@@ -119,13 +119,14 @@ struct SceneDetailView: View {
                     onStartPlayback: { resume in startPlayback(resume: resume) }
                 )
                 
-                let isAnyAudioModeActive = handyManager.isAudioMode || buttplugManager.isAudioMode || loveSpouseManager.isAudioMode
+                let isStashSyncActive = handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode
+                let isStashSyncEnabled = StashVideoSyncManager.shared.isVideoSyncEnabled
                 
-                if isAnyAudioModeActive {
-                    AudioVibeCard()
+                if isStashSyncEnabled && (isStashSyncActive || isStashSyncEnabled) {
+                    StashSyncCard()
                 }
                 
-                if activeScene.interactive == true && activeScene.funscriptURL != nil && !isAnyAudioModeActive {
+                if activeScene.interactive == true && activeScene.funscriptURL != nil && !isStashSyncActive {
                     SceneHeatmapCard(
                         heatmapURL: activeScene.heatmapURL,
                         funscriptURL: activeScene.funscriptURL,
@@ -265,19 +266,27 @@ struct SceneDetailView: View {
                                 handleTimeControlStatusChange(status)
                             }
                                 .onReceive(player.publisher(for: \.status)) { _ in
-                                    ensureAudioAnalysis(for: player.currentItem)
-                                }
+                                                                    }
                                 .onChange(of: player.currentItem) { _, newItem in
-                                    ensureAudioAnalysis(for: newItem)
+                                                                        ensureVideoAnalysis(for: newItem)
                                 }
-                                .onChange(of: handyManager.isAudioMode) { _, isAudio in
-                                    if isAudio { ensureAudioAnalysis(for: player.currentItem) }
+                                .onChange(of: handyManager.isStashSyncMode) { _, isStash in
+                                    if isStash { 
+                                                                                ensureVideoAnalysis(for: player.currentItem)
+                                        initialSync()
+                                    }
                                 }
-                                .onChange(of: buttplugManager.isAudioMode) { _, isAudio in
-                                    if isAudio { ensureAudioAnalysis(for: player.currentItem) }
+                                .onChange(of: buttplugManager.isStashSyncMode) { _, isStash in
+                                    if isStash { 
+                                                                                ensureVideoAnalysis(for: player.currentItem)
+                                        initialSync()
+                                    }
                                 }
-                                .onChange(of: loveSpouseManager.isAudioMode) { _, isAudio in
-                                    if isAudio { ensureAudioAnalysis(for: player.currentItem) }
+                                .onChange(of: loveSpouseManager.isStashSyncMode) { _, isStash in
+                                    if isStash { 
+                                                                                ensureVideoAnalysis(for: player.currentItem)
+                                        initialSync()
+                                    }
                                 }
                     }
                 }
@@ -285,14 +294,36 @@ struct SceneDetailView: View {
             .onChange(of: handyManager.isSyncing) { _, isSyncing in
                 // Standard HSSP handling
             }
+            .onChange(of: StashSyncManager.shared.isActive) { _, active in
+                if active { initialSync() }
+            }
+            .onChange(of: player) { _, newPlayer in
+                // When player is assigned after StashSync was already activated, set up video analysis
+                if StashSyncManager.shared.isActive, let item = newPlayer?.currentItem {
+                    ensureVideoAnalysis(for: item)
+                }
+            }
     }
 
-    private func ensureAudioAnalysis(for item: AVPlayerItem?) {
+    private func ensureVideoAnalysis(for item: AVPlayerItem?) {
         guard let item = item else { return }
-        // Only setup if at least one manager is in audio mode
-        if handyManager.isAudioMode || buttplugManager.isAudioMode || loveSpouseManager.isAudioMode {
-            print("🎙️ SceneDetail: Ensuring Audio Analysis is setup for current item")
-            AudioAnalysisManager.shared.setup(for: item)
+        if handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode {
+            print("🎬 SceneDetail: Ensuring Video Analysis is setup for current item")
+            StashVideoSyncManager.shared.setup(for: item)
+            StashVideoSyncManager.shared.isActive = true
+        }
+    }
+    
+    private func initialSync() {
+        guard let player = player, StashSyncManager.shared.isActive else { return }
+                ensureVideoAnalysis(for: player.currentItem)
+        
+        if player.timeControlStatus == .playing {
+            let currentTime = player.currentTime().seconds
+            print("🎬 SceneDetail: Executing initial StashSync play at \(currentTime)s")
+            if handyManager.isStashSyncMode { handyManager.play(at: currentTime) }
+            if buttplugManager.isStashSyncMode { buttplugManager.play(at: currentTime) }
+            if loveSpouseManager.isStashSyncMode { loveSpouseManager.play(at: currentTime) }
         }
     }
 
@@ -313,10 +344,10 @@ struct SceneDetailView: View {
         // Reset all SYNC states only on very first appear - WE WANT MANUAL ACTIVATION
         if !hasInitializedDevices {
             handyManager.isSyncing = false
-            handyManager.isAudioMode = false // In case we ever bring it back
-            buttplugManager.isAudioMode = false
+            handyManager.isStashSyncMode = false
+            buttplugManager.isStashSyncMode = false
             buttplugManager.isSyncing = false
-            loveSpouseManager.isAudioMode = false
+            loveSpouseManager.isStashSyncMode = false
             loveSpouseManager.isSyncing = false
             hasInitializedDevices = true
         }
@@ -354,9 +385,9 @@ struct SceneDetailView: View {
 
         if !isFullscreen {
             player?.pause()
-            if handyManager.isSyncing { handyManager.pause() }
-            if buttplugManager.isConnected { buttplugManager.pause() }
-            if loveSpouseManager.isConnected { loveSpouseManager.pause() }
+            if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
+            if buttplugManager.isConnected { buttplugManager.stop() }
+            if loveSpouseManager.isConnected { loveSpouseManager.stop() }
         }
         stopPreview()
         removeTimeObserver()
@@ -406,14 +437,14 @@ struct SceneDetailView: View {
         let currentTime = player.currentTime().seconds
         
         if status == .paused {
-            if handyManager.isSyncing { handyManager.pause() }
-            if buttplugManager.isConnected { buttplugManager.pause() }
-            if loveSpouseManager.isSyncing { loveSpouseManager.pause() }
+            if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
+            if buttplugManager.isSyncing || buttplugManager.isStashSyncMode { buttplugManager.pause() }
+            if loveSpouseManager.isSyncing || loveSpouseManager.isStashSyncMode { loveSpouseManager.pause() }
         } else if status == .playing {
-            ensureAudioAnalysis(for: player.currentItem)
-            if handyManager.isSyncing { handyManager.play(at: currentTime) }
-            if buttplugManager.isConnected { buttplugManager.play(at: currentTime) }
-            if loveSpouseManager.isSyncing { loveSpouseManager.play(at: currentTime) }
+            ensureVideoAnalysis(for: player.currentItem)
+            if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.play(at: currentTime) }
+            if buttplugManager.isSyncing || buttplugManager.isStashSyncMode { buttplugManager.play(at: currentTime) }
+            if loveSpouseManager.isSyncing || loveSpouseManager.isStashSyncMode { loveSpouseManager.play(at: currentTime) }
         }
     }
 
@@ -839,174 +870,5 @@ struct AddMarkerSheet: View {
     }
 }
 
-// MARK: - AudioVibeCard Component
-struct AudioVibeCard: View {
-    @ObservedObject var audioManager = AudioAnalysisManager.shared
-    @ObservedObject var appearanceManager = AppearanceManager.shared
-    @ObservedObject var handyManager = HandyManager.shared
-    @ObservedObject var buttplugManager = ButtplugManager.shared
-    @ObservedObject var loveSpouseManager = LoveSpouseManager.shared
-    
-    @State private var isSettingsExpanded = false
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center) {
-                Text("Audio Sync")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                    if buttplugManager.isEnabled {
-                        Button {
-                            if !buttplugManager.isAudioMode && !buttplugManager.isConnected {
-                                buttplugManager.connect()
-                            }
-                            withAnimation { buttplugManager.isAudioMode.toggle() }
-                            HapticManager.medium()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: buttplugManager.isAudioMode ? "waveform.and.mic" : "waveform")
-                                Text("Intiface")
-                            }
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(buttplugManager.isAudioMode ? .white : appearanceManager.tintColor)
-                            .padding(.horizontal, 8)
-                            .frame(minWidth: 80, minHeight: 28)
-                            .background(buttplugManager.isAudioMode ? Color.purple : appearanceManager.tintColor.opacity(0.1))
-                            .clipShape(Capsule())
-                        }
-                    }
-                    
-                    // Love Spouse Button
-                    if loveSpouseManager.isEnabled {
-                        Button {
-                            withAnimation { loveSpouseManager.isAudioMode.toggle() }
-                            HapticManager.medium()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: loveSpouseManager.isAudioMode ? "waveform.and.mic" : "waveform")
-                                Text("LoveSpouse")
-                            }
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(loveSpouseManager.isAudioMode ? .white : appearanceManager.tintColor)
-                            .padding(.horizontal, 8)
-                            .frame(minWidth: 80, minHeight: 28)
-                            .background(loveSpouseManager.isAudioMode ? Color.purple : appearanceManager.tintColor.opacity(0.1))
-                            .clipShape(Capsule())
-                        }
-                    }
-                }
-            
-            VStack(spacing: 8) {
-                // VU Meter
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 8)
-                        
-                        Rectangle()
-                            .fill(LinearGradient(
-                                colors: [.green, .yellow, .red],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ))
-                            .frame(width: geo.size.width * CGFloat(audioManager.visualLevel), height: 8)
-                            .animation(.linear(duration: 0.1), value: audioManager.visualLevel)
-                    }
-                    .clipShape(Capsule())
-                }
-                .frame(height: 8)
-                
-                HStack {
-                    Text("Live Audio Level")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text("\(Int(audioManager.visualLevel * 100))%")
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            VStack(alignment: .trailing, spacing: 4) {
-                ZStack(alignment: .topLeading) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // Sensitivity
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Sensitivity")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(Int(audioManager.sensitivity * 100))%")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Slider(value: $audioManager.sensitivity, in: 0...1)
-                                .tint(appearanceManager.tintColor)
-                        }
-                        
-                        // Intensity
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Max Intensity")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(Int(audioManager.maxIntensity * 100))%")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Slider(value: $audioManager.maxIntensity, in: 0.1...1)
-                                .tint(appearanceManager.tintColor)
-                        }
-                        
-                        // Latency (Delay)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("Latency Compensation")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(Int(audioManager.delayMs))ms")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Slider(value: $audioManager.delayMs, in: 0...1000, step: 10)
-                                .tint(appearanceManager.tintColor)
-                            Text("Signal will be sent \(Int(audioManager.delayMs))ms before the sound.")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .italic()
-                        }
-                    }
-                    .padding(.top, 12)
-                }
-                .frame(maxHeight: isSettingsExpanded ? .none : 0, alignment: .topLeading)
-                .clipped()
-                
-                Button(action: {
-                    withAnimation(.spring()) {
-                        isSettingsExpanded.toggle()
-                    }
-                }) {
-                    Image(systemName: isSettingsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(appearanceManager.tintColor)
-                        .padding(6)
-                        .background(appearanceManager.tintColor.opacity(0.1))
-                        .clipShape(Circle())
-                }
-                .padding(.top, 4)
-            }
-        }
-        .padding(12)
-        .background(Color.secondaryAppBackground)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
-        .cardShadow()
-    }
-}
+
 #endif

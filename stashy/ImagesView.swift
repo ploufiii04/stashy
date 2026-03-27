@@ -44,6 +44,9 @@ struct ImagesView: View {
     
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.ImageSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         
         // Save to TabManager
@@ -88,10 +91,19 @@ struct ImagesView: View {
         }
         .onAppear {
             // Apply default sort option
-            let defaultSortStr = TabManager.shared.getPersistentSortOption(for: .images) ?? "dateDesc"
+            let defaultSortStr: String
+            if gallery != nil {
+                defaultSortStr = TabManager.shared.getDetailSortOption(for: DetailViewContext.gallery.rawValue) ?? "dateDesc"
+            } else {
+                defaultSortStr = TabManager.shared.getSortOption(for: .images) ?? "dateDesc"
+            }
+            
             if let defaultSort = StashDBViewModel.ImageSortOption(rawValue: defaultSortStr) {
                  selectedSortOption = defaultSort
                  viewModel.currentImageSortOption = defaultSort
+                 if gallery != nil {
+                     viewModel.currentGalleryImageSortOption = defaultSort
+                 }
             }
 
             // Fetch filters

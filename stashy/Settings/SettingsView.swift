@@ -62,6 +62,13 @@ struct SettingsView: View {
             }
             .listRowBackground(Color.secondaryAppBackground)
 
+            Section(header: Text("StashSync")) {
+                NavigationLink(destination: StashSyncSettingsView()) {
+                    Label("StashSync", systemImage: "bolt.fill")
+                }
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+
             // MARK: - Content & Tabs
             if configManager.activeConfig != nil {
                 ContentSettingsSection()
@@ -82,9 +89,7 @@ struct SettingsView: View {
             }
 
             // MARK: - About
-            #if !os(tvOS)
             interactiveDevicesSection
-            #endif
             tipSection
             aboutSection
         }
@@ -265,11 +270,9 @@ struct SettingsView: View {
                 .listRowBackground(Color.clear)
         }
     }
-
     // MARK: - Interactive Devices
-    #if !os(tvOS)
     private var interactiveDevicesSection: some View {
-        Section(header: Text("Interactive Devices")) {
+        Section(header: Text("Device Synchronization")) {
             NavigationLink(destination: HandySettingsView()) {
                 Label("The Handy", systemImage: "hand.tap")
             }
@@ -282,7 +285,6 @@ struct SettingsView: View {
         }
         .listRowBackground(Color.secondaryAppBackground)
     }
-    #endif
 
     // MARK: - Actions
 
@@ -435,26 +437,81 @@ struct HandySettingsView: View {
                     .tint(appearanceManager.tintColor)
             }
             .listRowBackground(Color.secondaryAppBackground)
-            
+
+            Section(header: Text("Device Type"), footer: Text("The Handy uses HAMP protocol. The Oh. uses HVP protocol.")) {
+                Picker("Device", selection: $handyManager.deviceType) {
+                    Text("The Handy").tag("The Handy")
+                    Text("The Oh.").tag("Oh.")
+                }
+                .pickerStyle(.segmented)
+                .disabled(!handyManager.isEnabled)
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+
+            if handyManager.deviceType == "The Handy" {
+                Section(header: Text("StashSync Controls")) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Stroke Length")
+                            Spacer()
+                            Text("\(Int(handyManager.strokeLength))%")
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $handyManager.strokeLength, in: 10...100, step: 5)
+                            .tint(appearanceManager.tintColor)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Max Velocity")
+                            Spacer()
+                            Text("\(Int(handyManager.maxVelocity))%")
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $handyManager.maxVelocity, in: 10...100, step: 5)
+                            .tint(appearanceManager.tintColor)
+                    }
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+                .disabled(!handyManager.isEnabled)
+            } else {
+                Section(header: Text("StashSync Controls")) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Max Intensity")
+                            Spacer()
+                            Text("\(Int(handyManager.maxAmplitude * 100))%")
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $handyManager.maxAmplitude, in: 0.1...1.0, step: 0.05)
+                            .tint(appearanceManager.tintColor)
+                    }
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+                .disabled(!handyManager.isEnabled)
+            }
+
             Section(header: Text("Handy Connection"), footer: Text("Stashy now automatically uploads local funscripts to Handy Cloud. The Public URL is only needed for advanced setups.")) {
                 TextField("Connection Key", text: HandyManager.shared.$connectionKey)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .disabled(!handyManager.isEnabled)
-                
+
                 TextField("Public URL Override (Optional)", text: HandyManager.shared.$publicUrl)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .keyboardType(.URL)
                     .disabled(!handyManager.isEnabled)
-                
+
                 HStack {
                     Text("Status")
                     Spacer()
                     Text(handyManager.statusMessage)
                         .foregroundColor(handyManager.isConnected ? .green : .secondary)
                 }
-                
+
                 Button("Check Connection") {
                     handyManager.checkConnection()
                 }
@@ -496,6 +553,58 @@ struct LoveSpouseSettingsView: View {
             .listRowBackground(Color.secondaryAppBackground)
         }
         .navigationTitle("Love Spouse")
+        .navigationBarTitleDisplayMode(.inline)
+        .applyAppBackground()
+        .scrollContentBackground(.hidden)
+    }
+}
+
+
+struct StashSyncSettingsView: View {
+    @ObservedObject var videoManager = StashVideoSyncManager.shared
+    @ObservedObject var appearanceManager = AppearanceManager.shared
+    
+    var body: some View {
+        Form {
+            Section(header: Text("StashSync Features")) {
+                Toggle(isOn: $videoManager.isVideoSyncEnabled) {
+                    Label("StashSync", systemImage: "bolt.fill")
+                }
+                .tint(appearanceManager.tintColor)
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+            
+            Section(header: Text("Sensitivity")) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("StashSync Sensitivity")
+                        Spacer()
+                        Text("\(Int(videoManager.sensitivity * 50))%").foregroundColor(.secondary)
+                    }
+                    Slider(value: $videoManager.sensitivity, in: 0.1...2.0).tint(.orange)
+                }.padding(.vertical, 4)
+            }
+            .disabled(!videoManager.isVideoSyncEnabled)
+            .listRowBackground(Color.secondaryAppBackground)
+
+            Section(header: Text("Optical Flow Smoothing")) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Smoothing")
+                        Spacer()
+                        Text("\(Int(videoManager.smoothing * 100))%").foregroundColor(.secondary)
+                    }
+                    Slider(value: $videoManager.smoothing, in: 0.0...0.9).tint(.orange)
+                }
+            }
+            .disabled(!videoManager.isVideoSyncEnabled)
+            .listRowBackground(Color.secondaryAppBackground)
+            
+            Section(footer: Text("StashSync uses On-Device analysis to detect motion in real-time. This can be CPU intensive and may affect battery life.")) {
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+        }
+        .navigationTitle("StashSync")
         .navigationBarTitleDisplayMode(.inline)
         .applyAppBackground()
         .scrollContentBackground(.hidden)

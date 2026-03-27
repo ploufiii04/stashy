@@ -109,11 +109,12 @@ struct ServerConfig: Codable, Identifiable, Equatable {
         #if !os(tvOS)
         // First try Keychain
         if let keychainKey = KeychainManager.shared.loadAPIKey(forServerID: id) {
-            return keychainKey
+            let trimmed = keychainKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         }
         #endif
         // Fallback to stored value (for migration)
-        return apiKey
+        return apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // Modern initializer

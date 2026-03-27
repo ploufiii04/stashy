@@ -50,6 +50,9 @@ struct ScenesView: View {
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         scrollPosition = nil
         shouldRestoreScroll = false
@@ -390,6 +393,12 @@ struct ScenesView: View {
                     selectedFilter = nil
                 }
                 performSearch()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.scenes.rawValue {
+                let newSort = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .scenes) ?? "") ?? .dateDesc
+                changeSortOption(to: newSort)
             }
         }
         .onChange(of: viewModel.savedFilters) { oldValue, newValue in

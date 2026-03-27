@@ -774,10 +774,13 @@ class TabManager: ObservableObject {
     func setPersistentSortOption(for tab: AppTab, option: String) {
         if let index = tabs.firstIndex(where: { $0.id == tab }) {
             tabs[index].defaultSortOption = option
-            // Clear session option when default is changed? 
-            // Better keep it, but Settings usually implies "next time I open it"
-            sessionSortOptions[tab] = option 
+            sessionSortOptions[tab] = option
             saveConfig()
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DefaultSortChanged"),
+                object: nil,
+                userInfo: ["tab": tab.rawValue]
+            )
         }
     }
     

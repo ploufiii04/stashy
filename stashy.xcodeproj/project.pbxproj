@@ -22,7 +22,8 @@
 		2F2314B3093A480F864AFEEC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB192F16743C007C2090 /* HomeView.swift */; };
 		372E2D6A2F6339EE00603361 /* LoginAuthHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D692F6339EE00603361 /* LoginAuthHelper.swift */; };
 		372E2D6B2F633DB400603361 /* LoginAuthHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D692F6339EE00603361 /* LoginAuthHelper.swift */; };
-		37BE5B4E2F51718500107960 /* AudioAnalysisManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37BE5B4C2F51718500107960 /* AudioAnalysisManager.swift */; };
+		372E2D992F64272300603361 /* VideoAnalysisManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D982F64272300603361 /* VideoAnalysisManager.swift */; };
+		372E2D9B2F64425000603361 /* StashSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D9A2F64425000603361 /* StashSyncManager.swift */; };
 		37D3E2E52F39384000AB8FAD /* ServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FB779EFE84155DC02AAC07 /* ServerConfig.swift */; };
 		37D3E3262F39444C00AB8FAD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000022E8A9C0000000001 /* Assets.xcassets */; };
 		37D3E4922F3A305D00AB8FAD /* SceneHeatmapCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D3E4912F3A305D00AB8FAD /* SceneHeatmapCard.swift */; };
@@ -131,7 +132,8 @@
 		08FB77A0FE84155DC02AAC07 /* stashy/Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = stashy/Info.plist; sourceTree = "<group>"; };
 		08FB77A2FE84155DC02AAC07 /* StashDBViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StashDBViewModel.swift; sourceTree = "<group>"; };
 		372E2D692F6339EE00603361 /* LoginAuthHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginAuthHelper.swift; sourceTree = "<group>"; };
-		37BE5B4C2F51718500107960 /* AudioAnalysisManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisManager.swift; sourceTree = "<group>"; };
+		372E2D982F64272300603361 /* VideoAnalysisManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoAnalysisManager.swift; sourceTree = "<group>"; };
+		372E2D9A2F64425000603361 /* StashSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StashSyncManager.swift; sourceTree = "<group>"; };
 		37D3E24E2F3932C400AB8FAD /* stashyTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = stashyTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		37D3E4912F3A305D00AB8FAD /* SceneHeatmapCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneHeatmapCard.swift; sourceTree = "<group>"; };
 		AA0000022E8A9C0000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -283,7 +285,8 @@
 		37BE5B4D2F51718500107960 /* Managers */ = {
 			isa = PBXGroup;
 			children = (
-				37BE5B4C2F51718500107960 /* AudioAnalysisManager.swift */,
+				372E2D982F64272300603361 /* VideoAnalysisManager.swift */,
+				372E2D9A2F64425000603361 /* StashSyncManager.swift */,
 				DFSEC0022F2A000100000002 /* SecurityManager.swift */,
 			);
 			path = Managers;
@@ -491,12 +494,12 @@
 				DFST000052F30A0000000005 /* ServerListSection.swift in Sources */,
 				37D3E4922F3A305D00AB8FAD /* SceneHeatmapCard.swift in Sources */,
 				DFST000072F30A0000000007 /* ServerDetailView.swift in Sources */,
-				37BE5B4E2F51718500107960 /* AudioAnalysisManager.swift in Sources */,
 				DFST000092F30A0000000009 /* PlaybackSettingsSection.swift in Sources */,
 				DFST0000B2F30A000000000B /* ContentSettingsSection.swift in Sources */,
 				DFST0000D2F30A000000000D /* DashboardSettingsView.swift in Sources */,
 				DFST0000F2F30A000000000F /* ReelsModeSettingsView.swift in Sources */,
 				DFST000112F30A0000000011 /* DefaultSortView.swift in Sources */,
+				372E2D992F64272300603361 /* VideoAnalysisManager.swift in Sources */,
 				DFST000132F30A0000000013 /* DefaultFilterView.swift in Sources */,
 				DFST000152F30A0000000015 /* ServerStatisticsView.swift in Sources */,
 				DFE5045E2E8A8C2000323FF0 /* ScenesView.swift in Sources */,
@@ -541,6 +544,7 @@
 				DFGQ000032F28A0000000003 /* GraphQLQueries.swift in Sources */,
 				DFSM000012F2NEWFILE001 /* KeychainManager.swift in Sources */,
 				DFSM000052F2NEWFILE005 /* ServerFormViewNew.swift in Sources */,
+				372E2D9B2F64425000603361 /* StashSyncManager.swift in Sources */,
 				DFUI000012F3AUDIT001 /* DesignTokens.swift in Sources */,
 				DFUI000032F3AUDIT003 /* HapticManager.swift in Sources */,
 				DFUI000052F3AUDIT005 /* ToastManager.swift in Sources */,

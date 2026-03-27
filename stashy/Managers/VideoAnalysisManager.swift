@@ -1,0 +1,631 @@
+#if !os(tvOS)
+import Foundation
+import AVFoundation
+import Vision
+import Combine
+import SwiftUI
+import MediaToolbox
+
+// MARK: - Motion Channel
+
+enum MotionChannel: String {
+    case hip    // optical-flow vertical rhythm (thrusting)
+    case head   // head/neck centroid movement
+    case wrist  // wrist/arm speed (handjob, fingering)
+}
+
+class StashVideoSyncManager: ObservableObject {
+    static let shared = StashVideoSyncManager()
+
+    // --- Published channels (0.0 – 1.0) ---
+    @Published var hipIntensity: Float = 0.0       // vertical optical flow rhythm
+    @Published var headIntensity: Float = 0.0      // head/neck centroid movement
+    @Published var pelvisIntensity: Float = 0.0    // hip joint movement
+    @Published var wristIntensity: Float = 0.0     // wrist/arm speed
+    @Published var horzIntensity: Float = 0.0      // horizontal flow dominance
+    @Published var audioIntensity: Float = 0.0     // audio RMS (AGC-normalized)
+    @Published var rawMotionIntensity: Float = 0.0 // instantaneous optical-flow speed (no reversal window)
+    @Published var dominantChannel: MotionChannel = .hip
+
+    // Backwards-compat: toy managers subscribe to $currentIntensity
+    @Published var currentIntensity: Float = 0.0
+
+    @Published var isActive: Bool = false
+    @Published var frameCounter: Int = 0
+    @Published var lastError: String?
+
+    @AppStorage("video_sync_enabled") var isVideoSyncEnabled: Bool = false
+    @AppStorage("video_sync_sensitivity") var sensitivity: Double = 0.5 {
+        didSet { cachedSensitivity = Float(sensitivity) }
+    }
+    @AppStorage("video_sync_smoothing") var smoothing: Double = 0.3 {
+        didSet { cachedSmoothing = Float(smoothing) }
+    }
+
+    // Thread-safe cached copies for background queue / audio thread access
+    private var cachedSensitivity: Float = 0.5
+    private var cachedSmoothing: Float = 0.3
+
+    @Published var isRecording: Bool = false
+
+    private var currentPlayerTime: Double = 0
+    private var currentItem: AVPlayerItem?
+    private var videoOutput: AVPlayerItemVideoOutput?
+    private var displayLink: CADisplayLink?
+    private var previousPixelBuffer: CVPixelBuffer?
+
+    // Head tracking
+    private var previousHeadCentroid: CGPoint?
+
+    // Hip/optical-flow rhythm tracking
+    private var previousDominantVy: Float = 0
+    private var previousDominantVx: Float = 0
+    private var recentSpeedHistory: [Float] = []
+    private let speedHistorySize = 8
+    private var reversalTimestamps: [Int] = []
+    private let reversalWindowFrames = 45       // ~1.5s at 30fps
+
+    // Pelvis joint tracking
+    private var previousPelvisCentroid: CGPoint?
+    private var previousPelvisY: Float = 0.5
+    private var pelvisReversalTimestamps: [Int] = []
+
+    // Wrist tracking
+    private var previousLeftWrist: CGPoint?
+    private var previousRightWrist: CGPoint?
+    private var wristSpeedHistory: [Float] = []
+    private let wristHistorySize = 6
+
+    // Dominant channel EMA accumulators (slow decay, hysteresis switching)
+    private var hipAccum: Float = 0.0
+    private var headAccum: Float = 0.0
+    private var wristAccum: Float = 0.0
+
+    // Audio tap
+    private var audioTap: MTAudioProcessingTap?
+    private var audioAGCMax: Float = 0.01  // adaptive ceiling for AGC normalization
+
+    private var cancellables = Set<AnyCancellable>()
+    private let analysisQueue = DispatchQueue(label: "com.stashko.videoanalysis", qos: .userInteractive)
+    private let processingLock = NSLock()
+
+    // Vision requests — reused across frames
+    private let segmentationRequest: VNGeneratePersonSegmentationRequest = {
+        let r = VNGeneratePersonSegmentationRequest()
+        if #available(iOS 15, *) { r.qualityLevel = .accurate }
+        r.outputPixelFormat = kCVPixelFormatType_OneComponent32Float
+        return r
+    }()
+    private let poseRequest = VNDetectHumanBodyPoseRequest()
+
+    private init() {
+        cachedSensitivity = Float(sensitivity)
+        cachedSmoothing = Float(smoothing)
+    }
+
+    func setup(for playerItem: AVPlayerItem) {
+        cleanup()
+        self.currentItem = playerItem
+
+        let settings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+        ]
+        videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: settings)
+        if let output = videoOutput { playerItem.add(output) }
+
+        setupAudioTap(for: playerItem)
+
+        displayLink = CADisplayLink(target: self, selector: #selector(updateDisplayLink))
+        displayLink?.add(to: .main, forMode: .common)
+    }
+
+    // MARK: - Audio Tap (MTAudioProcessingTap + AGC)
+
+    private func setupAudioTap(for playerItem: AVPlayerItem) {
+        let audioTracks = playerItem.asset.tracks(withMediaType: .audio)
+        guard let audioTrack = audioTracks.first else { return }
+
+        var callbacks = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(self).toOpaque()),
+            init: { tap, clientInfo, tapStorageOut in
+                tapStorageOut.pointee = clientInfo
+            },
+            finalize: { tap in
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                Unmanaged<StashVideoSyncManager>.fromOpaque(storage).release()
+            },
+            prepare: { _, _, _ in },
+            unprepare: { _ in },
+            process: { tap, numberFrames, flags, bufferListInOut, numberFramesOut, flagsOut in
+                let storage = MTAudioProcessingTapGetStorage(tap)
+                let manager = Unmanaged<StashVideoSyncManager>.fromOpaque(storage).takeUnretainedValue()
+
+                var outFrames: CMItemCount = 0
+                MTAudioProcessingTapGetSourceAudio(tap, numberFrames, bufferListInOut, flagsOut, nil, &outFrames)
+                numberFramesOut.pointee = outFrames
+
+                guard bufferListInOut.pointee.mNumberBuffers > 0,
+                      outFrames > 0 else { return }
+
+                let audioBuffer = bufferListInOut.pointee.mBuffers
+                guard let dataPtr = audioBuffer.mData else { return }
+                let sampleCount = min(Int(audioBuffer.mDataByteSize) / MemoryLayout<Float>.size, 4096)
+                guard sampleCount > 0 else { return }
+
+                let samples = dataPtr.assumingMemoryBound(to: Float.self)
+                var sumSquares: Float = 0
+                for i in 0..<sampleCount { let s = samples[i]; sumSquares += s * s }
+                let rms = sqrt(sumSquares / Float(sampleCount))
+                manager.updateAudioIntensity(rms)
+            }
+        )
+
+        var tap: MTAudioProcessingTap?
+        let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
+        guard status == noErr, let tap = tap else { return }
+        self.audioTap = tap
+
+        let audioParams = AVMutableAudioMixInputParameters(track: audioTrack)
+        audioParams.audioTapProcessor = tap
+        let audioMix = AVMutableAudioMix()
+        audioMix.inputParameters = [audioParams]
+        playerItem.audioMix = audioMix
+    }
+
+    // Called from audio real-time thread — only touches audioAGCMax (audio-thread-only) + dispatches to main
+    private func updateAudioIntensity(_ rms: Float) {
+        audioAGCMax = max(audioAGCMax * 0.9995, rms)
+        let normalized = min(1.0, rms / max(0.001, audioAGCMax))
+        let sm = cachedSmoothing
+        DispatchQueue.main.async {
+            self.audioIntensity = self.audioIntensity * sm + normalized * (1.0 - sm)
+        }
+    }
+
+    // MARK: - Display Link
+
+    @objc private func updateDisplayLink(link: CADisplayLink) {
+        guard isActive, let output = videoOutput else { return }
+        let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
+        self.currentPlayerTime = itemTime.seconds
+        if output.hasNewPixelBuffer(forItemTime: itemTime) {
+            if let pixelBuffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
+                processFrame(pixelBuffer)
+            }
+        }
+    }
+
+    private func processFrame(_ pixelBuffer: CVPixelBuffer) {
+        guard processingLock.try() else { return }
+        let localCounter = frameCounter
+
+        analysisQueue.async { [weak self] in
+            guard let self = self else { return }
+            defer { self.processingLock.unlock() }
+
+            // --- Stage A: Person Segmentation ---
+            var personMask: CVPixelBuffer? = nil
+            let segHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+            do {
+                try segHandler.perform([self.segmentationRequest])
+                personMask = self.segmentationRequest.results?.first?.pixelBuffer
+            } catch {
+                DispatchQueue.main.async { self.lastError = "Seg: \(error.localizedDescription)" }
+            }
+
+            // --- Stage B: Optical Flow → hip rhythm + horizontal motion ---
+            if let previous = self.previousPixelBuffer {
+                let flowRequest = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: previous, options: [:])
+                flowRequest.computationAccuracy = .low
+                let flowHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+                do {
+                    try flowHandler.perform([flowRequest])
+                    if let result = flowRequest.results?.first as? VNPixelBufferObservation {
+                        self.analyzeOpticalFlow(result.pixelBuffer, mask: personMask)
+                    }
+                } catch {
+                    DispatchQueue.main.async { self.lastError = "Flow: \(error.localizedDescription)" }
+                }
+            }
+            self.previousPixelBuffer = pixelBuffer
+
+            // --- Stage C: Full Body Pose (every 6th frame) ---
+            if localCounter % 6 == 0 {
+                let poseHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+                do {
+                    try poseHandler.perform([self.poseRequest])
+                    if let observation = self.poseRequest.results?.first {
+                        self.analyzeHeadMovement(observation)
+                        self.analyzePelvisMovement(observation)
+                        self.analyzeWristMovement(observation)
+                    } else {
+                        DispatchQueue.main.async {
+                            self.headIntensity *= 0.5
+                            self.pelvisIntensity *= 0.7
+                            self.wristIntensity *= 0.7
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.headIntensity *= 0.5
+                        self.pelvisIntensity *= 0.7
+                        self.wristIntensity *= 0.7
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.headIntensity *= 0.90
+                    self.pelvisIntensity *= 0.95
+                    self.wristIntensity *= 0.93
+                }
+            }
+
+            DispatchQueue.main.async { self.frameCounter += 1 }
+        }
+    }
+
+    // MARK: - Optical Flow → Hip Rhythm + Horizontal Motion
+
+    private func analyzeOpticalFlow(_ flowBuffer: CVPixelBuffer, mask: CVPixelBuffer?) {
+        CVPixelBufferLockBaseAddress(flowBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(flowBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(flowBuffer) else { return }
+        let width = CVPixelBufferGetWidth(flowBuffer)
+        let height = CVPixelBufferGetHeight(flowBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(flowBuffer)
+        let floatBuffer = baseAddress.assumingMemoryBound(to: Float.self)
+        let floatsPerRow = bytesPerRow / 4
+        let sampleStep = 6
+
+        var maskBaseAddr: UnsafeMutableRawPointer? = nil
+        var maskWidth = 0
+        var maskHeight = 0
+        var maskBytesPerRow = 0
+        if let mask = mask {
+            CVPixelBufferLockBaseAddress(mask, .readOnly)
+            maskBaseAddr = CVPixelBufferGetBaseAddress(mask)
+            maskWidth = CVPixelBufferGetWidth(mask)
+            maskHeight = CVPixelBufferGetHeight(mask)
+            maskBytesPerRow = CVPixelBufferGetBytesPerRow(mask)
+        }
+        defer { if let mask = mask { CVPixelBufferUnlockBaseAddress(mask, .readOnly) } }
+
+        var vySum: Float = 0
+        var vxSum: Float = 0
+        var magSum: Float = 0
+        var vxAbsSum: Float = 0
+        var vyAbsSum: Float = 0
+        var sampleCount = 0
+        let s = cachedSensitivity
+        let noiseFloor = Float(0.35 / (Double(s) + 0.1))
+
+        for y in stride(from: 0, to: height, by: sampleStep) {
+            let rowOffset = y * floatsPerRow
+            for x in stride(from: 0, to: width, by: sampleStep) {
+                if let maskAddr = maskBaseAddr {
+                    let maskX = x * maskWidth / width
+                    let maskY = y * maskHeight / height
+                    let maskFloatsPerRow = maskBytesPerRow / 4
+                    let maskVal = maskAddr.assumingMemoryBound(to: Float.self)[maskY * maskFloatsPerRow + maskX]
+                    if maskVal < 0.5 { continue }
+                }
+                let idx = rowOffset + x * 2
+                let dx = floatBuffer[idx]
+                let dy = floatBuffer[idx + 1]
+                let mag = sqrt(dx * dx + dy * dy)
+                if mag > noiseFloor {
+                    vySum += dy
+                    vxSum += dx
+                    magSum += mag
+                    vxAbsSum += abs(dx)
+                    vyAbsSum += abs(dy)
+                    sampleCount += 1
+                }
+            }
+        }
+
+        let currentFrame = frameCounter
+        reversalTimestamps = reversalTimestamps.filter { currentFrame - $0 <= reversalWindowFrames }
+
+        guard sampleCount > 4 else {
+            DispatchQueue.main.async {
+                self.rawMotionIntensity *= 0.7
+                self.hipIntensity = self.hipIntensity * self.cachedSmoothing
+                self.horzIntensity *= 0.85
+                self.currentIntensity = self.computeCurrentIntensity()
+            }
+            return
+        }
+
+        let dominantVy = vySum / Float(sampleCount)
+        let dominantVx = vxSum / Float(sampleCount)
+        let avgMag = magSum / Float(sampleCount)
+
+        let rawRatio = vxAbsSum / max(0.001, vxAbsSum + vyAbsSum)
+        let horzRatio = max(0.0, (rawRatio - 0.55) / 0.45)
+
+        recentSpeedHistory.append(avgMag)
+        if recentSpeedHistory.count > speedHistorySize { recentSpeedHistory.removeFirst() }
+        let recentAvgSpeed = recentSpeedHistory.reduce(0, +) / Float(recentSpeedHistory.count)
+
+        let prevVy = previousDominantVy
+        let vertReversed = (prevVy > 0.25 && dominantVy < -0.25) || (prevVy < -0.25 && dominantVy > 0.25)
+        previousDominantVy = dominantVy
+        previousDominantVx = dominantVx
+
+        if vertReversed { reversalTimestamps.append(currentFrame) }
+
+        let updatedReversals = Float(reversalTimestamps.count)
+        let updatedFreq = updatedReversals / (Float(reversalWindowFrames) / 30.0)
+
+        let speedActive = recentAvgSpeed > (0.08 / max(0.1, s))
+        let freqRaw: Float = !speedActive || updatedReversals < 2 ? 0.0 : min(1.0, updatedFreq / 3.0)
+
+        // Weight hip level by speed so it decays when motion stops
+        let hipLevel = freqRaw * min(1.0, recentAvgSpeed * 6.0)
+        let rawLevel = min(1.0, avgMag * 6.0 * s)
+
+        let horzLevel = min(1.0, recentAvgSpeed * horzRatio * s * 4.0)
+
+        let sm = cachedSmoothing
+        DispatchQueue.main.async {
+            self.rawMotionIntensity = self.rawMotionIntensity * sm + rawLevel * (1.0 - sm)
+            self.hipIntensity = min(1.0, self.hipIntensity * sm + hipLevel * (1.0 - sm))
+            self.horzIntensity = self.horzIntensity * 0.6 + horzLevel * 0.4
+            self.currentIntensity = self.computeCurrentIntensity()
+
+            if currentFrame % 15 == 0 {
+                NSLog("📊 VR: %d revs | Freq: %.2f | SpeedWeight: %.2f | RawInt: %.2f | SmoothInt: %.2f",
+                      Int(updatedReversals), updatedFreq, min(1.0, recentAvgSpeed * 6.0), hipLevel, self.hipIntensity)
+            }
+        }
+    }
+
+    // MARK: - Head Pose Analysis
+
+    private func analyzeHeadMovement(_ observation: VNHumanBodyPoseObservation) {
+        let headJoints: [VNHumanBodyPoseObservation.JointName] = [.neck, .leftEar, .rightEar, .nose]
+        var points: [CGPoint] = []
+        for joint in headJoints {
+            if let point = try? observation.recognizedPoint(joint), point.confidence > 0.3 {
+                points.append(point.location)
+            }
+        }
+        guard !points.isEmpty else {
+            DispatchQueue.main.async { self.headIntensity *= 0.5 }
+            return
+        }
+        let centroid = CGPoint(
+            x: points.map(\.x).reduce(0, +) / CGFloat(points.count),
+            y: points.map(\.y).reduce(0, +) / CGFloat(points.count)
+        )
+        let sm = cachedSmoothing
+        let s = cachedSensitivity
+        if let prev = previousHeadCentroid {
+            let dx = Float(centroid.x - prev.x)
+            let dy = Float(centroid.y - prev.y)
+            let delta = sqrt(dx * dx + dy * dy)
+            let normalized = min(1.0, (delta / 0.05) * s)
+            if normalized < 0.02 {
+                DispatchQueue.main.async { self.headIntensity *= 0.5 }
+            } else {
+                DispatchQueue.main.async {
+                    self.headIntensity = min(1.0, self.headIntensity * sm + normalized * (1.0 - sm))
+                }
+            }
+        }
+        previousHeadCentroid = centroid
+    }
+
+    // MARK: - Pelvis/Hip Joint Analysis
+
+    private func analyzePelvisMovement(_ observation: VNHumanBodyPoseObservation) {
+        let currentFrame = frameCounter
+        pelvisReversalTimestamps = pelvisReversalTimestamps.filter { currentFrame - $0 <= reversalWindowFrames }
+
+        let pelvisJoints: [VNHumanBodyPoseObservation.JointName] = [.leftHip, .rightHip, .root]
+        var points: [CGPoint] = []
+        for joint in pelvisJoints {
+            if let point = try? observation.recognizedPoint(joint), point.confidence > 0.3 {
+                points.append(point.location)
+            }
+        }
+        guard !points.isEmpty else {
+            DispatchQueue.main.async { self.pelvisIntensity *= 0.6 }
+            return
+        }
+        let centroid = CGPoint(
+            x: points.map(\.x).reduce(0, +) / CGFloat(points.count),
+            y: points.map(\.y).reduce(0, +) / CGFloat(points.count)
+        )
+
+        if let prev = previousPelvisCentroid {
+            let dx = Float(centroid.x - prev.x)
+            let dy = Float(centroid.y - prev.y)
+            let delta = sqrt(dx * dx + dy * dy)
+            let s = cachedSensitivity
+
+            let normalized = min(1.0, (delta / 0.05) * s)
+
+            guard normalized > 0.01 else {
+                DispatchQueue.main.async { self.pelvisIntensity *= self.cachedSmoothing }
+                return
+            }
+
+            let prevY = previousPelvisY
+            if (prevY > 0.52 && normalized < 0.48) || (prevY < 0.48 && normalized > 0.52) {
+                pelvisReversalTimestamps.append(currentFrame)
+            }
+            previousPelvisY = normalized
+
+            let pelvisReversals = Float(pelvisReversalTimestamps.count)
+            let pelvisFreq = pelvisReversals / (Float(reversalWindowFrames) / 30.0)
+            let pelvisLevel = normalized > 0.05 ? min(1.0, pelvisFreq / 3.0) : normalized * 0.5
+
+            let sm = cachedSmoothing
+            DispatchQueue.main.async {
+                self.pelvisIntensity = min(1.0, self.pelvisIntensity * sm + pelvisLevel * (1.0 - sm))
+                self.currentIntensity = self.computeCurrentIntensity()
+            }
+        }
+        previousPelvisCentroid = centroid
+    }
+
+    // MARK: - Wrist / Arm Speed Analysis
+
+    private func analyzeWristMovement(_ observation: VNHumanBodyPoseObservation) {
+        let joints: [(VNHumanBodyPoseObservation.JointName, VNHumanBodyPoseObservation.JointName)] = [
+            (.leftWrist, .leftElbow),
+            (.rightWrist, .rightElbow)
+        ]
+
+        var totalDelta: Float = 0
+        var count = 0
+
+        for arm in joints {
+            var armPoints: [CGPoint] = []
+            if let w = try? observation.recognizedPoint(arm.0), w.confidence > 0.3 { armPoints.append(w.location) }
+            if let e = try? observation.recognizedPoint(arm.1), e.confidence > 0.3 { armPoints.append(e.location) }
+
+            if !armPoints.isEmpty {
+                let centroid = CGPoint(x: armPoints.map(\.x).reduce(0, +) / CGFloat(armPoints.count),
+                                      y: armPoints.map(\.y).reduce(0, +) / CGFloat(armPoints.count))
+                let prev = arm.0 == .leftWrist ? previousLeftWrist : previousRightWrist
+                if let prev = prev {
+                    let dx = Float(centroid.x - prev.x)
+                    let dy = Float(centroid.y - prev.y)
+                    totalDelta += sqrt(dx * dx + dy * dy)
+                    count += 1
+                }
+                if arm.0 == .leftWrist { previousLeftWrist = centroid }
+                else { previousRightWrist = centroid }
+            }
+        }
+
+        guard count > 0 else {
+            DispatchQueue.main.async { self.wristIntensity *= 0.7 }
+            return
+        }
+
+        let avgDelta = totalDelta / Float(count)
+        let s = cachedSensitivity
+        let normalized = min(1.0, (avgDelta / 0.04) * s)
+
+        wristSpeedHistory.append(normalized)
+        if wristSpeedHistory.count > wristHistorySize { wristSpeedHistory.removeFirst() }
+        let smoothedWrist = min(1.0, wristSpeedHistory.reduce(0, +) / Float(wristSpeedHistory.count))
+
+        let sm = cachedSmoothing
+        DispatchQueue.main.async {
+            if normalized < 0.03 {
+                self.wristIntensity *= 0.6
+            } else {
+                self.wristIntensity = min(1.0, self.wristIntensity * sm + smoothedWrist * (1.0 - sm))
+            }
+            self.currentIntensity = self.computeCurrentIntensity()
+        }
+    }
+
+    // MARK: - Signal Fusion (dominant-channel routing + audio blend)
+    // Must be called on main thread (reads/writes @Published properties)
+
+    private func computeCurrentIntensity() -> Float {
+        let s = cachedSensitivity
+
+        // --- Update dominant channel EMA accumulators (slow adaptation) ---
+        let emaAlpha: Float = 0.03
+        hipAccum   = hipAccum   * (1 - emaAlpha) + hipIntensity   * emaAlpha
+        headAccum  = headAccum  * (1 - emaAlpha) + headIntensity  * emaAlpha
+        wristAccum = wristAccum * (1 - emaAlpha) + wristIntensity * emaAlpha
+
+        // Hysteresis: only switch dominant channel if new leader is clearly ahead
+        let hysteresis: Float = 0.15
+        let currentAccum: Float
+        switch dominantChannel {
+        case .hip:   currentAccum = hipAccum
+        case .head:  currentAccum = headAccum
+        case .wrist: currentAccum = wristAccum
+        }
+        let candidates: [(Float, MotionChannel)] = [(hipAccum, .hip), (headAccum, .head), (wristAccum, .wrist)]
+        if let best = candidates.max(by: { $0.0 < $1.0 }),
+           best.1 != dominantChannel,
+           best.0 > currentAccum + hysteresis {
+            dominantChannel = best.1
+        }
+
+        // --- Motion signal from dominant channel ---
+        let motionSignal: Float
+        switch dominantChannel {
+        case .hip:
+            // Hip rhythm + supplementary boosts from pelvis and horizontal flow
+            let thrustBase = hipIntensity
+            let pelvisBoost = pelvisIntensity * 0.25
+            let horzBoost = horzIntensity * (1.0 - hipIntensity * 0.5) * 0.15
+            motionSignal = min(1.0, thrustBase + pelvisBoost + horzBoost)
+        case .head:
+            motionSignal = headIntensity
+        case .wrist:
+            motionSignal = wristIntensity
+        }
+
+        // --- Blend motion (70%) + audio (30%) ---
+        let blended = motionSignal * 0.7 + audioIntensity * 0.3
+        let scaled = min(1.0, blended * (0.5 + s * 1.0))
+
+        if frameCounter % 15 == 0 {
+            NSLog("🎛 Ch:%@ | Hip:%.2f Head:%.2f Wrist:%.2f | Audio:%.2f | Motion:%.2f | Out:%.2f",
+                  dominantChannel.rawValue, hipIntensity, headIntensity, wristIntensity, audioIntensity, motionSignal, scaled)
+        }
+
+        let ceiling: Float = s < 0.3 ? 0.4 : (s < 0.7 ? 0.8 : 1.0)
+        return min(ceiling, scaled)
+    }
+
+    // MARK: - Lifecycle
+
+    func stop() {
+        isActive = false
+        cleanup()
+    }
+
+    private func cleanup() {
+        displayLink?.invalidate()
+        displayLink = nil
+        if let output = videoOutput, let item = currentItem { item.remove(output) }
+        videoOutput = nil
+        currentItem = nil
+        audioTap = nil
+        previousPixelBuffer = nil
+        previousHeadCentroid = nil
+        previousPelvisCentroid = nil
+        previousPelvisY = 0.5
+        previousLeftWrist = nil
+        previousRightWrist = nil
+        previousDominantVy = 0
+        previousDominantVx = 0
+        recentSpeedHistory = []
+        wristSpeedHistory = []
+        reversalTimestamps = []
+        pelvisReversalTimestamps = []
+        hipAccum = 0
+        headAccum = 0
+        wristAccum = 0
+        audioAGCMax = 0.01
+        dominantChannel = .hip
+        hipIntensity = 0
+        headIntensity = 0
+        pelvisIntensity = 0
+        wristIntensity = 0
+        horzIntensity = 0
+        audioIntensity = 0
+        rawMotionIntensity = 0
+        currentIntensity = 0
+        lastError = nil
+    }
+
+    func startRecording() {}
+    func stopRecordingAndExport() -> String? { return nil }
+}
+#endif

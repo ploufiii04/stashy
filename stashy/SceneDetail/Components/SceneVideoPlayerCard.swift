@@ -24,6 +24,7 @@ struct SceneVideoPlayerCard: View {
     // Preview state
     @State private var previewPlayer: AVPlayer?
     @State private var isPressing = false
+    @State private var showStashSyncSheet = false
     
     // Closure for externally handled actions like seeking and playback start
     var onSeek: (Double) -> Void
@@ -38,6 +39,13 @@ struct SceneVideoPlayerCard: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
         .cardShadow()
         .overlay(expandToggleOverlay, alignment: .bottomTrailing)
+        .sheet(isPresented: $showStashSyncSheet) {
+            #if !os(tvOS)
+            StashSyncSheet()
+                .presentationDetents([PresentationDetent.medium, PresentationDetent.large])
+                .presentationDragIndicator(Visibility.visible)
+            #endif
+        }
     }
 
     @ViewBuilder
@@ -254,6 +262,16 @@ struct SceneVideoPlayerCard: View {
         .padding(12)
         .padding(.bottom, (activeScene.details?.isEmpty ?? true) ? 0 : 20)
         .background(Color.secondaryAppBackground)
+        .onChange(of: player) { _, newPlayer in
+            if let item = newPlayer?.currentItem {
+                StashVideoSyncManager.shared.setup(for: item)
+            }
+        }
+        .onAppear {
+            if let item = player?.currentItem {
+                StashVideoSyncManager.shared.setup(for: item)
+            }
+        }
     }
 
     @ViewBuilder
@@ -291,11 +309,37 @@ struct SceneVideoPlayerCard: View {
                 addMarkerButton
                 Spacer(minLength: 4)
                 qualityMenu
-                Spacer(minLength: 4)
-                audioSyncButton
+                if StashVideoSyncManager.shared.isVideoSyncEnabled {
+                    Spacer(minLength: 4)
+                    stashSyncButton
+                }
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private var stashSyncButton: some View {
+        #if !os(tvOS)
+        let isActive = HandyManager.shared.isStashSyncMode || ButtplugManager.shared.isStashSyncMode || LoveSpouseManager.shared.isStashSyncMode
+        Image(systemName: "bolt.horizontal.fill")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(isActive ? .orange : .secondary)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(isActive ? Color.orange.opacity(0.1) : Color.gray.opacity(0.1))
+            .clipShape(Capsule())
+            .onTapGesture {
+                HapticManager.medium()
+                StashSyncManager.shared.toggle()
+            }
+            .onLongPressGesture {
+                HapticManager.heavy()
+                showStashSyncSheet = true
+            }
+        #else
+        EmptyView()
+        #endif
     }
 
     @ViewBuilder
@@ -524,28 +568,5 @@ struct SceneVideoPlayerCard: View {
         previewPlayer?.seek(to: CMTime.zero)
     }
 
-    private var audioSyncButton: some View {
-        Button {
-            withAnimation {
-                let targetState = !handyManager.isAudioMode
-                handyManager.isAudioMode = targetState
-                buttplugManager.isAudioMode = targetState
-                loveSpouseManager.isAudioMode = targetState
-                
-                // Automatically activate analysis when showing the card
-                if targetState {
-                    AudioAnalysisManager.shared.isActive = true
-                } else {
-                    AudioAnalysisManager.shared.stop()
-                }
-            }
-            HapticManager.medium()
-        } label: {
-            let isAudioActive = handyManager.isAudioMode
-            infoPill(icon: isAudioActive ? "waveform.and.mic" : "waveform", 
-                     text: isAudioActive ? "Sync ON" : "Sync", 
-                     color: isAudioActive ? .purple : Color.pillAccent)
-        }
-    }
 }
 #endif

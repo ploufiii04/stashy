@@ -42,6 +42,9 @@ struct StudioDetailView: View {
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         
         // Save to TabManager (Session)

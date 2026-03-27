@@ -23,7 +23,18 @@ struct HomeSceneCardView: View {
                 return 280
             }
         }
-        return 200
+        return cardHeight * 16 / 9
+    }
+
+    private var cardHeight: CGFloat {
+        if isLarge {
+            if tabManager.dashboardHeroSize == .big {
+                return (UIScreen.main.bounds.width - 20) * 9 / 16
+            } else {
+                return 280 * 9 / 16
+            }
+        }
+        return 125
     }
     
     var body: some View {
@@ -43,7 +54,7 @@ struct HomeSceneCardView: View {
                             image
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: cardWidth, height: cardWidth * 9 / 16)
+                                .frame(width: cardWidth, height: cardHeight)
                                 .clipped()
                         } else {
                             Image(systemName: "film")
@@ -58,13 +69,13 @@ struct HomeSceneCardView: View {
                 // Video Preview Overlay
                 if isPreviewing, let previewPlayer = previewPlayer {
                     AspectFillVideoPlayer(player: previewPlayer)
-                        .frame(width: cardWidth, height: cardWidth * 9 / 16)
+                        .frame(width: cardWidth, height: cardHeight)
                         .clipped()
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
             }
-            .frame(width: cardWidth, height: cardWidth * 9 / 16)
+            .frame(width: cardWidth, height: cardHeight)
             .clipped() // Hard clip for the container
             .contentShape(Rectangle())
             .onLongPressGesture(minimumDuration: 0.15, pressing: { pressing in
@@ -157,7 +168,7 @@ struct HomeSceneCardView: View {
                 }
             }
         }
-        .frame(width: cardWidth, height: cardWidth * 9 / 16)
+        .frame(width: cardWidth, height: cardHeight)
         .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
         .shadow(color: .black.opacity(isBigHero ? 0.35 : 0), radius: 12, x: 0, y: 8)

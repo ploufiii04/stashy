@@ -738,144 +738,6 @@ struct CustomVideoScrubber: View {
     }
 }
 
-#if !os(tvOS)
-struct AudioSyncSheet: View {
-    @ObservedObject var audioManager = AudioAnalysisManager.shared
-    @ObservedObject var appearanceManager = AppearanceManager.shared
-    @ObservedObject var handyManager = HandyManager.shared
-    @ObservedObject var buttplugManager = ButtplugManager.shared
-    @ObservedObject var loveSpouseManager = LoveSpouseManager.shared
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationView {
-            Form {
-                Section(header: Text("Device Audio Sync")) {
-                    if buttplugManager.isEnabled {
-                        Toggle(isOn: $buttplugManager.isAudioMode) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "waveform.and.mic")
-                                    .foregroundColor(buttplugManager.isAudioMode ? .purple : .secondary)
-                                Text("Intiface")
-                            }
-                        }
-                    }
-                    
-                    if loveSpouseManager.isEnabled {
-                        Toggle(isOn: $loveSpouseManager.isAudioMode) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "waveform.and.mic")
-                                    .foregroundColor(loveSpouseManager.isAudioMode ? .purple : .secondary)
-                                Text("LoveSpouse")
-                            }
-                        }
-                    }
-                    
-                    if !buttplugManager.isEnabled && !loveSpouseManager.isEnabled {
-                         Text("No audio-sync capable devices enabled. Turn them on in Settings.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Section(header: Text("Live Level")) {
-                    // VU Meter
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.2))
-                                .frame(height: 8)
-                            
-                            Rectangle()
-                                .fill(LinearGradient(
-                                    colors: [.green, .yellow, .red],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                ))
-                                .frame(width: max(0, geo.size.width * CGFloat(audioManager.visualLevel)), height: 8)
-                                .animation(.linear(duration: 0.1), value: audioManager.visualLevel)
-                        }
-                        .clipShape(Capsule())
-                    }
-                    .frame(height: 8)
-                    .padding(.vertical, 8)
-                    
-                    HStack {
-                        Spacer()
-                        Text("\(Int(audioManager.visualLevel * 100))%")
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Section(header: Text("Configuration")) {
-                    // Sensitivity
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Sensitivity")
-                            Spacer()
-                            Text("\(Int(audioManager.sensitivity * 100))%")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: $audioManager.sensitivity, in: 0...1)
-                            .tint(appearanceManager.tintColor)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    // Intensity
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Max Intensity")
-                            Spacer()
-                            Text("\(Int(audioManager.maxIntensity * 100))%")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: $audioManager.maxIntensity, in: 0.1...1)
-                            .tint(appearanceManager.tintColor)
-                    }
-                    .padding(.vertical, 4)
-                    
-                    // Latency
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Latency Compensation")
-                            Spacer()
-                            Text("\(Int(audioManager.delayMs))ms")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: Binding(get: {
-                            audioManager.delayMs
-                        }, set: {
-                            audioManager.delayMs = $0
-                        }), in: -500...500, step: 10)
-                        .tint(appearanceManager.tintColor)
-                    }
-                    .padding(.vertical, 4)
-                }
-                
-                Section(header: Text("Manual Control")) {
-                    Button(action: {
-                        audioManager.resetToDefaults()
-                    }) {
-                        Text("Reset to Defaults")
-                            .foregroundColor(.red)
-                    }
-                }
-            }
-            .navigationTitle("Audio Sync")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-#endif
 
 // MARK: - Center Play Button
 struct CenterPlayButton: View {
@@ -949,11 +811,10 @@ public struct FilterMapper {
                 }
             }
             
-            // Combine rules using AND logic if we have multiple, or set directly if single
-            if rules.count > 1 {
-                newDict["AND"] = rules
-            } else if let firstRule = rules.first {
-                for (k, v) in firstRule {
+            // Merge all rules as top-level keys (Stash implicitly ANDs all top-level criteria).
+            // Do NOT use AND:[array] — Stash's AND field is a single nested FilterType object, not an array.
+            for rule in rules {
+                for (k, v) in rule {
                     newDict[k] = v
                 }
             }
@@ -1012,10 +873,14 @@ public struct FilterMapper {
         }
         
         // Unwrap nested value structures (Stash UI quirk: {"value": {"value": X}} or {"value": {"id": X}})
+        // For hierarchical fields (studios, tags) the value is {"items": [...], "depth": N} — preserve depth at top level.
         if let valueDict = subDict["value"] as? [String: Any] {
             if let inner = valueDict["value"] { subDict["value"] = inner }
             else if let inner = valueDict["id"] { subDict["value"] = inner }
-            else if let items = valueDict["items"] as? [Any] { subDict["value"] = items }
+            else if let items = valueDict["items"] as? [Any] {
+                subDict["value"] = items
+                if let depth = valueDict["depth"] { subDict["depth"] = depth }
+            }
         }
         if let vd2 = subDict["value2"] as? [String: Any], let iv2 = vd2["value"] {
             subDict["value2"] = iv2
@@ -1100,6 +965,7 @@ public struct FilterMapper {
         return val
     }
     
+    
     private static func mapToIds(_ array: [Any]) -> [String] {
         return array.compactMap { item -> String? in
             if let s = item as? String { return s }
@@ -1107,8 +973,369 @@ public struct FilterMapper {
             if let obj = item as? [String: Any] {
                 if let id = obj["id"] as? String { return id }
                 if let id = obj["id"] as? Int { return String(id) }
+                // Stash sometimes uses "value" key instead of "id" for exclude items
+                if let id = obj["value"] as? String { return id }
+                if let id = obj["value"] as? Int { return String(id) }
             }
             return nil
         }
     }
 }
+
+
+#if !os(tvOS)
+struct StashSyncCard: View {
+    var showVideoAnalysis: Bool = true
+    @ObservedObject var stashSync = StashSyncManager.shared
+    @ObservedObject var videoManager = StashVideoSyncManager.shared
+    @ObservedObject var appearanceManager = AppearanceManager.shared
+    @ObservedObject var handyManager = HandyManager.shared
+    @ObservedObject var buttplugManager = ButtplugManager.shared
+    @ObservedObject var loveSpouseManager = LoveSpouseManager.shared
+    @State private var isChannelsExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header and Device Toggles
+            HStack(alignment: .center) {
+                Text("StashSync")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                // Device Toggle Pills in Header (Style matching Interactive Card)
+                let anyDeviceEnabled = handyManager.isEnabled || buttplugManager.isEnabled || loveSpouseManager.isEnabled
+                if anyDeviceEnabled {
+                    HStack(spacing: 8) {
+                        if handyManager.isEnabled {
+                            deviceTogglePill(
+                                label: "Handy",
+                                icon: handyManager.isStashSyncMode ? "hand.tap.fill" : "hand.tap",
+                                isOn: $handyManager.isStashSyncMode
+                            )
+                        }
+                        if buttplugManager.isEnabled {
+                            deviceTogglePill(
+                                label: "Intiface",
+                                icon: buttplugManager.isStashSyncMode ? "cable.connector.fill" : "cable.connector",
+                                isOn: $buttplugManager.isStashSyncMode
+                            )
+                        }
+                        if loveSpouseManager.isEnabled {
+                            deviceTogglePill(
+                                label: "LoveSpouse",
+                                icon: loveSpouseManager.isStashSyncMode ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right",
+                                isOn: $loveSpouseManager.isStashSyncMode
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.top, 4)
+
+            // Video Analysis — combined banner + expandable channels
+            if showVideoAnalysis {
+            VStack(alignment: .leading, spacing: 6) {
+                // Combined output banner
+                let combined = videoManager.currentIntensity
+                Button(action: { withAnimation(.spring(duration: 0.25)) { isChannelsExpanded.toggle() } }) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("Combined Output")
+                                .font(.caption2).foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(Int(combined * 100))%")
+                                .font(.caption2).monospacedDigit().foregroundColor(.secondary)
+                            Image(systemName: isChannelsExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appearanceManager.tintColor)
+                                .padding(4)
+                                .background(appearanceManager.tintColor.opacity(0.12))
+                                .clipShape(Circle())
+                        }
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Rectangle().fill(Color.gray.opacity(0.15))
+                                Rectangle().fill(appearanceManager.tintColor)
+                                    .frame(width: max(0, geo.size.width * CGFloat(combined)))
+                                    .animation(.linear(duration: 0.1), value: combined)
+                            }.clipShape(Capsule())
+                        }.frame(height: 7)
+                    }
+                }.buttonStyle(.plain)
+
+                // Individual channels — collapsed by default
+                if isChannelsExpanded {
+                    VStack(alignment: .leading, spacing: 5) {
+                        compactBar(label: "Hip / Body", value: videoManager.hipIntensity,    color: appearanceManager.tintColor)
+                        compactBar(label: "Pelvis",     value: videoManager.pelvisIntensity, color: .orange)
+                        compactBar(label: "Head / Neck",value: videoManager.headIntensity,   color: .blue)
+                        compactBar(label: "Wrist / Arm",value: videoManager.wristIntensity,  color: .purple)
+                        compactBar(label: "Horizontal", value: videoManager.horzIntensity,   color: .green)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            } // showVideoAnalysis
+
+            // Sensitivity Slider
+            VStack(spacing: 4) {
+                HStack {
+                    Text("Motion Sensitivity")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(Int(videoManager.sensitivity * 50))%")
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: $videoManager.sensitivity, in: 0.1...2.0)
+                    .tint(.orange)
+            }
+        }
+        .padding(12)
+        .background(Color.secondaryAppBackground)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
+        .cardShadow()
+        .onChange(of: handyManager.isStashSyncMode) { _, _ in updateSyncState() }
+        .onChange(of: buttplugManager.isStashSyncMode) { _, _ in updateSyncState() }
+        .onChange(of: loveSpouseManager.isStashSyncMode) { _, _ in updateSyncState() }
+    }
+
+    private func updateSyncState() {
+        let anyActive = handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode
+        if anyActive {
+            stashSync.start()
+        } else {
+            stashSync.stop()
+        }
+    }
+
+    @ViewBuilder
+    private func compactBar(label: String, value: Float, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label).font(.caption2).foregroundColor(.secondary)
+                Spacer()
+                Text("\(Int(value * 100))%").font(.caption2).monospacedDigit().foregroundColor(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.gray.opacity(0.15))
+                    Rectangle().fill(color)
+                        .frame(width: max(0, geo.size.width * CGFloat(value)))
+                        .animation(.linear(duration: 0.1), value: value)
+                }.clipShape(Capsule())
+            }.frame(height: 5)
+        }
+    }
+
+    @ViewBuilder
+    private func deviceTogglePill(label: String, icon: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            HapticManager.medium()
+            isOn.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                Text(isOn.wrappedValue ? "SYNC ON" : label)
+            }
+            .font(.caption)
+            .fontWeight(.bold)
+            .foregroundColor(isOn.wrappedValue ? .white : Color.pillAccent)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 92, minHeight: 28)
+            .background(isOn.wrappedValue ? Color.green : appearanceManager.tintColor.opacity(0.1))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SyncBadge: View {
+    let isVisible: Bool
+    let icon: String
+    let color: Color
+    
+    var body: some View {
+        Image(systemName: icon)
+            .font(.caption2)
+            .foregroundColor(isVisible ? color : .secondary.opacity(0.3))
+            .padding(6)
+            .background(isVisible ? color.opacity(0.1) : Color.clear)
+            .clipShape(Circle())
+    }
+}
+
+private struct DeviceStatusDot: View {
+    let isConnected: Bool
+    let name: String
+    
+    var body: some View {
+        if isConnected {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 6, height: 6)
+        }
+    }
+}
+
+struct StashSyncSheet: View {
+    var showVideoAnalysis: Bool = true
+    @ObservedObject var stashSync = StashSyncManager.shared
+    @ObservedObject var videoManager = StashVideoSyncManager.shared
+    @ObservedObject var appearanceManager = AppearanceManager.shared
+    @ObservedObject var handyManager = HandyManager.shared
+    @ObservedObject var buttplugManager = ButtplugManager.shared
+    @ObservedObject var loveSpouseManager = LoveSpouseManager.shared
+    @Environment(\.dismiss) var dismiss
+    @State private var isChannelsExpanded = false
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Connected Devices")) {
+                    if handyManager.isEnabled {
+                        Toggle(isOn: $handyManager.isStashSyncMode) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "bolt.horizontal.fill")
+                                    .foregroundColor(handyManager.isStashSyncMode ? .orange : .secondary)
+                                Text("The Handy")
+                            }
+                        }
+                    }
+                    if buttplugManager.isEnabled {
+                        Toggle(isOn: $buttplugManager.isStashSyncMode) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "bolt.horizontal.fill")
+                                    .foregroundColor(buttplugManager.isStashSyncMode ? .orange : .secondary)
+                                Text("Intiface")
+                            }
+                        }
+                    }
+                    if loveSpouseManager.isEnabled {
+                        Toggle(isOn: $loveSpouseManager.isStashSyncMode) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "bolt.horizontal.fill")
+                                    .foregroundColor(loveSpouseManager.isStashSyncMode ? .orange : .secondary)
+                                Text("LoveSpouse")
+                            }
+                        }
+                    }
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+                if showVideoAnalysis {
+                Section(header: Text("Live Signal Analysis")) {
+                    VStack(spacing: 10) {
+                        // Combined banner
+                        let combined = videoManager.currentIntensity
+                        Button(action: { withAnimation(.spring(duration: 0.25)) { isChannelsExpanded.toggle() } }) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Label("Combined Output", systemImage: "waveform").font(.caption2)
+                                    Spacer()
+                                    Text("\(Int(combined * 100))%").font(.caption2).monospacedDigit()
+                                    Image(systemName: isChannelsExpanded ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(appearanceManager.tintColor)
+                                        .padding(4)
+                                        .background(appearanceManager.tintColor.opacity(0.12))
+                                        .clipShape(Circle())
+                                }.foregroundColor(.secondary)
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Rectangle().fill(Color.gray.opacity(0.1)).frame(height: 12)
+                                        Rectangle().fill(appearanceManager.tintColor)
+                                            .frame(width: max(0, geo.size.width * CGFloat(combined)), height: 12)
+                                            .animation(.linear(duration: 0.1), value: combined)
+                                    }.clipShape(Capsule())
+                                }.frame(height: 12)
+                            }
+                        }.buttonStyle(.plain)
+
+                        // Individual channels
+                        if isChannelsExpanded {
+                            VStack(spacing: 10) {
+                                signalBar(label: "Hip / Body", icon: "figure.walk",         value: videoManager.hipIntensity,    color: appearanceManager.tintColor)
+                                signalBar(label: "Pelvis",     icon: "figure.stand",         value: videoManager.pelvisIntensity, color: .orange)
+                                signalBar(label: "Head / Neck",icon: "person.bust",          value: videoManager.headIntensity,   color: .blue)
+                                signalBar(label: "Wrist / Arm",icon: "hand.raised",          value: videoManager.wristIntensity,  color: .purple)
+                                signalBar(label: "Horizontal", icon: "arrow.left.and.right", value: videoManager.horzIntensity,   color: .green)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }.padding(.vertical, 8)
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+                } // showVideoAnalysis
+                Section(header: Text("Analysis Sensitivity")) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Motion Analysis")
+                            Spacer()
+                            Text("\(Int(videoManager.sensitivity * 50))%").foregroundColor(.secondary)
+                        }
+                        Slider(value: $videoManager.sensitivity, in: 0.1...2.0).tint(.orange)
+                    }.padding(.vertical, 4)
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+                Section(header: Text("Optical Flow Smoothing")) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Smoothing")
+                            Spacer()
+                            Text("\(Int(videoManager.smoothing * 100))%").foregroundColor(.secondary)
+                        }
+                        Slider(value: $videoManager.smoothing, in: 0.0...0.9).tint(.orange)
+                    }
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+            }
+            .navigationTitle("StashSync")
+            .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { 
+                        if handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode {
+                            stashSync.isActive = true
+                        } else {
+                            stashSync.isActive = false
+                        }
+                        dismiss() 
+                    }
+                }
+            }
+        }
+        .applyAppBackground()
+        .onChange(of: handyManager.isStashSyncMode) { _, _ in syncSheetState() }
+        .onChange(of: buttplugManager.isStashSyncMode) { _, _ in syncSheetState() }
+        .onChange(of: loveSpouseManager.isStashSyncMode) { _, _ in syncSheetState() }
+    }
+
+    private func syncSheetState() {
+        let anyActive = handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode
+        if anyActive { stashSync.start() } else { stashSync.stop() }
+    }
+
+    @ViewBuilder
+    private func signalBar(label: String, icon: String, value: Float, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(label, systemImage: icon).font(.caption2)
+                Spacer()
+                Text("\(Int(value * 100))%").font(.caption2).monospacedDigit()
+            }.foregroundColor(.secondary)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.gray.opacity(0.1)).frame(height: 8)
+                    Rectangle().fill(color).frame(width: max(0, geo.size.width * CGFloat(value)), height: 8)
+                        .animation(.linear(duration: 0.1), value: value)
+                }.clipShape(Capsule())
+            }.frame(height: 8)
+        }
+    }
+}
+#endif

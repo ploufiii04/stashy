@@ -262,34 +262,52 @@ struct ReelsView: View {
 
     
 
-    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil) {
+    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false) {
         if let providedMode = mode { reelsMode = providedMode }
         currentVisibleSceneId = nil // Reset to allow onAppear to pick up the new first item
-        
-        // Update local state only (session-scoped, does NOT persist to settings default)
+
+        // Update local state and handle random re-roll
         if let sortBy = sortBy {
+            if sortBy == .random && selectedSortOption == .random && reelsMode == .scenes {
+                viewModel.refreshRandomSeed()
+            }
             selectedSortOption = sortBy
         }
-        
+
         if let markerSortBy = markerSortBy {
+            if markerSortBy == .random && selectedMarkerSortOption == .random && reelsMode == .markers {
+                viewModel.refreshRandomSeed()
+            }
             selectedMarkerSortOption = markerSortBy
         }
-        
+
         if let clipSortBy = clipSortBy {
+            if clipSortBy == .random && selectedClipSortOption == .random && reelsMode == .clips {
+                viewModel.refreshRandomSeed()
+            }
             selectedClipSortOption = clipSortBy
         }
-        
-        // Pass NIL explicitly to clear filters
-        selectedClipFilter = clipFilter
+
+        // For clip filter: use explicitly passed value; fall back to existing selectedClipFilter
+        // unless clearClipFilter is true (used when explicitly removing the clip filter).
+        let resolvedClipFilter: StashDBViewModel.SavedFilter?
+        if clearClipFilter {
+            resolvedClipFilter = nil
+        } else if clipFilter != nil {
+            resolvedClipFilter = clipFilter
+        } else {
+            resolvedClipFilter = selectedClipFilter
+        }
+        selectedClipFilter = resolvedClipFilter
         selectedFilter = filter
         selectedPerformer = performer
         selectedTags = tags
-        
+
         // Merge performer and tags into filter if needed
         // IMPORTANT: Use the arguments (filter/clipFilter) instead of @State (selectedFilter/selectedClipFilter)
         // because @State might not have propagated yet.
         let mergedFilter = viewModel.mergeFilterWithCriteria(filter: filter, performer: performer, tags: tags, mode: .scenes)
-        let mergedClipFilter = viewModel.mergeFilterWithCriteria(filter: clipFilter, performer: performer, tags: tags, mode: .images)
+        let mergedClipFilter = viewModel.mergeFilterWithCriteria(filter: resolvedClipFilter, performer: performer, tags: tags, mode: .images)
 
         switch reelsMode {
         case .scenes:
@@ -552,7 +570,7 @@ struct ReelsView: View {
                 }
             } else {
                 // 2. Fallback (if not in current list)
-                viewModel.addSceneMarkerPlay(markerId: markerId) { _ in }
+            viewModel.addSceneMarkerPlay(markerId: markerId) { _ in }
             }
         }
     }
@@ -671,12 +689,18 @@ struct ReelsView: View {
             if initialPerformer != nil || !initialTags.isEmpty {
                 coordinator.reelsPerformer = nil
                 coordinator.reelsTags = []
-                
+
                 // Load saved sort for Scenes mode (default for nav context)
                 let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .scenes)
                 let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-                
-                applySettings(sortBy: savedSort, filter: selectedFilter, performer: initialPerformer, tags: initialTags)
+
+                // Resolve default filter so removing the performer/tag pill reverts to it (not nil)
+                var baseFilter = selectedFilter
+                if baseFilter == nil, let defId = TabManager.shared.getDefaultFilterId(for: .reels) {
+                    baseFilter = viewModel.savedFilters[defId]
+                }
+
+                applySettings(sortBy: savedSort, filter: baseFilter, performer: initialPerformer, tags: initialTags)
             } else {
                 let isCurrentlyEmpty: Bool = {
                     switch reelsMode {
@@ -741,7 +765,6 @@ struct ReelsView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             
             // Stop all audio & interactive sync
-            AudioAnalysisManager.shared.stop()
             HandyManager.shared.stop()
             ButtplugManager.shared.stopAllDevices()
             LoveSpouseManager.shared.stop()
@@ -774,6 +797,14 @@ struct ReelsView: View {
             }
         }
         .onChange(of: viewModel.savedFilters) { _, newValue in
+            // Backfill selectedFilter with the default if filters just arrived and we still have no base filter.
+            // This ensures removing a performer/tag pill reverts to the default rather than nil.
+            if selectedFilter == nil && reelsMode != .clips && !newValue.isEmpty {
+                if let defId = TabManager.shared.getDefaultFilterId(for: .reels), let filter = newValue[defId] {
+                    selectedFilter = filter
+                }
+            }
+
             // Only apply initial load if we are empty and no specific navigation context was provided
             let isCurrentlyEmpty: Bool = {
                 switch reelsMode {
@@ -819,7 +850,7 @@ struct ReelsView: View {
                         applySettings(markerSortBy: savedSort, filter: nil, performer: selectedPerformer, tags: selectedTags)
                     case .clips:
                         let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
-                        applySettings(clipSortBy: savedSort, filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags)
+                        applySettings(clipSortBy: savedSort, filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, clearClipFilter: true)
                     }
                 }
             }
@@ -870,7 +901,14 @@ struct ReelsView: View {
                 applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
             },
             onTagTap: { tag in
-                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: [tag])
+                // Add tag to existing selection (or toggle off if already selected)
+                var newTags = selectedTags
+                if newTags.contains(where: { $0.id == tag.id }) {
+                    newTags.removeAll { $0.id == tag.id }
+                } else {
+                    newTags.append(tag)
+                }
+                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
             },
             onRatingChanged: { rating in
                 self.handleRatingChange(item: item, newRating: rating)
@@ -1424,7 +1462,7 @@ struct ReelsView: View {
                 // Clips uses image filters
                 Button(action: {
                     selectedClipFilter = nil
-                    applySettings(filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, mode: .clips)
+                    applySettings(filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, mode: .clips, clearClipFilter: true)
                 }) {
                     HStack {
                         Text("No Filter")
@@ -1514,7 +1552,7 @@ struct ReelItemView: View {
     @Binding var isMenuOpen: Bool
     @Binding var isZoomed: Bool
     @Binding var isRotating: Bool
-    @State private var showAudioSyncSheet = false
+    @State private var showStashSyncSheet = false
     @State private var isFastForwarding = false
     var onInteraction: () -> Void
 
@@ -1535,101 +1573,102 @@ struct ReelItemView: View {
     
     
     var body: some View {
+        applyModifiers(mainContent)
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         ZStack(alignment: .bottom) {
             mediaLayer
             fastForwardOverlay
             playButtonOverlay
             bottomBarOverlay
         }
-        .buttonStyle(.plain)
-        .background(Color.black)
-        .onAppear {
-            setupPlayer()
-            if isActive {
-                onInteraction()
-                if item.isAnimated { startAnimationAdvanceTimer() }
+    }
+}
+
+extension ReelItemView {
+    func applyModifiers<V: View>(_ content: V) -> some View {
+        let v1 = applyBasicModifiers(content)
+        let v2 = applyPlaybackLifecycleModifiers(v1)
+        let v4 = applyOverlayModifiers(v2)
+        return applyStashSyncModifiers(v4)
+    }
+
+    @ViewBuilder
+    private func applyBasicModifiers<V: View>(_ content: V) -> some View {
+        content
+            .buttonStyle(.plain)
+            .background(Color.black)
+            .focusable(false)
+            .focusEffectDisabled()
+    }
+
+    @ViewBuilder
+    private func applyPlaybackLifecycleModifiers<V: View>(_ content: V) -> some View {
+        content
+            .onAppear {
+                setupPlayer()
+                if isActive {
+                    onInteraction()
+                    if item.isAnimated { startAnimationAdvanceTimer() }
+                }
             }
-        }
-        .onDisappear {
-            cleanupPlayer()
-            cancelAnimationAdvanceTimer()
-        }
-        .onChange(of: isMuted) { _, newValue in
-            player?.isMuted = newValue
-        }
-        .focusable(false)
-        .focusEffectDisabled()
-        .onChange(of: isActive) { _, newValue in
-            if newValue {
-                if player == nil { setupPlayer() }
-                if isPlaying && !isRotating { player?.play() }
-                onInteraction()
-                if item.isAnimated { startAnimationAdvanceTimer() }
-            } else {
+            .onDisappear {
                 cleanupPlayer()
                 cancelAnimationAdvanceTimer()
             }
-        }
-        .onChange(of: tabManager.reelsContinuousPlay) { _, enabled in
-            if item.isAnimated {
-                if enabled && isActive {
-                    startAnimationAdvanceTimer()
+            .onChange(of: isMuted) { _, newValue in
+                player?.isMuted = newValue
+            }
+            .onChange(of: isActive) { _, newValue in
+                if newValue {
+                    if player == nil { setupPlayer() }
+                    if isPlaying && !isRotating { player?.play() }
+                    onInteraction()
+                    if item.isAnimated { startAnimationAdvanceTimer() }
                 } else {
+                    cleanupPlayer()
                     cancelAnimationAdvanceTimer()
                 }
             }
-        }
-        .onChange(of: isRotating) { _, newValue in
-            if !newValue && isActive && isPlaying {
-                print("🔄 ReelItemView: Rotation finished, resuming playback")
-                player?.play()
-            } else if newValue {
-                print("🔄 ReelItemView: Rotation started, pausing playback")
-                player?.pause()
+            .onChange(of: tabManager.reelsContinuousPlay) { _, enabled in
+                if item.isAnimated {
+                    if enabled && isActive {
+                        startAnimationAdvanceTimer()
+                    } else {
+                        cancelAnimationAdvanceTimer()
+                    }
+                }
             }
-        }
-        .onChange(of: showRatingOverlay) { _, newValue in
-            isMenuOpen = newValue || showTagsOverlay
-        }
-        .onChange(of: showTagsOverlay) { _, newValue in
-            isMenuOpen = newValue || showRatingOverlay
-        }
-        .onChange(of: player?.currentItem) { _, newItem in
-            ensureAudioAnalysis(for: newItem)
-        }
-        .onChange(of: HandyManager.shared.isAudioMode) { _, isAudio in
-            if isAudio { ensureAudioAnalysis(for: player?.currentItem) }
-            else { checkAndStopAudioAnalysis() }
-        }
-        .onChange(of: ButtplugManager.shared.isAudioMode) { _, isAudio in
-            if isAudio { ensureAudioAnalysis(for: player?.currentItem) }
-            else { checkAndStopAudioAnalysis() }
-        }
-        .onChange(of: LoveSpouseManager.shared.isAudioMode) { _, isAudio in
-            if isAudio { ensureAudioAnalysis(for: player?.currentItem) }
-            else { checkAndStopAudioAnalysis() }
-        }
-        .onAppear {
-            if HandyManager.shared.isAudioMode || ButtplugManager.shared.isAudioMode || LoveSpouseManager.shared.isAudioMode {
-                 AudioAnalysisManager.shared.isActive = true
+            .onChange(of: isRotating) { _, newValue in
+                if !newValue && isActive && isPlaying {
+                    player?.play()
+                } else if newValue {
+                    player?.pause()
+                }
             }
-        }
     }
+
+    @ViewBuilder
+    private func applyOverlayModifiers<V: View>(_ content: V) -> some View {
+        content
+            .onChange(of: showRatingOverlay) { _, newValue in
+                isMenuOpen = newValue || showTagsOverlay
+            }
+            .onChange(of: showTagsOverlay) { _, newValue in
+                isMenuOpen = newValue || showRatingOverlay
+            }
+    }
+
+
+    @ViewBuilder
+    private func applyStashSyncModifiers<V: View>(_ content: V) -> some View {
+        content
+            .modifier(StashSyncManagerModifier(isActive: isActive, isPlaying: isPlaying, player: player))
+    }
+
     
-    private func ensureAudioAnalysis(for item: AVPlayerItem?) {
-        guard let item = item else { return }
-        if HandyManager.shared.isAudioMode || ButtplugManager.shared.isAudioMode || LoveSpouseManager.shared.isAudioMode {
-            print("🎙️ ReelsView: Ensuring Audio Analysis is setup for current item")
-            AudioAnalysisManager.shared.setup(for: item)
-            AudioAnalysisManager.shared.isActive = true 
-        }
-    }
-    
-    private func checkAndStopAudioAnalysis() {
-        if !HandyManager.shared.isAudioMode && !ButtplugManager.shared.isAudioMode && !LoveSpouseManager.shared.isAudioMode {
-            AudioAnalysisManager.shared.stop()
-        }
-    }
 
     @ViewBuilder
     private var mediaLayer: some View {
@@ -1810,6 +1849,7 @@ struct ReelItemView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 
+
                 // Performer and Title labels moved here
                 VStack(alignment: .leading, spacing: 4) {
                     performerLabel(for: item)
@@ -1887,23 +1927,24 @@ struct ReelItemView: View {
                         Spacer()
                     }
                     
-                    // Mute & Audio Sync (only for videos)
+                    // Mute & StashSync (only for videos)
                     if !item.isAnimated {
-                        // Audio Sync Button
-                        let isAnyAudioModeActive = HandyManager.shared.isAudioMode || ButtplugManager.shared.isAudioMode || LoveSpouseManager.shared.isAudioMode
-                        #if !os(tvOS)
-                        BottomBarButton(
-                            icon: isAnyAudioModeActive ? "waveform.and.mic" : "waveform",
-                            count: 0,
-                            hideCount: true
-                        ) {
-                            showAudioSyncSheet = true
-                            onInteraction()
+                        if StashVideoSyncManager.shared.isVideoSyncEnabled {
+                            // StashSync Button — always visible, tap opens sheet
+                            let isStashSyncActive = HandyManager.shared.isStashSyncMode || ButtplugManager.shared.isStashSyncMode || LoveSpouseManager.shared.isStashSyncMode
+                            BottomBarButton(
+                                icon: isStashSyncActive ? "bolt.horizontal.fill" : "bolt.horizontal",
+                                count: 0,
+                                hideCount: true
+                            ) {
+                                HapticManager.medium()
+                                showStashSyncSheet = true
+                                onInteraction()
+                            }
+                            .foregroundColor(isStashSyncActive ? .orange : .white)
+
+                            Spacer()
                         }
-                        .foregroundColor(isAnyAudioModeActive ? .purple : .white)
-                        
-                        Spacer()
-                        #endif
                         
                         // Mute Button
                         BottomBarButton(
@@ -1938,9 +1979,9 @@ struct ReelItemView: View {
             .frame(height: 50)
         }
         .padding(Edge.Set.bottom, 30) // Safe area spacing
-        .sheet(isPresented: $showAudioSyncSheet) {
+        .sheet(isPresented: $showStashSyncSheet) {
             #if !os(tvOS)
-            AudioSyncSheet()
+            StashSyncSheet()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             #endif
@@ -2198,5 +2239,131 @@ struct ReelItemView: View {
         animationAdvanceTimer?.invalidate()
         animationAdvanceTimer = nil
     }
+}
+
+struct StashSyncManagerModifier: ViewModifier {
+    let isActive: Bool
+    let isPlaying: Bool
+    let player: AVPlayer?
+    
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                initialSync()
+            }
+            .onChange(of: isActive) { _, active in
+                if active { initialSync() }
+            }
+            .onChange(of: StashSyncManager.shared.isActive) { _, active in
+                if active { initialSync() }
+            }
+            .onChange(of: player?.currentItem) { _, newItem in
+                if StashSyncManager.shared.isActive {
+                                        ensureVideoAnalysis(for: newItem)
+                }
+            }
+            .onChange(of: HandyManager.shared.isStashSyncMode) { _, isStash in
+                if isStash && isActive { 
+                                        ensureVideoAnalysis(for: player?.currentItem)
+                    StashSyncManager.shared.isActive = true
+                    if isPlaying { HandyManager.shared.play(at: player?.currentTime().seconds ?? 0) }
+                } else if !isStash {
+                    checkAndStopStashSync()
+                }
+            }
+            .onChange(of: ButtplugManager.shared.isStashSyncMode) { _, isStash in
+                if isStash && isActive { 
+                                        ensureVideoAnalysis(for: player?.currentItem)
+                    StashSyncManager.shared.isActive = true
+                    if isPlaying { ButtplugManager.shared.play(at: player?.currentTime().seconds ?? 0) }
+                } else if !isStash {
+                    checkAndStopStashSync()
+                }
+            }
+            .onChange(of: LoveSpouseManager.shared.isStashSyncMode) { _, isStash in
+                if isStash && isActive { 
+                                        ensureVideoAnalysis(for: player?.currentItem)
+                    StashSyncManager.shared.isActive = true
+                    if isPlaying { LoveSpouseManager.shared.play(at: player?.currentTime().seconds ?? 0) }
+                } else if !isStash {
+                    checkAndStopStashSync()
+                }
+            }
+            .onChange(of: isPlaying) { _, playing in
+                if StashSyncManager.shared.isActive && isActive {
+                    let currentTime = player?.currentTime().seconds ?? 0
+                    if playing {
+                        if HandyManager.shared.isStashSyncMode { HandyManager.shared.play(at: currentTime) }
+                        if ButtplugManager.shared.isStashSyncMode { ButtplugManager.shared.play(at: currentTime) }
+                        if LoveSpouseManager.shared.isStashSyncMode { LoveSpouseManager.shared.play(at: currentTime) }
+                    } else {
+                        if HandyManager.shared.isStashSyncMode { HandyManager.shared.pause() }
+                        if ButtplugManager.shared.isStashSyncMode { ButtplugManager.shared.pause() }
+                        if LoveSpouseManager.shared.isStashSyncMode { LoveSpouseManager.shared.pause() }
+                    }
+                }
+            }
+            .onChange(of: isActive) { _, active in
+                if active && StashSyncManager.shared.isActive {
+                    let currentTime = player?.currentTime().seconds ?? 0
+                    if isPlaying {
+                        if HandyManager.shared.isStashSyncMode { HandyManager.shared.play(at: currentTime) }
+                        if ButtplugManager.shared.isStashSyncMode { ButtplugManager.shared.play(at: currentTime) }
+                        if LoveSpouseManager.shared.isStashSyncMode { LoveSpouseManager.shared.play(at: currentTime) }
+                    } else {
+                        if HandyManager.shared.isStashSyncMode { HandyManager.shared.pause() }
+                        if ButtplugManager.shared.isStashSyncMode { ButtplugManager.shared.pause() }
+                        if LoveSpouseManager.shared.isStashSyncMode { LoveSpouseManager.shared.pause() }
+                    }
+                }
+            }
+    }
+    
+
+    private func initialSync() {
+        guard isActive && StashSyncManager.shared.isActive else {
+            print("🎬 ReelsView: initialSync check failed - isActive: \(isActive), StashSync: \(StashSyncManager.shared.isActive)")
+            return
+        }
+        print("🎬 ReelsView: Performing initial sync for manager states...")
+                ensureVideoAnalysis(for: player?.currentItem)
+        
+        if isPlaying {
+            let currentTime = player?.currentTime().seconds ?? 0
+            print("🎬 ReelsView: Resuming StashSync signals at \(currentTime)s")
+            if HandyManager.shared.isStashSyncMode { HandyManager.shared.play(at: currentTime) }
+            if ButtplugManager.shared.isStashSyncMode { ButtplugManager.shared.play(at: currentTime) }
+            if LoveSpouseManager.shared.isStashSyncMode { LoveSpouseManager.shared.play(at: currentTime) }
+        }
+    }
+    // MARK: - Helper Methods
+    
+    
+
+    
+    private func ensureVideoAnalysis(for item: AVPlayerItem?) {
+        guard let item = item else { return }
+        if HandyManager.shared.isStashSyncMode || ButtplugManager.shared.isStashSyncMode || LoveSpouseManager.shared.isStashSyncMode {
+            print("🎬 ReelsView: Ensuring Video Analysis is setup for current item")
+            StashVideoSyncManager.shared.setup(for: item)
+            StashVideoSyncManager.shared.isActive = true
+        }
+    }
+    
+    private func checkAndStopStashSync() {
+        if !HandyManager.shared.isStashSyncMode && 
+           !ButtplugManager.shared.isStashSyncMode && 
+           !LoveSpouseManager.shared.isStashSyncMode {
+            StashSyncManager.shared.isActive = false
+                        checkAndStopVideoAnalysis()
+        }
+    }
+    
+    private func checkAndStopVideoAnalysis() {
+        if !ButtplugManager.shared.isStashSyncMode && !LoveSpouseManager.shared.isStashSyncMode {
+            StashVideoSyncManager.shared.stop()
+        }
+    }
+    
 }
 #endif

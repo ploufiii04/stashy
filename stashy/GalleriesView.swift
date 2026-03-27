@@ -47,6 +47,9 @@ struct GalleriesView: View {
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.GallerySortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         scrollPosition = nil
         shouldRestoreScroll = false
@@ -253,6 +256,27 @@ struct GalleriesView: View {
                                 if selectedSortOption == .updatedAtDesc || selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
                             }
                         }
+
+                        // Image Count
+                        Menu {
+                            Button(action: { changeSortOption(to: .imageCountDesc) }) {
+                                HStack {
+                                    Text("High → Low")
+                                    if selectedSortOption == .imageCountDesc { Image(systemName: "checkmark") }
+                                }
+                            }
+                            Button(action: { changeSortOption(to: .imageCountAsc) }) {
+                                HStack {
+                                    Text("Low → High")
+                                    if selectedSortOption == .imageCountAsc { Image(systemName: "checkmark") }
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text("Image Count")
+                                if selectedSortOption == .imageCountDesc || selectedSortOption == .imageCountAsc { Image(systemName: "checkmark") }
+                            }
+                        }
                         
                         // Random
                         Button(action: { changeSortOption(to: .random) }) {
@@ -305,6 +329,13 @@ struct GalleriesView: View {
             }
         }
         .onAppear {
+            // Apply default sort option
+            let defaultSortStr = TabManager.shared.getSortOption(for: .galleries) ?? "dateDesc"
+            if let defaultSort = StashDBViewModel.GallerySortOption(rawValue: defaultSortStr) {
+                 selectedSortOption = defaultSort
+                 viewModel.currentGallerySortOption = defaultSort
+            }
+            
             // Check for search text from navigation
             if !coordinator.activeSearchText.isEmpty {
                 searchText = coordinator.activeSearchText
@@ -331,6 +362,12 @@ struct GalleriesView: View {
                     selectedFilter = nil
                 }
                 performSearch()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.galleries.rawValue {
+                let newSort = StashDBViewModel.GallerySortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .galleries) ?? "") ?? .dateDesc
+                changeSortOption(to: newSort)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
@@ -489,7 +526,6 @@ struct GalleryItemView: View {
     @State private var timeObserver: Any?
     @State private var showRatingOverlay = false
     @State private var showTagsOverlay = false
-    @State private var showAudioSyncSheet = false
 
     private var isAnimatedImage: Bool {
         let ext = image.fileExtension?.uppercased()
@@ -640,7 +676,8 @@ struct GalleryItemView: View {
                 .transition(AnyTransition.move(edge: Edge.bottom).combined(with: .opacity))
             }
             
-            // Performer and Title labels
+
+                // Performer and Title labels
             VStack(alignment: .leading, spacing: 4) {
                 performerLabel
                 titleLabel
@@ -714,22 +751,6 @@ struct GalleryItemView: View {
                 Spacer()
                 
                 // Video Controls
-                if image.isVideo {
-                    // Audio Sync
-                    let isAnyAudioModeActive = HandyManager.shared.isAudioMode || ButtplugManager.shared.isAudioMode || LoveSpouseManager.shared.isAudioMode
-                    #if !os(tvOS)
-                    BottomBarButton(
-                        icon: isAnyAudioModeActive ? "waveform.and.mic" : "waveform",
-                        count: 0,
-                        hideCount: true
-                    ) {
-                        showAudioSyncSheet = true
-                        onInteraction()
-                    }
-                    .foregroundColor(isAnyAudioModeActive ? .purple : .white)
-                    
-                    Spacer()
-                    #endif
                     
                     // Mute
                     BottomBarButton(
@@ -755,19 +776,11 @@ struct GalleryItemView: View {
                         onInteraction()
                     }
                     Spacer()
-                }
             }
             .padding(Edge.Set.horizontal, 16)
             .frame(height: 50)
         }
         .padding(.bottom, 30)
-        .sheet(isPresented: $showAudioSyncSheet) {
-            #if !os(tvOS)
-            AudioSyncSheet()
-                .presentationDetents([PresentationDetent.medium, PresentationDetent.large])
-                .presentationDragIndicator(Visibility.visible)
-            #endif
-        }
     }
 
     var body: some View {

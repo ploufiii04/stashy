@@ -29,6 +29,9 @@ struct StudiosView: View {
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.StudioSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         
         // Save to TabManager
@@ -81,6 +84,12 @@ struct StudiosView: View {
                     selectedFilter = nil
                 }
                 performSearch()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.studios.rawValue {
+                let newSort = StashDBViewModel.StudioSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .studios) ?? "") ?? .nameAsc
+                changeSortOption(to: newSort)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
@@ -540,16 +549,12 @@ struct StudioCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Logo Block (Top)
-            ZStack(alignment: .bottom) {
-                // Background
-                Color.studioHeaderGray
-                
-                // Logo Image
-                StudioImageView(studio: studio)
-                    .padding(12)
-                    .frame(maxWidth: .infinity)
-            }
-            .aspectRatio(2.2, contentMode: .fit)
+            Color.studioHeaderGray
+                .aspectRatio(2.2, contentMode: .fit)
+                .overlay(
+                    StudioImageView(studio: studio)
+                )
+                .clipped()
             
             // Name & Info Area (Below)
             HStack(spacing: 8) {
@@ -598,11 +603,16 @@ struct SVGWebView: UIViewRepresentable {
     let svgString: String?
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        let config = WKWebViewConfiguration()
+        config.userContentController = WKUserContentController()
+        let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
-        webView.isUserInteractionEnabled = false // Erlaubt Touch-Events durchzulassen
+        webView.scrollView.bouncesZoom = false
+        webView.scrollView.minimumZoomScale = 1.0
+        webView.scrollView.maximumZoomScale = 1.0
+        webView.isUserInteractionEnabled = false
         return webView
     }
 
@@ -612,27 +622,43 @@ struct SVGWebView: UIViewRepresentable {
             <!DOCTYPE html>
             <html>
             <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
                 <style>
-                    body {
-                        margin: 0;
-                        padding: 0;
+                    * { box-sizing: border-box; margin: 0; padding: 0; }
+                    html, body {
+                        width: 100vw;
+                        height: 100vh;
+                        background: transparent;
+                        overflow: hidden;
                         display: flex;
                         justify-content: center;
                         align-items: center;
-                        background: transparent;
-                        min-height: 100vh;
-                        min-width: 100vw;
                     }
                     svg {
-                        width: 100%;
-                        height: 100%;
+                        width: 100vw !important;
+                        height: 100vh !important;
+                        max-width: 100vw !important;
+                        max-height: 100vh !important;
+                        display: block;
                         object-fit: contain;
                     }
                 </style>
             </head>
             <body>
                 \(svgString)
+                <script>
+                    var svg = document.querySelector('svg');
+                    if (svg) {
+                        if (!svg.getAttribute('viewBox')) {
+                            var w = svg.getAttribute('width') || '100';
+                            var h = svg.getAttribute('height') || '100';
+                            svg.setAttribute('viewBox', '0 0 ' + parseFloat(w) + ' ' + parseFloat(h));
+                        }
+                        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                        svg.removeAttribute('width');
+                        svg.removeAttribute('height');
+                    }
+                </script>
             </body>
             </html>
             """

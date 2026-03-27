@@ -72,7 +72,7 @@ struct HomeRowView: View {
         let heroTopPadding: CGFloat = 115
         let heroBottomPadding: CGFloat = 8 // Symmetrical bottom gap
         let dotsAreaHeight: CGFloat = 0 
-        let cardHeight = isBigHero ? (screenWidth - 20) * 9 / 16 : 200 * 9 / 16
+        let cardHeight = isBigHero ? (screenWidth - 20) * 9 / 16 : 125
 
         // totalHeroHeight = (statusBar + navBar + margin) + card + 22 (dots+gap) + 8 (bottom gap)
         let totalHeroHeight: CGFloat = heroTopPadding + cardHeight + dotsAreaHeight + heroBottomPadding
@@ -347,18 +347,15 @@ struct HomeRowView: View {
             }
         }
         
-        // Standard width for non-hero rows
-        let baseWidth: CGFloat = 200
-        
+        // Standard width for non-hero rows — based on fixed 125pt card height
+        let cardHeight: CGFloat = 125
+
         if config.type == .newPerformers || config.type == .performersHighestSceneCount || config.type == .performersHighestOCount {
-            // Performers are portrait (2:3), but matched to the height of 16:9 scenes
-            let matchedHeight = baseWidth * 9 / 16
-            return matchedHeight * 2 / 3
+            return cardHeight * 2 / 3
         } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries {
-            // Galleries are square, matched to height
-            return baseWidth * 9 / 16
+            return cardHeight
         } else {
-            return baseWidth
+            return cardHeight * 16 / 9
         }
     }
     
@@ -445,9 +442,7 @@ struct HomePerformerCardView: View {
                 return 280
             }
         } else {
-            // Standard height is 200 * 9/16 = 112.5
-            // Width is 2/3 of that for portrait
-            return (200 * 9 / 16) * 2 / 3
+            return 125 * 2 / 3
         }
     }
     
@@ -540,7 +535,7 @@ struct HomeStudioCardView: View {
     @ObservedObject var appearanceManager = AppearanceManager.shared
     
     // Use same height as scenes, but standard width (16:9 like scenes)
-    private var cardWidth: CGFloat { 
+    private var cardWidth: CGFloat {
         if isLarge {
             if tabManager.dashboardHeroSize == .big {
                 return UIScreen.main.bounds.width - 24
@@ -548,7 +543,7 @@ struct HomeStudioCardView: View {
                 return 280
             }
         }
-        return 200 
+        return 125 * 16 / 9
     }
     private var cardHeight: CGFloat { cardWidth * 9 / 16 }
     

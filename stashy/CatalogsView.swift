@@ -378,6 +378,12 @@ struct GroupsView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.groups.rawValue {
+                let newSort = StashDBViewModel.GroupSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .groups) ?? "") ?? .nameAsc
+                changeSortOption(to: newSort)
+            }
+        }
         .onChange(of: searchText) { oldValue, newValue in
             NSObject.cancelPreviousPerformRequests(withTarget: self)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -389,6 +395,9 @@ struct GroupsView: View {
     }
 
     private func changeSortOption(to newOption: StashDBViewModel.GroupSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         TabManager.shared.setSortOption(for: .groups, option: newOption.rawValue)
         performSearch()
@@ -749,6 +758,9 @@ struct GroupDetailView: View {
     }
 
     private func changeSortOption(to option: StashDBViewModel.SceneSortOption) {
+        if option == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = option
         TabManager.shared.setPersistentDetailSortOption(for: DetailViewContext.group.rawValue, option: option.rawValue)
         viewModel.fetchGroupScenes(groupId: selectedGroup.id, sortBy: option, isInitialLoad: true)

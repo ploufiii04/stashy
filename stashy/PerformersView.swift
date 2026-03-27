@@ -43,6 +43,9 @@ struct PerformersView: View {
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.PerformerSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         selectedSortOption = newOption
         scrollPosition = nil
         shouldRestoreScroll = false
@@ -319,6 +322,12 @@ struct PerformersView: View {
                     selectedFilter = nil
                 }
                 performSearch()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.performers.rawValue {
+                let newSort = StashDBViewModel.PerformerSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .performers) ?? "") ?? .sceneCountDesc
+                changeSortOption(to: newSort)
             }
         }
         .onChange(of: viewModel.savedFilters) { oldValue, newValue in

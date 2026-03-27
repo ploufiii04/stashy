@@ -130,7 +130,7 @@ class StashDBViewModel: ObservableObject {
         case groups = "GROUPS"
         case sceneMarkers = "SCENE_MARKERS"
         case unknown = "UNKNOWN"
-        
+
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
             let string = try container.decode(String.self).uppercased()
@@ -365,7 +365,7 @@ class StashDBViewModel: ObservableObject {
             case .ratingDesc, .ratingAsc: return "rating"
             case .createdAtDesc, .createdAtAsc: return "created_at"
             case .updatedAtDesc, .updatedAtAsc: return "updated_at"
-            case .imageCountDesc, .imageCountAsc: return "image_count"
+            case .imageCountDesc, .imageCountAsc: return "images_count"
             case .random: return "random"
             }
         }
@@ -2832,9 +2832,13 @@ class StashDBViewModel: ObservableObject {
         // Use saved filter if provided
         if let savedFilter = filter {
             if let dict = savedFilter.filterDict {
+                print("🔍 Gallery filter (filterDict) RAW: \(dict)")
                 galleryFilter = sanitizeFilter(dict)
+                print("🔍 Gallery filter (filterDict) sanitized: \(galleryFilter)")
             } else if let obj = savedFilter.object_filter, let objDict = obj.value as? [String: Any] {
+                print("🔍 Gallery filter (object_filter) RAW: \(objDict)")
                 galleryFilter = sanitizeFilter(objDict)
+                print("🔍 Gallery filter (object_filter) sanitized: \(galleryFilter)")
             }
         }
         
@@ -3160,7 +3164,7 @@ class StashDBViewModel: ObservableObject {
     func deleteImage(imageId: String, completion: @escaping (Bool) -> Void) {
         let mutation = """
         {
-          "query": "mutation { imageDestroy(input: { id: \\\"\(imageId)\\\" }) }"
+          "query": "mutation { imageDestroy(input: { id: \\"\(imageId)\\" }) }"
         }
         """
 
@@ -4189,7 +4193,7 @@ struct Scene: Codable, Identifiable, Equatable {
             if url.query?.lowercased().contains("apikey=") == true { return url }
             var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
             var items = comps?.queryItems ?? []
-            items.append(URLQueryItem(name: "apikey", value: key))
+            items.append(URLQueryItem(name: "apikey", value: key.trimmingCharacters(in: .whitespacesAndNewlines)))
             comps?.queryItems = items
             return comps?.url ?? url
         }
@@ -4326,7 +4330,7 @@ struct Scene: Codable, Identifiable, Equatable {
         guard let config = ServerConfigManager.shared.activeConfig, let key = config.secureApiKey, !key.isEmpty else { return url }
         var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         var items = comps?.queryItems ?? []
-        items.append(URLQueryItem(name: "apikey", value: key))
+        items.append(URLQueryItem(name: "apikey", value: key.trimmingCharacters(in: .whitespacesAndNewlines)))
         comps?.queryItems = items
         return comps?.url ?? url
     }
@@ -4341,7 +4345,7 @@ struct Scene: Codable, Identifiable, Equatable {
         guard let config = ServerConfigManager.shared.activeConfig, let key = config.secureApiKey, !key.isEmpty else { return url }
         var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         var items = comps?.queryItems ?? []
-        items.append(URLQueryItem(name: "apikey", value: key))
+        items.append(URLQueryItem(name: "apikey", value: key.trimmingCharacters(in: .whitespacesAndNewlines)))
         comps?.queryItems = items
         return comps?.url ?? url
     }
@@ -4401,7 +4405,7 @@ struct Scene: Codable, Identifiable, Equatable {
             if url.query?.lowercased().contains("apikey=") == true { return url }
             var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
             var items = comps?.queryItems ?? []
-            items.append(URLQueryItem(name: "apikey", value: key))
+            items.append(URLQueryItem(name: "apikey", value: key.trimmingCharacters(in: .whitespacesAndNewlines)))
             comps?.queryItems = items
             return comps?.url ?? url
         }
@@ -6069,9 +6073,16 @@ extension StashDBViewModel {
 #if !os(tvOS)
 class HandyManager: ObservableObject {
     static let shared = HandyManager()
-    
+
     @AppStorage("handy_connection_key") var connectionKey: String = ""
     @AppStorage("handy_public_url") var publicUrl: String = ""
+    @AppStorage("handy_device_type") var deviceType: String = "The Handy" // "The Handy" or "Oh."
+    /// HAMP: stroke range 0–100 (min position and max position, symmetric around 50)
+    @AppStorage("handy_stroke_length") var strokeLength: Double = 100.0  // 0–100%
+    /// HAMP: max velocity cap 0–100%
+    @AppStorage("handy_max_velocity") var maxVelocity: Double = 100.0    // 0–100%
+    /// HVP (Oh.): max amplitude cap 0–1
+    @AppStorage("handy_max_amplitude") var maxAmplitude: Double = 1.0    // 0–1
     @AppStorage("handy_enabled") var isEnabled: Bool = false {
         didSet {
             if !isEnabled && isConnected {
@@ -6080,29 +6091,132 @@ class HandyManager: ObservableObject {
             }
         }
     }
+
     @Published var isConnected: Bool = false
-    @Published var isAudioMode: Bool = false
-    @Published var isSyncing: Bool = false
-    @Published var statusMessage: String = "Not Configured"
-    
-    private let baseURL = "https://www.handyfeeling.com/api/handy/v2"
-    private var cancellables = Set<AnyCancellable>()
-    private var audioCancellable: AnyCancellable?
-    
-    private var lastAudioCommandTime: Date = .distantPast
-    
-    private var serverTimeOffset: Int64 = 0
-    private var lastSyncTime: Date?
-    
-    private init() {
-        if !connectionKey.isEmpty {
-            checkConnection()
+    @Published var isStashSyncMode: Bool = false {
+        didSet {
+            if isStashSyncMode {
+                isSyncing = false
+                setupStashSync()
+            } else {
+                stashCancellable = nil
+                // Send explicit stop before clearing state
+                if isConnected {
+                    if deviceType == "Oh." {
+                        sendRequest(path: "/hvp/stop", method: "PUT") { _ in }
+                    } else {
+                        sendRequest(path: "/hamp/stop", method: "PUT") { _ in }
+                    }
+                }
+                hampIsRunning = false
+                if !isSyncing { stop() }
+            }
         }
     }
-    
-    private var lastHandyOscillation = false
-    
-    
+    @Published var isSyncing: Bool = false
+    @Published var isPlayingScript: Bool = false
+    @Published var statusMessage: String = "Not Configured"
+
+    // API v3
+    private let baseURL = "https://www.handyfeeling.com/api/handy-rest/v3"
+    private let handyApiKey = "Wu8AA1nDwSJl_P_pQiCdQkOnjNQjLVBL"
+
+    private var cancellables = Set<AnyCancellable>()
+    private var stashCancellable: AnyCancellable?
+    private var currentTask: URLSessionDataTask?
+    private var lastAudioCommandTime: Date = .distantPast
+
+    private init() {
+        if !connectionKey.isEmpty { checkConnection() }
+    }
+
+    // MARK: - StashSync (video-reactive mode)
+
+    private func setupStashSync() {
+        let modeStr = deviceType == "Oh." ? "HVP" : "HAMP"
+        print("📲 Handy v3: setupStashSync() — starting \(modeStr)")
+        // Put device in HAMP/HVP mode (mode2 = 0) then start motion
+        sendRequest(path: "/mode2", method: "PUT", params: ["mode": 0]) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let data):
+                let body = String(data: data, encoding: .utf8) ?? "(empty)"
+                print("📲 Handy /mode2 response: \(body)")
+            case .failure(let e):
+                print("❌ Handy /mode2 failed: \(e.localizedDescription)")
+            }
+            if self.deviceType == "Oh." {
+                self.sendRequest(path: "/hvp/start", method: "PUT") { r in
+                    if case .success(let d) = r { print("📲 Handy /hvp/start: \(String(data: d, encoding: .utf8) ?? "")") }
+                    else if case .failure(let e) = r { print("❌ Handy /hvp/start failed: \(e)") }
+                }
+            } else {
+                // Set stroke range before starting
+                let halfStroke = self.strokeLength / 2.0
+                let slideMin = max(0, 50.0 - halfStroke)
+                let slideMax = min(100, 50.0 + halfStroke)
+                self.sendRequest(path: "/hamp/slide", method: "PUT", params: ["min": slideMin, "max": slideMax]) { _ in }
+                self.sendRequest(path: "/hamp/start", method: "PUT") { r in
+                    if case .success(let d) = r { print("📲 Handy /hamp/start: \(String(data: d, encoding: .utf8) ?? "")") }
+                    else if case .failure(let e) = r { print("❌ Handy /hamp/start failed: \(e)") }
+                }
+            }
+        }
+
+        #if !os(tvOS)
+        stashCancellable = StashSyncManager.shared.$currentIntensity
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] intensity in
+                guard let self = self else { return }
+                if !self.isStashSyncMode || !self.isConnected || !self.isEnabled {
+                    if intensity > 0.05 {
+                        print("📲 Handy StashSync BLOCKED — isStashSyncMode:\(self.isStashSyncMode) isConnected:\(self.isConnected) isEnabled:\(self.isEnabled) intensity:\(intensity)")
+                    }
+                    return
+                }
+                if Date().timeIntervalSince(self.lastAudioCommandTime) < 0.05 { return }
+                self.setStashSyncVelocity(intensity)
+                self.lastAudioCommandTime = Date()
+            }
+        #endif
+    }
+
+    private var hampIsRunning: Bool = false
+
+    private func setStashSyncVelocity(_ intensity: Float) {
+        if deviceType == "Oh." {
+            if intensity <= 0.05 {
+                sendRequest(path: "/hvp/stop", method: "PUT") { _ in }
+            } else {
+                let amplitude = Double(max(0.0, min(maxAmplitude, Double(intensity) * maxAmplitude)))
+                sendRequest(path: "/hvp/state", method: "PUT", params: [
+                    "amplitude": amplitude,
+                    "frequency": 75,
+                    "position": 50
+                ]) { _ in }
+            }
+        } else {
+            // HAMP: velocity scaled by maxVelocity cap
+            let rawVelocity = Double(intensity) * (maxVelocity / 100.0)
+            if intensity <= 0.05 {
+                if hampIsRunning {
+                    sendRequest(path: "/hamp/velocity", method: "PUT", params: ["velocity": 0.0]) { _ in }
+                    sendRequest(path: "/hamp/stop", method: "PUT") { _ in }
+                    hampIsRunning = false
+                }
+            } else {
+                let velocity = max(0.01, min(maxVelocity / 100.0, rawVelocity))
+                sendRequest(path: "/hamp/velocity", method: "PUT", params: ["velocity": velocity]) { _ in }
+                if !hampIsRunning {
+                    self.sendRequest(path: "/hamp/start", method: "PUT") { _ in }
+                    self.hampIsRunning = true
+                }
+            }
+        }
+    }
+
+    // MARK: - Connection
+
     func checkConnection(completion: ((Bool) -> Void)? = nil) {
         guard !connectionKey.isEmpty else {
             statusMessage = "No connection key"
@@ -6110,306 +6224,234 @@ class HandyManager: ObservableObject {
             completion?(false)
             return
         }
-        
-        var request = URLRequest(url: URL(string: "\(baseURL)/connected")!)
-        request.setValue(connectionKey, forHTTPHeaderField: "X-Connection-Key")
-        
-        URLSession.shared.dataTaskPublisher(for: request)
-            .map { $0.data }
-            .decode(type: HandyConnectedResponse.self, decoder: JSONDecoder())
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { completionStatus in
-                if case .failure(let error) = completionStatus {
-                    self.statusMessage = "Offline"
-                    print("❌ Handy: Connection failed: \(error.localizedDescription)")
+
+        sendRequest(path: "/connected") { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch result {
+                case .success(let data):
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let resultObj = json["result"] as? [String: Any],
+                       let connected = resultObj["connected"] as? Bool {
+                        self.isConnected = connected
+                        self.statusMessage = connected ? "Connected" : "Device Offline"
+                        print("📲 Handy v3: connected=\(connected)")
+                        completion?(connected)
+                    } else {
+                        self.isConnected = false
+                        self.statusMessage = "Offline"
+                        completion?(false)
+                    }
+                case .failure(let error):
                     self.isConnected = false
+                    self.statusMessage = "Offline"
+                    print("❌ Handy v3: checkConnection failed: \(error.localizedDescription)")
                     completion?(false)
                 }
-            }, receiveValue: { response in
-                self.isConnected = response.connected
-                self.statusMessage = response.connected ? "Connected" : "Device Offline"
-                if response.connected {
-                    self.syncServerTime { _ in }
-                }
-                completion?(response.connected)
-            })
-            .store(in: &cancellables)
+            }
+        }
     }
+
+    // MARK: - Funscript / HSSP
 
     func setupScene(funscriptURL: URL, at seconds: Double? = nil) {
-        print("📲 Handy: Setting up scene with URL: \(funscriptURL.absoluteString)")
-        
-        // Check if URL is local
+        print("📲 Handy v3: setupScene \(funscriptURL.absoluteString)")
+        isStashSyncMode = false
+
         let urlString = funscriptURL.absoluteString
-        if urlString.contains("127.0.0.1") || urlString.contains("localhost") || urlString.contains("192.168.") || urlString.contains("10.") {
-            print("⚠️ Handy: Warning - Funscript URL appears to be local. The Handy Cloud API may not be able to reach it.")
-            statusMessage = "Local URL Warning"
+        let isLocal = urlString.contains("127.0.0.1") || urlString.contains("localhost")
+            || urlString.contains("192.168.") || urlString.contains("10.")
+
+        guard isConnected else {
+            checkConnection { [weak self] connected in
+                if connected { self?.setupScene(funscriptURL: funscriptURL, at: seconds) }
+                else { DispatchQueue.main.async { self?.statusMessage = "Connect Device First" } }
+            }
+            return
         }
 
-        guard isConnected else { 
-            print("📲 Handy: Device not connected, checking connection first...")
-            checkConnection { [weak self] connected in
-                if connected { 
-                    self?.setupScene(funscriptURL: funscriptURL, at: seconds) 
-                } else {
-                    self?.statusMessage = "Connect Device First"
-                }
-            }
-            return 
-        }
-        
         isSyncing = false
         statusMessage = "Setting up sync..."
-        
-        // Always sync time before HSSP setup to ensure offset is fresh
-        syncServerTime { [weak self] _ in
-            guard let self = self else { return }
-            
-            // 1. Ensure mode is HSSP (1)
-            self.setMode(mode: 1) { [weak self] success in
-                guard let self = self else { return }
-                if success {
-                    // 2. Setup HSSP with script
-                    self.setupHSSP(url: funscriptURL, at: seconds)
-                } else {
-                    self.statusMessage = "Mode Error"
-                }
-            }
-        }
-    }
-    
-    private func setMode(mode: Int, completion: @escaping (Bool) -> Void) {
-        var request = URLRequest(url: URL(string: "\(baseURL)/mode")!)
-        request.httpMethod = "PUT"
-        request.setValue(connectionKey, forHTTPHeaderField: "X-Connection-Key")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body = ["mode": mode]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            let success = (response as? HTTPURLResponse)?.statusCode == 200
-            DispatchQueue.main.async {
-                completion(success)
-            }
-        }.resume()
-    }
-    
-    private func setupHSSP(url: URL, at seconds: Double?) {
-        // 1. If URL is local, we must use the Upload Bridge
-        let urlString = url.absoluteString
-        if urlString.contains("127.0.0.1") || urlString.contains("localhost") || urlString.contains("192.168.") || urlString.contains("10.") {
-            print("📲 Handy: Local URL detected. Initiating Direct Upload Bridge...")
+
+        if isLocal {
             statusMessage = "Uploading script..."
-            
-            uploadToHandyCloud(localUrl: url) { [weak self] publicUrl in
-                guard let self = self else { return }
+            uploadToHandyCloud(localUrl: funscriptURL) { [weak self] publicUrl in
                 if let publicUrl = publicUrl {
-                    print("📲 Handy: Upload bridge successful. Public URL: \(publicUrl.absoluteString)")
-                    self.executeHSSPSetup(url: publicUrl, at: seconds)
+                    self?.executeHSSPSetup(url: publicUrl, at: seconds)
                 } else {
-                    print("❌ Handy: Upload bridge failed.")
-                    DispatchQueue.main.async {
-                        self.statusMessage = "Upload Failed"
-                    }
+                    DispatchQueue.main.async { self?.statusMessage = "Upload Failed" }
                 }
             }
             return
         }
-        
-        // 2. If we have a public URL override, use it (fallback)
-        if !publicUrl.isEmpty {
-            if let publicBase = URL(string: publicUrl),
-               var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-                comps.host = publicBase.host
-                comps.scheme = publicBase.scheme
-                comps.port = publicBase.port
-                
-                if let newUrl = comps.url {
-                    print("📲 Handy: Swapping for public override: \(newUrl.absoluteString)")
-                    executeHSSPSetup(url: newUrl, at: seconds)
-                    return
-                }
+
+        // Public URL override
+        if !publicUrl.isEmpty,
+           let publicBase = URL(string: publicUrl),
+           var comps = URLComponents(url: funscriptURL, resolvingAgainstBaseURL: false) {
+            comps.host = publicBase.host
+            comps.scheme = publicBase.scheme
+            comps.port = publicBase.port
+            if let newUrl = comps.url {
+                executeHSSPSetup(url: newUrl, at: seconds)
+                return
             }
         }
 
-        // 3. Normal public URL
-        executeHSSPSetup(url: url, at: seconds)
+        executeHSSPSetup(url: funscriptURL, at: seconds)
     }
-    
-    private func executeHSSPSetup(url: URL, at seconds: Double?) {
-        print("📲 Handy: Sending HSSP setup request for URL: \(url.absoluteString)")
-        var request = URLRequest(url: URL(string: "\(baseURL)/hssp/setup")!)
-        request.httpMethod = "PUT"
-        request.setValue(connectionKey, forHTTPHeaderField: "X-Connection-Key")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body = ["url": url.absoluteString]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            let httpResponse = response as? HTTPURLResponse
-            let success = httpResponse?.statusCode == 200
-            
-            if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                print("📲 Handy: HSSP Setup Response (\(httpResponse?.statusCode ?? 0)): \(responseString)")
-            }
 
-            DispatchQueue.main.async {
-                self.isSyncing = success
-                if success {
-                    print("✅ Handy: HSSP Setup Successful")
-                    if let seconds = seconds {
-                        self.play(at: seconds)
+    private func executeHSSPSetup(url: URL, at seconds: Double?) {
+        print("📲 Handy v3: HSSP setup → \(url.absoluteString)")
+        sendRequest(path: "/mode2", method: "PUT", params: ["mode": 1]) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .failure:
+                DispatchQueue.main.async { self.statusMessage = "Mode Error" }
+                return
+            case .success:
+                self.sendRequest(path: "/hssp/setup", method: "PUT", params: ["url": url.absoluteString, "timeout": 5000]) { [weak self] result in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .success(let data):
+                            if let str = String(data: data, encoding: .utf8) {
+                                print("📲 Handy v3: HSSP setup response: \(str)")
+                            }
+                            self.isSyncing = true
+                            self.statusMessage = "Synced & Ready"
+                            print("✅ Handy v3: HSSP setup successful")
+                            if let seconds = seconds { self.play(at: seconds) }
+                        case .failure(let error):
+                            self.statusMessage = "Sync Failed"
+                            print("❌ Handy v3: HSSP setup failed: \(error.localizedDescription)")
+                        }
                     }
-                } else {
-                    print("❌ Handy: HSSP Setup Failed")
                 }
-                self.statusMessage = success ? "Synced & Ready" : "Sync Failed (\(httpResponse?.statusCode ?? 0))"
             }
-        }.resume()
+        }
     }
-    
+
     private func uploadToHandyCloud(localUrl: URL, completion: @escaping (URL?) -> Void) {
-        // Phase 1: Download from Stash
-        print("📲 Handy Bridge: Downloading script from \(localUrl.absoluteString)...")
-        URLSession.shared.dataTask(with: localUrl) { data, response, error in
+        print("📲 Handy v3 Bridge: downloading \(localUrl.absoluteString)...")
+        URLSession.shared.dataTask(with: localUrl) { data, _, error in
             guard let data = data, error == nil else {
-                print("❌ Handy Bridge: Failed to download script: \(error?.localizedDescription ?? "no data")")
+                let errMsg = error?.localizedDescription ?? "no data"
+                print("❌ Handy v3 Bridge: download failed: \(errMsg)")
                 completion(nil)
                 return
             }
-            
-            // Phase 2: Upload to Handy Cloud
-            // The API v2 endpoint for CSV/JSON upload is https://www.handfeeling.com/api/sync/upload
-            // It expects a multipart form-data request
-            print("📲 Handy Bridge: Uploading \(data.count) bytes to Handy Cloud...")
-            
             let boundary = "Boundary-\(UUID().uuidString)"
             var request = URLRequest(url: URL(string: "https://www.handyfeeling.com/api/sync/upload")!)
             request.httpMethod = "POST"
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-            
             var body = Data()
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"syncFile\"; filename=\"script.funscript\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: application/json\r\n\r\n".data(using: .utf8)!)
             body.append(data)
             body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-            
             request.httpBody = body
-            
-            URLSession.shared.dataTask(with: request) { data, response, error in
-                guard let data = data, let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                    print("❌ Handy Bridge: Upload failed (\((response as? HTTPURLResponse)?.statusCode ?? 0))")
+            URLSession.shared.dataTask(with: request) { data, response, _ in
+                guard let data = data,
+                      (response as? HTTPURLResponse)?.statusCode == 200,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let urlStr = json["url"] as? String,
+                      let remoteUrl = URL(string: urlStr) else {
+                    print("❌ Handy v3 Bridge: upload failed")
                     completion(nil)
                     return
                 }
-                
-                // Response is usually JSON with "url"
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let remoteUrlString = json["url"] as? String,
-                   let remoteUrl = URL(string: remoteUrlString) {
-                    completion(remoteUrl)
-                } else {
-                    print("❌ Handy Bridge: Could not parse remote URL from response")
-                    completion(nil)
-                }
+                completion(remoteUrl)
             }.resume()
         }.resume()
     }
-    
+
+    // MARK: - Playback Control
+
     func play(at seconds: Double) {
-        guard isConnected && isSyncing else { 
-            print("📲 Handy: Play ignored - Connected: \(isConnected), Syncing: \(isSyncing)")
-            return 
-        }
-        
-        let serverTime = estimatedServerTime
-        var request = URLRequest(url: URL(string: "\(self.baseURL)/hssp/play")!)
-        request.httpMethod = "PUT"
-        request.setValue(self.connectionKey, forHTTPHeaderField: "X-Connection-Key")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let startTimeMs = Int(seconds * 1000)
-        let body: [String: Any] = [
-            "estimatedServerTime": serverTime,
-            "startTime": startTimeMs
-        ]
-        
-        print("📲 Handy: Sending Play - estimatedServerTime: \(serverTime), startTime: \(startTimeMs)ms")
-        
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                let errorData = data != nil ? String(data: data!, encoding: .utf8) ?? "" : ""
-                print("❌ Handy: Play failed (\(httpResponse.statusCode)): \(errorData)")
-            } else if error != nil {
-                print("❌ Handy: Play network error: \(error?.localizedDescription ?? "unknown")")
-            } else {
-                print("✅ Handy: Play command acknowledged")
+        isPlayingScript = true
+        guard isConnected, isSyncing else { return }
+
+        sendRequest(path: "/hssp/play", method: "PUT", params: [
+            "startTime": Int(seconds * 1000),
+            "serverTime": Int64(Date().timeIntervalSince1970 * 1000)
+        ]) { result in
+            switch result {
+            case .success: print("✅ Handy v3: play acknowledged")
+            case .failure(let e): print("❌ Handy v3: play failed: \(e.localizedDescription)")
             }
-        }.resume()
-    }
-    
-    private var estimatedServerTime: Int64 {
-        return Int64(Date().timeIntervalSince1970 * 1000) + serverTimeOffset
-    }
-    
-    private func syncServerTime(completion: @escaping (Bool) -> Void) {
-        let startTime = Date()
-        fetchServerTime { [weak self] serverTime in
-            guard let self = self, let serverTime = serverTime else {
-                completion(false)
-                return
-            }
-            let endTime = Date()
-            let rtt = Int64(endTime.timeIntervalSince(startTime) * 1000) / 2
-            let localTimeAtServerTime = Int64(endTime.timeIntervalSince1970 * 1000) - rtt
-            self.serverTimeOffset = serverTime - localTimeAtServerTime
-            self.lastSyncTime = Date()
-            print("📲 Handy: Server time synced. Offset: \(self.serverTimeOffset)ms, RTT: \(rtt*2)ms")
-            completion(true)
         }
     }
-    
+
     func pause() {
+        isPlayingScript = false
+
+        if isStashSyncMode {
+            setStashSyncVelocity(0)
+        }
+
         guard isConnected && isSyncing else { return }
-        
-        print("📲 Handy: Pause command")
-        var request = URLRequest(url: URL(string: "\(baseURL)/hssp/stop")!)
-        request.httpMethod = "PUT"
-        request.setValue(connectionKey, forHTTPHeaderField: "X-Connection-Key")
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                 print("❌ Handy: Pause failed (\(httpResponse.statusCode))")
-            } else {
-                 print("✅ Handy: Pause command acknowledged")
-            }
-        }.resume()
+        sendRequest(path: "/hssp/stop", method: "PUT") { result in
+            if case .failure(let e) = result { print("❌ Handy v3: pause failed: \(e.localizedDescription)") }
+            else { print("✅ Handy v3: pause acknowledged") }
+        }
     }
-    
+
     func stop() {
         pause()
         isSyncing = false
     }
-    
-    private func fetchServerTime(completion: @escaping (Int64?) -> Void) {
-        let request = URLRequest(url: URL(string: "\(baseURL)/servertime")!)
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let data = data,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let time = json["serverTime"] as? Int64 {
-                completion(time)
-            } else {
-                completion(nil)
-            }
-        }.resume()
-    }
-}
 
-struct HandyConnectedResponse: Codable {
-    let connected: Bool
+    // MARK: - Generic v3 Request
+
+    private func sendRequest(path: String, method: String = "GET", params: [String: Any] = [:], completion: @escaping (Result<Data, Error>) -> Void = { _ in }) {
+        guard !connectionKey.isEmpty else { return }
+
+        if path == "/hvp/state" || path == "/hamp/velocity" {
+            currentTask?.cancel()
+        }
+
+        var urlString = baseURL + path
+        if method == "GET", !params.isEmpty, var comps = URLComponents(string: urlString) {
+            comps.queryItems = params.map { URLQueryItem(name: $0.key, value: "\($0.value)") }
+            urlString = comps.url?.absoluteString ?? urlString
+        }
+
+        guard let url = URL(string: urlString) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 7.0
+        request.addValue(connectionKey, forHTTPHeaderField: "X-Connection-Key")
+        request.addValue(handyApiKey, forHTTPHeaderField: "X-Api-Key")
+
+        if method != "GET", !params.isEmpty {
+            request.httpBody = try? JSONSerialization.data(withJSONObject: params)
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                if (error as NSError).code == NSURLErrorCancelled { return }
+                print("❌ Handy v3: \(method) \(path) error: \(error.localizedDescription)")
+                completion(.failure(error))
+                return
+            }
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                let msg = data.flatMap { String(data: $0, encoding: .utf8) } ?? "unknown"
+                if path != "/hvp/state" && path != "/hamp/velocity" {
+                    print("❌ Handy v3: \(method) \(path) [\(http.statusCode)] \(msg)")
+                }
+                completion(.failure(NSError(domain: "HandyManager", code: http.statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: msg])))
+                return
+            }
+            completion(.success(data ?? Data()))
+        }
+
+        if path == "/hvp/state" || path == "/hamp/velocity" { currentTask = task }
+        task.resume()
+    }
 }
 
 class ButtplugManager: ObservableObject {
@@ -6431,18 +6473,21 @@ class ButtplugManager: ObservableObject {
     private var webSocket: URLSessionWebSocketTask?
     private var messageId: Int = 1
     
-    @Published var isAudioMode: Bool = false {
+    @Published var isStashSyncMode: Bool = false {
         didSet {
-            if isAudioMode {
-                isSyncing = false // EXCLUSIVITY
-                setupAudioSync()
+            if isStashSyncMode {
+                isSyncing = false
+                setupStashSync()
             } else {
-                audioCancellable = nil
-                stopAllDevices()
+                stashCancellable = nil
+                // Only stop if we are not switching to Funscript (isSyncing) mode
+                if !isSyncing {
+                    stopAllDevices()
+                }
             }
         }
     }
-    private var audioCancellable: AnyCancellable?
+    private var stashCancellable: AnyCancellable?
     private var lastAudioCommandTime: Date = .distantPast
     
     // Funscript Sync
@@ -6450,28 +6495,25 @@ class ButtplugManager: ObservableObject {
     private var syncTimer: CADisplayLink?
     private var lastPlaybackTime: Double = 0
     private var lastCommandSentAt: Double = 0
-    private var isPlayingScript: Bool = false
+    @Published var isPlayingScript: Bool = false
     @Published var isSyncing: Bool = false
     
     private init() {
         // Optional: Auto-connect if desirable
     }
     
-    private func setupAudioSync() {
-        print("📱 Buttplug: setupAudioSync() initiated with currentLevel subscription")
-        audioCancellable = AudioAnalysisManager.shared.$currentLevel
+    
+    private func setupStashSync() {
+        print("📱 Buttplug: setupStashSync() initiated")
+        #if !os(tvOS)
+        stashCancellable = StashSyncManager.shared.$currentIntensity
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] level in
-                guard let self = self, self.isAudioMode, self.isConnected, self.isEnabled, !self.devices.isEmpty else { return }
+            .sink { [weak self] intensity in
+                guard let self = self, self.isStashSyncMode, self.isConnected, self.isEnabled, !self.devices.isEmpty else { return }
                 
-                let threshold = Float(0.32 * pow(0.04, AudioAnalysisManager.shared.sensitivity))
-                let isActive = level > threshold
-                
-                // Intiface can handle higher frequency, let's do 20Hz
                 if Date().timeIntervalSince(self.lastAudioCommandTime) < 0.05 { return }
                 
-                if isActive {
-                    let intensity = level * Float(AudioAnalysisManager.shared.maxIntensity)
+                if intensity > 0.05 {
                     self.sendMovement(position: Double(intensity * 100), duration: 50)
                     self.lastAudioCommandTime = Date()
                 } else if Date().timeIntervalSince(self.lastAudioCommandTime) > 0.3 {
@@ -6479,6 +6521,7 @@ class ButtplugManager: ObservableObject {
                     self.lastAudioCommandTime = Date()
                 }
             }
+        #endif
     }
     
     func connect() {
@@ -6549,6 +6592,8 @@ class ButtplugManager: ObservableObject {
     // MARK: - Funscript Sync Logic
     
     func setupScene(funscriptURL: URL, at seconds: Double? = nil) {
+        isStashSyncMode = false // EXCLUSIVITY
+        
         if !isConnected {
             connect()
             // We'll return and wait for connection, user can tap again or we could improve this later
@@ -6564,7 +6609,7 @@ class ButtplugManager: ObservableObject {
                 DispatchQueue.main.async {
                     self.currentScript = script
                     self.isSyncing = true
-                    self.isAudioMode = false // EXCLUSIVITY
+                    self.isStashSyncMode = false // EXCLUSIVITY
                     self.statusMessage = "Script Loaded"
                     print("✅ Buttplug: Loaded script with \(script.actions?.count ?? 0) actions")
                     if let seconds = seconds {
@@ -6581,16 +6626,20 @@ class ButtplugManager: ObservableObject {
     }
     
     func play(at seconds: Double) {
-        guard isConnected, isSyncing, currentScript != nil else { return }
-        
-        lastPlaybackTime = seconds
-        lastCommandSentAt = 0 // Reset to force immediate command
         isPlayingScript = true
+        guard isConnected, (isSyncing || isStashSyncMode) else {
+            print("📱 Buttplug: Play ignored - Connected: \(isConnected), Mode: \(isSyncing ? "Sync" : "Stash")")
+            return
+        }
         
-        // Use CADisplayLink for high-precision sync
-        syncTimer?.invalidate()
-        syncTimer = CADisplayLink(target: self, selector: #selector(updateSync))
-        syncTimer?.add(to: .main, forMode: .common)
+        if isSyncing, currentScript != nil {
+            lastPlaybackTime = seconds
+            lastCommandSentAt = 0
+            
+            syncTimer?.invalidate()
+            syncTimer = CADisplayLink(target: self, selector: #selector(updateSync))
+            syncTimer?.add(to: .main, forMode: .common)
+        }
     }
     
     func pause() {
@@ -6652,9 +6701,9 @@ class ButtplugManager: ObservableObject {
         for device in devices {
             // Filter LoveSpouse devices from Buttplug if native is handling them or they are deactivated
             if device.name.lowercased().contains("lovespouse") {
-                if isAudioMode {
-                    // In Audio mode, check if LoveSpouse card button is ON
-                    if !LoveSpouseManager.shared.isAudioMode { continue }
+                if isStashSyncMode {
+                    // In StashSync mode, check if LoveSpouse card button is ON
+                    if !LoveSpouseManager.shared.isStashSyncMode { continue }
                 } else {
                     // In Funscript mode, check if LoveSpouse global toggle is ON
                     if !LoveSpouseManager.shared.isEnabled { continue }
@@ -6805,20 +6854,21 @@ class LoveSpouseManager: NSObject, ObservableObject {
     @Published var statusMessage: String = "Not Connected"
     @Published var isAdvertising: Bool = false
     
-    @Published var isAudioMode: Bool = false {
+    @Published var isStashSyncMode: Bool = false {
         didSet {
-            if isAudioMode {
-                isSyncing = false // EXCLUSIVITY
-                setupAudioSync()
+            if isStashSyncMode {
+                isSyncing = false
+                setupStashSync()
             } else {
-                audioCancellable = nil
-                // Force immediate stop
-                selectProgram(0)
-                print("📱 LoveSpouse: Audio Mode Disabled, sending STOP")
+                stashCancellable = nil
+                // Only stop if we are not switching to Funscript (isSyncing) mode
+                if !isSyncing {
+                    selectProgram(0)
+                }
             }
         }
     }
-    private var audioCancellable: AnyCancellable?
+    private var stashCancellable: AnyCancellable?
     private var lastAudioCommandTime: Date = .distantPast
 
     // MARK: - Funscript Sync
@@ -6826,7 +6876,7 @@ class LoveSpouseManager: NSObject, ObservableObject {
     private var syncTimer: CADisplayLink?
     private var lastPlaybackTime: Double = 0
     private var lastCommandSentAt: Double = 0
-    private var isPlayingScript: Bool = false
+    @Published var isPlayingScript: Bool = false
 
     // MARK: - Private
     private var peripheralManager: CBPeripheralManager!
@@ -6834,31 +6884,26 @@ class LoveSpouseManager: NSObject, ObservableObject {
     private let bleQueue = DispatchQueue(label: "com.stashy.lovespouse", qos: .userInitiated)
     private var isAdvertisingActive = false
     
-    private func setupAudioSync() {
-        print("📱 LoveSpouse: setupAudioSync() initiated with currentLevel subscription")
-        audioCancellable = AudioAnalysisManager.shared.$currentLevel
+    
+    private func setupStashSync() {
+        print("📱 LoveSpouse: setupStashSync() initiated")
+        #if !os(tvOS)
+        stashCancellable = StashSyncManager.shared.$currentIntensity
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] level in
-                guard let self = self, self.isAudioMode, self.isConnected, self.isEnabled else { return }
-                
-                let threshold = Float(0.32 * pow(0.04, AudioAnalysisManager.shared.sensitivity))
-                let isActive = level > threshold
-                
-                // Love Spouse has high latency, limit to 2Hz
+            .sink { [weak self] intensity in
+                guard let self = self, self.isStashSyncMode, self.isConnected, self.isEnabled else { return }
+
                 if Date().timeIntervalSince(self.lastAudioCommandTime) < 0.4 { return }
                 
-                if isActive {
-                    let intensity = level * Float(AudioAnalysisManager.shared.maxIntensity)
-                    // Map intensity 0-1 to speed 1-3
-                    let speed = Int(ceil(intensity * 3))
-                    let cappedSpeed = min(3, max(1, speed))
-                    self.selectProgram(cappedSpeed)
+                if intensity > 0.05 {
+                    self.setLevel(Double(intensity * 100))
                     self.lastAudioCommandTime = Date()
                 } else if Date().timeIntervalSince(self.lastAudioCommandTime) > 0.8 {
                     self.selectProgram(0)
                     self.lastAudioCommandTime = Date()
                 }
             }
+        #endif
     }
     
     // Extracted UUID pairs [UUID5, UUID6] mapped to 0-9
@@ -6884,17 +6929,35 @@ class LoveSpouseManager: NSObject, ObservableObject {
     // MARK: - Funscript Integration
 
     func setupScene(funscriptURL: URL, at seconds: Double? = nil) {
+        isStashSyncMode = false // EXCLUSIVITY
         guard isEnabled else { return }
         statusMessage = "Loading Script..."
         URLSession.shared.dataTask(with: funscriptURL) { [weak self] data, response, error in
-            guard let self = self, let data = data else { return }
-            
+            guard let self = self else { return }
+
+            if let error = error {
+                print("❌ LoveSpouse: Network error fetching funscript: \(error)")
+                DispatchQueue.main.async { self.statusMessage = "Network Error" }
+                return
+            }
+
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                print("❌ LoveSpouse: Funscript fetch returned HTTP \(http.statusCode) for \(funscriptURL)")
+                DispatchQueue.main.async { self.statusMessage = "Script Error (\(http.statusCode))" }
+                return
+            }
+
+            guard let data = data, !data.isEmpty else {
+                print("❌ LoveSpouse: Funscript data empty for \(funscriptURL)")
+                DispatchQueue.main.async { self.statusMessage = "Script Empty" }
+                return
+            }
+
             do {
                 let script = try JSONDecoder().decode(Funscript.self, from: data)
                 DispatchQueue.main.async {
                     self.currentScript = script
                     self.isSyncing = true
-                    self.isAudioMode = false // EXCLUSIVITY
                     self.statusMessage = "Script Loaded"
                     print("✅ LoveSpouse: Loaded script with \(script.actions?.count ?? 0) actions")
                     if let seconds = seconds {
@@ -6903,32 +6966,36 @@ class LoveSpouseManager: NSObject, ObservableObject {
                 }
             } catch {
                 print("❌ LoveSpouse: Failed to parse Funscript: \(error)")
-                DispatchQueue.main.async {
-                    self.statusMessage = "Script Error"
+                if let raw = String(data: data, encoding: .utf8)?.prefix(200) {
+                    print("❌ LoveSpouse: Raw response: \(raw)")
                 }
+                DispatchQueue.main.async { self.statusMessage = "Script Error" }
             }
         }.resume()
     }
 
     func play(at seconds: Double) {
-        guard isConnected, isSyncing, currentScript != nil else { return }
-        
-        lastPlaybackTime = seconds
-        lastCommandSentAt = 0 // Reset to force immediate command
         isPlayingScript = true
+        guard isConnected, (isSyncing || isStashSyncMode) else {
+            print("📱 LoveSpouse: Play ignored - Connected: \(isConnected), Mode: \(isSyncing ? "Sync" : "Stash")")
+            return
+        }
         
-        // Use CADisplayLink for high-precision sync
-        syncTimer?.invalidate()
-        syncTimer = CADisplayLink(target: self, selector: #selector(updateSync))
-        syncTimer?.add(to: .main, forMode: .common)
+        if isSyncing, currentScript != nil {
+            lastPlaybackTime = seconds
+            lastCommandSentAt = 0
+            
+            syncTimer?.invalidate()
+            syncTimer = CADisplayLink(target: self, selector: #selector(updateSync))
+            syncTimer?.add(to: .main, forMode: .common)
+        }
     }
-
+    
     func pause() {
         isPlayingScript = false
         syncTimer?.invalidate()
         syncTimer = nil
-        // We pause the script logic, but often we want the radio to stop too
-        stopAll()
+        selectProgram(0) // RESTORED: Ensure device stops physically when video pauses
     }
     
     func stop() {

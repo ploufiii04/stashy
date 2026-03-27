@@ -20,14 +20,14 @@ struct TagsView: View {
     @State private var isSearchVisible = false
     var hideTitle: Bool = false
     
-    // Grid Setup: Flexible Columns
     @Environment(\.verticalSizeClass) var verticalSizeClass
-    
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private var columns: [GridItem] {
-        if verticalSizeClass == .compact {
-            return Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+        if horizontalSizeClass == .regular {
+            return Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
         } else {
-            return [GridItem(.adaptive(minimum: 150), spacing: 12)]
+            return [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
         }
     }
 
@@ -96,6 +96,9 @@ struct TagsView: View {
                     Menu {
                         // Random
                         Button(action: {
+                            if selectedSortOption == .random {
+                                viewModel.refreshRandomSeed()
+                            }
                             selectedSortOption = .random
                             TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.random.rawValue)
                             performSearch()
@@ -295,6 +298,13 @@ struct TagsView: View {
                 performSearch()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.tags.rawValue {
+                let newSort = StashDBViewModel.TagSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .tags) ?? "") ?? .sceneCountDesc
+                selectedSortOption = newSort
+                performSearch()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
             selectedFilter = nil
             performSearch()
@@ -368,49 +378,68 @@ struct TagsView: View {
     }
 }
 
-// Simple Card View for a Tag
 struct TagCardView: View {
     let tag: Tag
     @ObservedObject var appearanceManager = AppearanceManager.shared
-    
+
+    private var hasCustomImage: Bool {
+        tag.imagePath != nil && tag.imagePath?.contains("default") != true
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            // Count Box (Square, flush left, top, bottom)
-            if let count = tag.sceneCount {
-                 ZStack {
-                     appearanceManager.tintColor
-                     
-                     Text("\(count)")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(4)
-                        .minimumScaleFactor(0.5)
-                 }
-                 .frame(width: 48, height: 48)
-            } else {
-                // Small margin if no count box to prevent text from sticking to the edge
-                Spacer().frame(width: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            // Image Block (Top)
+            Color.studioHeaderGray
+                .aspectRatio(2.2, contentMode: .fit)
+                .overlay(
+                    Group {
+                        if hasCustomImage {
+                            TagImageView(tag: tag)
+                        } else {
+                            Image(systemName: "number")
+                                .font(.system(size: 32, weight: .bold))
+                                .foregroundColor(appearanceManager.tintColor)
+                        }
+                    }
+                )
+                .clipped()
+
+            // Name & Count Area (Below)
+            HStack(spacing: 8) {
+                Text(tag.name)
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    if let sceneCount = tag.sceneCount, sceneCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "film")
+                                .font(.system(size: 10))
+                            Text("\(sceneCount)")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                    }
+                    if let galleryCount = tag.galleryCount, galleryCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 10))
+                            Text("\(galleryCount)")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                    }
+                }
+                .foregroundColor(.secondary)
+                .layoutPriority(1)
             }
-            
-            // Name
-            Text(tag.name)
-                .font(.subheadline)
-                .fontWeight(.bold)
-                .foregroundColor(.primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .padding(.vertical, 4)
-            
-            Spacer()
-        } // Closing HStack
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 48) // Optimized height for two lines of subheadline
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
         .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
-        )
         .cardShadow()
     }
 }
@@ -430,6 +459,9 @@ struct TagDetailView: View {
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
         guard !isChangingSort else { return }
 
         isChangingSort = true
@@ -504,16 +536,23 @@ struct TagDetailView: View {
                         // Header
                         VStack(spacing: 0) {
                             HStack(alignment: .top, spacing: 16) {
-                                // Brown square with #
-                                Rectangle()
-                                    .fill(appearanceManager.tintColor)
-                                    .frame(width: 80, height: 80)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    .overlay(
-                                        Image(systemName: "number")
-                                            .font(.system(size: 32, weight: .bold))
-                                            .foregroundColor(.white)
-                                    )
+                                // Tag image or fallback #
+                                let hasCustomImage = selectedTag.imagePath != nil && selectedTag.imagePath?.contains("default") != true
+                                if hasCustomImage {
+                                    TagImageView(tag: selectedTag)
+                                        .frame(width: 80, height: 80)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                } else {
+                                    Rectangle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 80, height: 80)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            Image(systemName: "number")
+                                                .font(.system(size: 32, weight: .bold))
+                                                .foregroundColor(.white)
+                                        )
+                                }
                                 
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(alignment: .top, spacing: 8) {
@@ -772,6 +811,82 @@ struct TagDetailView: View {
                     self.isFavorite = selectedTag.favorite ?? false
                 }
             }
+        }
+    }
+}
+
+struct TagImageView: View {
+    let tag: Tag
+    @ObservedObject var appearanceManager = AppearanceManager.shared
+    @State private var imageLoadState: ImageLoadState = .loading
+
+    enum ImageLoadState {
+        case loading
+        case success(Image)
+        case successSVG(Data, String)
+        case failure
+    }
+
+    private var imageURL: URL? {
+        guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
+        return URL(string: "\(config.baseURL)/tag/\(tag.id)/image")
+    }
+
+    var body: some View {
+        Group {
+            switch imageLoadState {
+            case .loading:
+                Rectangle()
+                    .fill(appearanceManager.tintColor)
+                    .overlay(ProgressView().tint(.white))
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFill()
+            case .successSVG(let svgData, let svgString):
+                ZStack {
+                    SVGWebView(svgData: svgData, svgString: svgString)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Color.clear.contentShape(Rectangle())
+                }
+            case .failure:
+                Rectangle()
+                    .fill(appearanceManager.tintColor)
+                    .overlay(
+                        Image(systemName: "number")
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(.white)
+                    )
+            }
+        }
+        .task { await loadImage() }
+    }
+
+    private func loadImage() async {
+        guard let url = imageURL else { imageLoadState = .failure; return }
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30.0
+            if let config = ServerConfigManager.shared.loadConfig(),
+               let apiKey = config.secureApiKey, !apiKey.isEmpty {
+                request.setValue(apiKey, forHTTPHeaderField: "ApiKey")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                imageLoadState = .failure; return
+            }
+            if let uiImage = UIImage(data: data) {
+                imageLoadState = .success(Image(uiImage: uiImage)); return
+            }
+            let contentType = httpResponse.allHeaderFields["Content-Type"] as? String
+            let dataString = String(data: data, encoding: .utf8) ?? ""
+            if contentType?.contains("svg") == true || dataString.contains("<svg") {
+                if !dataString.isEmpty { imageLoadState = .successSVG(data, dataString); return }
+            }
+            imageLoadState = .failure
+        } catch {
+            imageLoadState = .failure
         }
     }
 }
