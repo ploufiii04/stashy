@@ -62,12 +62,6 @@ struct SettingsView: View {
             }
             .listRowBackground(Color.secondaryAppBackground)
 
-            Section(header: Text("StashSync")) {
-                NavigationLink(destination: StashSyncSettingsView()) {
-                    Label("StashSync", systemImage: "bolt.fill")
-                }
-            }
-            .listRowBackground(Color.secondaryAppBackground)
 
             // MARK: - Content & Tabs
             if configManager.activeConfig != nil {
@@ -87,6 +81,13 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Color.secondaryAppBackground)
             }
+
+            Section(header: Text("StashSync")) {
+                NavigationLink(destination: StashSyncSettingsView()) {
+                    Label("StashSync", systemImage: "bolt.fill")
+                }
+            }
+            .listRowBackground(Color.secondaryAppBackground)
 
             // MARK: - About
             interactiveDevicesSection
@@ -563,11 +564,23 @@ struct LoveSpouseSettingsView: View {
 struct StashSyncSettingsView: View {
     @ObservedObject var videoManager = StashVideoSyncManager.shared
     @ObservedObject var appearanceManager = AppearanceManager.shared
+    @State private var showingDisclaimer = false
     
     var body: some View {
+        let syncEnabledBinding = Binding<Bool>(
+            get: { videoManager.isVideoSyncEnabled },
+            set: { newValue in
+                if newValue && !videoManager.isDisclaimerAccepted {
+                    showingDisclaimer = true
+                } else {
+                    videoManager.isVideoSyncEnabled = newValue
+                }
+            }
+        )
+        
         Form {
-            Section(header: Text("StashSync Features")) {
-                Toggle(isOn: $videoManager.isVideoSyncEnabled) {
+            Section(header: Text("StashSync Features"), footer: Text("StashSync uses real-time on-device video analysis to synchronize your devices. This process is CPU-intensive and can lead to increased battery drain and device heating. By enabling this feature, you acknowledge that you use StashSync and any controlled hardware devices at your own risk. Any potential damage or injury resulting from the use of connected hardware is your sole responsibility.")) {
+                Toggle(isOn: syncEnabledBinding) {
                     Label("StashSync", systemImage: "bolt.fill")
                 }
                 .tint(appearanceManager.tintColor)
@@ -600,14 +613,21 @@ struct StashSyncSettingsView: View {
             .disabled(!videoManager.isVideoSyncEnabled)
             .listRowBackground(Color.secondaryAppBackground)
             
-            Section(footer: Text("StashSync uses On-Device analysis to detect motion in real-time. This can be CPU intensive and may affect battery life.")) {
-            }
-            .listRowBackground(Color.secondaryAppBackground)
+
         }
         .navigationTitle("StashSync")
         .navigationBarTitleDisplayMode(.inline)
         .applyAppBackground()
         .scrollContentBackground(.hidden)
+        .alert("StashSync Disclaimer", isPresented: $showingDisclaimer) {
+            Button("Cancel", role: .cancel) { }
+            Button("Accept & Enable") {
+                videoManager.isDisclaimerAccepted = true
+                videoManager.isVideoSyncEnabled = true
+            }
+        } message: {
+            Text("StashSync uses real-time on-device video analysis to synchronize your devices. This process is CPU-intensive and can lead to increased battery drain and device heating. By enabling this feature, you acknowledge that you use StashSync and any controlled hardware devices at your own risk. Any potential damage or injury resulting from the use of connected hardware is your sole responsibility.")
+        }
     }
 }
 

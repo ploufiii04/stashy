@@ -4200,16 +4200,27 @@ struct Scene: Codable, Identifiable, Equatable {
 
         // Use path from API if available
         if let screenshotPath = paths?.screenshot {
-            let separator = screenshotPath.contains("?") ? "&" : "?"
-            let optimizedPath = "\(screenshotPath)\(separator)width=640"
-            if let url = URL(string: optimizedPath) {
+            var path = screenshotPath
+            let separator = path.contains("?") ? "&" : "?"
+            path = "\(path)\(separator)width=640"
+            
+            // Add timestamp for cache busting
+            if let updated = updatedAt {
+                path = "\(path)&t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+            }
+
+            if let url = URL(string: path) {
                  return signed(url)
             }
         }
         
         // Fallback to manual construction
         guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
-        return signed(URL(string: "\(config.baseURL)/scene/\(id)/screenshot?width=640"))
+        var manualPath = "\(config.baseURL)/scene/\(id)/screenshot?width=640"
+        if let updated = updatedAt {
+            manualPath = "\(manualPath)&t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        return signed(URL(string: manualPath))
     }
 
     /// Finds the best available stream matching the requested quality
@@ -4618,6 +4629,32 @@ struct MarkerScene: Codable, Identifiable, Equatable {
         MarkerScene(id: id, title: title, date: date, files: files, performers: performers, rating100: rating100, playCount: count, oCounter: oCounter, interactive: interactive, paths: paths, streams: streams)
     }
 
+    func toScene() -> Scene {
+        Scene(
+            id: id,
+            title: title,
+            details: nil,
+            date: date,
+            duration: files?.first?.duration,
+            studio: nil,
+            performers: performers ?? [],
+            files: files,
+            tags: nil,
+            galleries: nil,
+            organized: nil,
+            resumeTime: nil,
+            playCount: playCount,
+            oCounter: oCounter,
+            rating100: rating100,
+            createdAt: nil,
+            updatedAt: nil,
+            paths: paths,
+            sceneMarkers: nil,
+            interactive: interactive,
+            streams: streams
+        )
+    }
+
     // Computed property to determine if scene is truly interactive (has funscript)
     var hasInteractive: Bool {
         return paths?.funscript != nil
@@ -4855,10 +4892,20 @@ struct SceneFile: Codable, Identifiable, Equatable {
 struct SceneStudio: Codable, Equatable {
     let id: String
     let name: String
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case updatedAt = "updated_at"
+    }
 
     var thumbnailURL: URL? {
         guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
-        return signedURL(URL(string: "\(config.baseURL)/studio/\(id)/image"))
+        var thumbnailURLString = "\(config.baseURL)/studio/\(id)/image"
+        if let updated = updatedAt {
+            thumbnailURLString = "\(thumbnailURLString)?t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        return signedURL(URL(string: thumbnailURLString))
     }
 }
 
@@ -4868,17 +4915,23 @@ struct ScenePerformer: Codable, Identifiable, Equatable {
     let sceneCount: Int?
     let galleryCount: Int?
     let oCounter: Int?
+    let updatedAt: String?
     
     enum CodingKeys: String, CodingKey {
         case id, name
         case sceneCount = "scene_count"
         case galleryCount = "gallery_count"
         case oCounter = "o_counter"
+        case updatedAt = "updated_at"
     }
 
     var thumbnailURL: URL? {
         guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
-        return signedURL(URL(string: "\(config.baseURL)/performer/\(id)/image"))
+        var thumbnailURLString = "\(config.baseURL)/performer/\(id)/image"
+        if let updated = updatedAt {
+            thumbnailURLString = "\(thumbnailURLString)?t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        return signedURL(URL(string: thumbnailURLString))
     }
 }
 
@@ -5067,17 +5120,11 @@ struct Studio: Codable, Identifiable, Equatable {
     
     // Computed property for thumbnail URL
     var thumbnailURL: URL? {
-        print("🖼️ STUDIO THUMBNAIL DEBUG for studio \(id):")
-        
-        // Get server config
-        guard let config = ServerConfigManager.shared.loadConfig() else {
-            print("🖼️ No server config")
-            return nil
+        guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
+        var thumbnailURLString = "\(config.baseURL)/studio/\(id)/image"
+        if let updated = updatedAt {
+            thumbnailURLString = "\(thumbnailURLString)?t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
         }
-        
-        // Generate thumbnail URL using the provided format: /studio/[ID]/image
-        let thumbnailURLString = "\(config.baseURL)/studio/\(id)/image"
-        
         return signedURL(URL(string: thumbnailURLString))
     }
 }
@@ -5121,8 +5168,11 @@ struct Tag: Codable, Identifiable, Equatable {
     // Computed property for thumbnail URL
     var thumbnailURL: URL? {
         guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
-        // /tag/[ID]/image
-        return signedURL(URL(string: "\(config.baseURL)/tag/\(id)/image"))
+        var manualPath = "\(config.baseURL)/tag/\(id)/image"
+        if let updated = updatedAt {
+            manualPath = "\(manualPath)?t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        return signedURL(URL(string: manualPath))
     }
 }
 
@@ -5156,6 +5206,7 @@ struct StashGroup: Codable, Identifiable, Equatable {
     let scene_count: Int?
     let gallery_count: Int?
     let rating100: Int?
+    let updatedAt: String?
     let front_image_path: String?
     let back_image_path: String?
     let studio: GroupStudio?
@@ -5166,6 +5217,7 @@ struct StashGroup: Codable, Identifiable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, synopsis, date, scene_count, gallery_count, rating100, front_image_path, back_image_path, studio
+        case updatedAt = "updated_at"
     }
     
     // Computed property for thumbnail URL (using front image)
@@ -5173,6 +5225,10 @@ struct StashGroup: Codable, Identifiable, Equatable {
         if var path = front_image_path {
             let separator = path.contains("?") ? "&" : "?"
             path = "\(path)\(separator)width=640"
+            
+            if let updated = updatedAt {
+                path = "\(path)&t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+            }
             
             if let url = URL(string: path) {
                 if path.starts(with: "http") {
@@ -5184,8 +5240,11 @@ struct StashGroup: Codable, Identifiable, Equatable {
         }
         
         guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
-        // Fallback: /group/[ID]/frontimage
-        return signedURL(URL(string: "\(config.baseURL)/group/\(id)/frontimage"))
+        var fallbackPath = "\(config.baseURL)/group/\(id)/frontimage"
+        if let updated = updatedAt {
+            fallbackPath = "\(fallbackPath)?t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        return signedURL(URL(string: fallbackPath))
     }
 }
 
@@ -5235,20 +5294,29 @@ struct Gallery: Codable, Identifiable, Equatable {
         guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
         
         if let thumbnailPath = cover?.paths.thumbnail {
-            let separator = thumbnailPath.contains("?") ? "&" : "?"
-            let optimizedPath = "\(thumbnailPath)\(separator)width=640"
+            var path = thumbnailPath
+            let separator = path.contains("?") ? "&" : "?"
+            path = "\(path)\(separator)width=640"
+            
+            if let updated = updatedAt {
+                path = "\(path)&t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+            }
             
             // Check if the path is already an absolute URL
-            if optimizedPath.starts(with: "http://") || optimizedPath.starts(with: "https://") {
-                return signedURL(URL(string: optimizedPath))
+            if path.starts(with: "http://") || path.starts(with: "https://") {
+                return signedURL(URL(string: path))
             } else {
                 // Relative path, prepend baseURL
-                return signedURL(URL(string: config.baseURL + optimizedPath))
+                return signedURL(URL(string: config.baseURL + path))
             }
         }
         
-        // Fallback: use gallery asset endpoint which handles coverless galleries (returns first image)
-        return signedURL(URL(string: "\(config.baseURL)/gallery/\(id)/asset/thumbnail?width=640"))
+        // Fallback: use gallery asset endpoint
+        var fallbackPath = "\(config.baseURL)/gallery/\(id)/asset/thumbnail?width=640"
+        if let updated = updatedAt {
+            fallbackPath = "\(fallbackPath)&t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        return signedURL(URL(string: fallbackPath))
     }
     
     var coverURL: URL? {

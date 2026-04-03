@@ -98,7 +98,7 @@ struct ReelsView: View {
             switch self {
             case .scene(let s): return s.performers
             case .marker(let m): return m.scene?.performers ?? []
-            case .clip(let c): return c.performers?.map { ScenePerformer(id: $0.id, name: $0.name, sceneCount: nil, galleryCount: nil, oCounter: nil) } ?? []
+            case .clip(let c): return c.performers?.map { ScenePerformer(id: $0.id, name: $0.name, sceneCount: nil, galleryCount: nil, oCounter: nil, updatedAt: nil) } ?? []
             }
         }
         
@@ -247,6 +247,14 @@ struct ReelsView: View {
                 return ext == "GIF" || ext == "WEBP"
             case .scene: return false
             case .marker: return false
+            }
+        }
+
+        var underlyingScene: Scene? {
+            switch self {
+            case .scene(let s): return s
+            case .marker(let m): return m.scene?.toScene()
+            case .clip: return nil
             }
         }
 
@@ -2006,29 +2014,43 @@ extension ReelItemView {
     @ViewBuilder
     private func titleLabel(for item: ReelsView.ReelItemData) -> some View {
         if let title = item.title, !title.isEmpty {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(2)
-                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-                
-                // Download Indicator
-                let sceneId: String? = {
-                    if case .scene(let s) = item { return s.id }
-                    if case .marker(let m) = item { return m.scene?.id }
-                    return nil
-                }()
-                
-                if let sId = sceneId, DownloadManager.shared.isDownloaded(id: sId) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white)
-                        .padding(3)
-                        .background(Color.green)
-                        .clipShape(Circle())
-                        .shadow(radius: 2)
+            Group {
+                if let scene = item.underlyingScene {
+                    NavigationLink(destination: SceneDetailView(scene: scene)) {
+                        titleText(title, item: item)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    titleText(title, item: item)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func titleText(_ title: String, item: ReelsView.ReelItemData) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+            
+            // Download Indicator
+            let sceneId: String? = {
+                if case .scene(let s) = item { return s.id }
+                if case .marker(let m) = item { return m.scene?.id }
+                return nil
+            }()
+            
+            if let sId = sceneId, DownloadManager.shared.isDownloaded(id: sId) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .padding(3)
+                    .background(Color.green)
+                    .clipShape(Circle())
+                    .shadow(radius: 2)
             }
         }
     }

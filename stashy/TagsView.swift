@@ -833,23 +833,23 @@ struct TagImageView: View {
     }
 
     var body: some View {
-        Group {
-            switch imageLoadState {
-            case .loading:
+        CustomAsyncImage(url: tag.thumbnailURL) { loader in
+            if loader.isLoading {
                 Rectangle()
                     .fill(appearanceManager.tintColor)
                     .overlay(ProgressView().tint(.white))
-            case .success(let image):
+            } else if let image = loader.image {
                 image
                     .resizable()
                     .scaledToFill()
-            case .successSVG(let svgData, let svgString):
+            } else if let data = loader.imageData, isSVG(data) {
+                let dataString = String(data: data, encoding: .utf8) ?? ""
                 ZStack {
-                    SVGWebView(svgData: svgData, svgString: svgString)
+                    SVGWebView(svgData: data, svgString: dataString)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     Color.clear.contentShape(Rectangle())
                 }
-            case .failure:
+            } else {
                 Rectangle()
                     .fill(appearanceManager.tintColor)
                     .overlay(
@@ -859,35 +859,11 @@ struct TagImageView: View {
                     )
             }
         }
-        .task { await loadImage() }
     }
 
-    private func loadImage() async {
-        guard let url = imageURL else { imageLoadState = .failure; return }
-        do {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 30.0
-            if let config = ServerConfigManager.shared.loadConfig(),
-               let apiKey = config.secureApiKey, !apiKey.isEmpty {
-                request.setValue(apiKey, forHTTPHeaderField: "ApiKey")
-            }
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                imageLoadState = .failure; return
-            }
-            if let uiImage = UIImage(data: data) {
-                imageLoadState = .success(Image(uiImage: uiImage)); return
-            }
-            let contentType = httpResponse.allHeaderFields["Content-Type"] as? String
-            let dataString = String(data: data, encoding: .utf8) ?? ""
-            if contentType?.contains("svg") == true || dataString.contains("<svg") {
-                if !dataString.isEmpty { imageLoadState = .successSVG(data, dataString); return }
-            }
-            imageLoadState = .failure
-        } catch {
-            imageLoadState = .failure
-        }
+    private func isSVG(_ data: Data) -> Bool {
+        let str = String(data: data.prefix(100), encoding: .utf8) ?? ""
+        return str.lowercased().contains("<svg")
     }
 }
 #endif

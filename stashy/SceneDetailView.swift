@@ -122,7 +122,7 @@ struct SceneDetailView: View {
                 let isStashSyncActive = handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode
                 let isStashSyncEnabled = StashVideoSyncManager.shared.isVideoSyncEnabled
                 
-                if isStashSyncEnabled && (isStashSyncActive || isStashSyncEnabled) {
+                if isStashSyncEnabled && isStashSyncActive {
                     StashSyncCard()
                 }
                 

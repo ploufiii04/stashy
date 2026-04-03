@@ -79,7 +79,7 @@ class ImageCache {
         var stable = urlComponents
         // Filter query items to keep only size-related ones
         if let queryItems = stable.queryItems {
-            let allowedParams = Set(["width", "height", "size"])
+            let allowedParams = Set(["width", "height", "size", "t", "v"])
             let filteredItems = queryItems.filter { allowedParams.contains($0.name) }
             
             if filteredItems.isEmpty {

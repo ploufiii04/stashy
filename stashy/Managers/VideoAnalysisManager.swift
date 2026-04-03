@@ -35,6 +35,7 @@ class StashVideoSyncManager: ObservableObject {
     @Published var lastError: String?
 
     @AppStorage("video_sync_enabled") var isVideoSyncEnabled: Bool = false
+    @AppStorage("video_sync_disclaimer_accepted") var isDisclaimerAccepted: Bool = false
     @AppStorage("video_sync_sensitivity") var sensitivity: Double = 0.5 {
         didSet { cachedSensitivity = Float(sensitivity) }
     }
