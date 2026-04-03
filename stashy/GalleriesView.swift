@@ -22,11 +22,10 @@ struct GalleriesView: View {
     @State private var shouldRestoreScroll = false
     var hideTitle: Bool = false
     
-    init(initialSort: StashDBViewModel.GallerySortOption? = nil, filter: StashDBViewModel.SavedFilter? = nil, hideTitle: Bool = false) {
+    init(initialSort: StashDBViewModel.GallerySortOption? = nil, hideTitle: Bool = false) {
         self.hideTitle = hideTitle
         let savedSort = StashDBViewModel.GallerySortOption(rawValue: TabManager.shared.getSortOption(for: .galleries) ?? "")
         _selectedSortOption = State(initialValue: initialSort ?? savedSort ?? .dateDesc)
-        _selectedFilter = State(initialValue: filter)
     }
     
     // Grid Setup

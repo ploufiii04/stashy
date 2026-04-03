@@ -234,9 +234,6 @@ class StashDBViewModel: ObservableObject {
     @Published var homeRowPerformers: [HomeRowType: [Performer]] = [:]
     @Published var homeRowStudios: [HomeRowType: [Studio]] = [:]
     @Published var homeRowGalleries: [HomeRowType: [Gallery]] = [:]
-    @Published var homeRowMarkers: [HomeRowType: [SceneMarker]] = [:]
-    @Published var homeRowImages: [HomeRowType: [StashImage]] = [:]
-    @Published var homeRowGroups: [HomeRowType: [StashGroup]] = [:]
     @Published var homeRowLoadingState: [HomeRowType: Bool] = [:]
     private var isFetchingHomeRows: Set<HomeRowType> = []
 
@@ -1440,18 +1437,7 @@ class StashDBViewModel: ObservableObject {
             setSort(.ratingDesc)
         case .random:
             setSort(.random)
-        case .savedFilter:
-            if let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-                if let criteria = savedFilter.filterDict {
-                    let sanitized = sanitizeFilter(criteria)
-                    for (key, value) in sanitized {
-                        if key == "sort" { if let s = value as? String { sortField = s } }
-                        else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                        else { sceneFilter[key] = value }
-                    }
-                }
-            }
-        default:
+        case .statistics, .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .newStudios, .studiosHighestSceneCount, .newGalleries, .recentlyUpdatedGalleries:
             homeRowLoadingState[rowType] = false
             completion([])
             return
@@ -1534,17 +1520,6 @@ class StashDBViewModel: ObservableObject {
             setSort(.sceneCountDesc)
         case .performersHighestOCount:
             setSort(.oCountDesc)
-        case .savedFilter:
-            if let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-                if let criteria = savedFilter.filterDict {
-                    let sanitized = sanitizeFilter(criteria, isPerformer: true)
-                    for (key, value) in sanitized {
-                        if key == "sort" { if let s = value as? String { sortField = s } }
-                        else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                        else { performerFilter[key] = value }
-                    }
-                }
-            }
         default:
             homeRowLoadingState[rowType] = false
             completion([])
@@ -1623,17 +1598,6 @@ class StashDBViewModel: ObservableObject {
             setSort(.createdAtDesc)
         case .studiosHighestSceneCount:
             setSort(.sceneCountDesc)
-        case .savedFilter:
-            if let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-                if let criteria = savedFilter.filterDict {
-                    let sanitized = sanitizeFilter(criteria, isStudio: true)
-                    for (key, value) in sanitized {
-                        if key == "sort" { if let s = value as? String { sortField = s } }
-                        else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                        // Filter logic for Studios is limited in Stash API but we try
-                    }
-                }
-            }
         default:
             homeRowLoadingState[rowType] = false
             completion([])
@@ -1711,16 +1675,6 @@ class StashDBViewModel: ObservableObject {
             setSort(.createdAtDesc)
         case .recentlyUpdatedGalleries:
             setSort(.updatedAtDesc)
-        case .savedFilter:
-            if let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-                if let criteria = savedFilter.filterDict {
-                    let sanitized = sanitizeFilter(criteria, isGallery: true)
-                    for (key, value) in sanitized {
-                        if key == "sort" { if let s = value as? String { sortField = s } }
-                        else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                    }
-                }
-            }
         default:
             homeRowLoadingState[rowType] = false
             completion([])
@@ -1762,126 +1716,6 @@ class StashDBViewModel: ObservableObject {
                 // Cache the result
                 self?.homeRowGalleries[rowType] = galleries
                 completion(galleries)
-            }
-        }
-    }
-
-    func fetchMarkersForHomeRow(config: HomeRowConfig, limit: Int = 10, forceRefresh: Bool = false, completion: @escaping ([SceneMarker]) -> Void) {
-        let rowType = config.type
-        if !forceRefresh, let cached = homeRowMarkers[rowType], !cached.isEmpty { completion(cached); return }
-        if isFetchingHomeRows.contains(rowType) || homeRowLoadingState[rowType] == true { return }
-        isFetchingHomeRows.insert(rowType)
-        homeRowLoadingState[rowType] = true
-        
-        var markerFilter: [String: Any] = [:]
-        var sortField = "title"; var sortDirection = "ASC"
-        
-        if config.type == .savedFilter, let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-            if let criteria = savedFilter.filterDict {
-                let sanitized = sanitizeFilter(criteria, isMarker: true)
-                for (key, value) in sanitized {
-                    if key == "sort" { if let s = value as? String { sortField = s } }
-                    else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                    else { markerFilter[key] = value }
-                }
-            }
-        }
-
-        let queryVariables: [String: Any] = [
-            "filter": ["page": 1, "per_page": limit, "sort": sortField, "direction": sortDirection],
-            "scene_marker_filter": markerFilter
-        ]
-        let query = GraphQLQueries.queryWithFragments("findSceneMarkers")
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": queryVariables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else {
-            homeRowLoadingState[rowType] = false; isFetchingHomeRows.remove(rowType); completion([]); return
-        }
-
-        performGraphQLQuery(query: bodyString) { [weak self] (response: MarkersResponse?) in
-            DispatchQueue.main.async {
-                self?.homeRowLoadingState[rowType] = false; self?.isFetchingHomeRows.remove(rowType)
-                let markers = response?.data?.findSceneMarkers.scene_markers ?? []
-                self?.homeRowMarkers[rowType] = markers; completion(markers)
-            }
-        }
-    }
-
-    func fetchImagesForHomeRow(config: HomeRowConfig, limit: Int = 10, forceRefresh: Bool = false, completion: @escaping ([StashImage]) -> Void) {
-        let rowType = config.type
-        if !forceRefresh, let cached = homeRowImages[rowType], !cached.isEmpty { completion(cached); return }
-        if isFetchingHomeRows.contains(rowType) || homeRowLoadingState[rowType] == true { return }
-        isFetchingHomeRows.insert(rowType)
-        homeRowLoadingState[rowType] = true
-        
-        var imageFilter: [String: Any] = [:]
-        var sortField = "date"; var sortDirection = "DESC"
-        
-        if config.type == .savedFilter, let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-            if let criteria = savedFilter.filterDict {
-                let sanitized = sanitizeFilter(criteria) 
-                for (key, value) in sanitized {
-                    if key == "sort" { if let s = value as? String { sortField = s } }
-                    else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                    else { imageFilter[key] = value }
-                }
-            }
-        }
-
-        let queryVariables: [String: Any] = [
-            "filter": ["page": 1, "per_page": limit, "sort": sortField, "direction": sortDirection],
-            "image_filter": imageFilter
-        ]
-        let query = GraphQLQueries.queryWithFragments("findImages")
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": queryVariables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else {
-            homeRowLoadingState[rowType] = false; isFetchingHomeRows.remove(rowType); completion([]); return
-        }
-
-        performGraphQLQuery(query: bodyString) { [weak self] (response: ImagesResponse?) in
-            DispatchQueue.main.async {
-                self?.homeRowLoadingState[rowType] = false; self?.isFetchingHomeRows.remove(rowType)
-                let images = response?.data?.findImages.images ?? []
-                self?.homeRowImages[rowType] = images; completion(images)
-            }
-        }
-    }
-
-    func fetchGroupsForHomeRow(config: HomeRowConfig, limit: Int = 10, forceRefresh: Bool = false, completion: @escaping ([StashGroup]) -> Void) {
-        let rowType = config.type
-        if !forceRefresh, let cached = homeRowGroups[rowType], !cached.isEmpty { completion(cached); return }
-        if isFetchingHomeRows.contains(rowType) || homeRowLoadingState[rowType] == true { return }
-        isFetchingHomeRows.insert(rowType)
-        homeRowLoadingState[rowType] = true
-        
-        var groupFilter: [String: Any] = [:]
-        var sortField = "name"; var sortDirection = "ASC"
-        
-        if config.type == .savedFilter, let filterId = config.filterId, let savedFilter = savedFilters[filterId] {
-            if let criteria = savedFilter.filterDict {
-                let sanitized = sanitizeFilter(criteria)
-                for (key, value) in sanitized {
-                    if key == "sort" { if let s = value as? String { sortField = s } }
-                    else if key == "direction" { if let d = value as? String { sortDirection = d } }
-                    else { groupFilter[key] = value }
-                }
-            }
-        }
-
-        let queryVariables: [String: Any] = [
-            "filter": ["page": 1, "per_page": limit, "sort": sortField, "direction": sortDirection],
-            "group_filter": groupFilter
-        ]
-        let query = GraphQLQueries.queryWithFragments("findGroups")
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": queryVariables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else {
-            homeRowLoadingState[rowType] = false; isFetchingHomeRows.remove(rowType); completion([]); return
-        }
-
-        performGraphQLQuery(query: bodyString) { [weak self] (response: GroupsResponse?) in
-            DispatchQueue.main.async {
-                self?.homeRowLoadingState[rowType] = false; self?.isFetchingHomeRows.remove(rowType)
-                let groups = response?.data?.findGroups.groups ?? []
-                self?.homeRowGroups[rowType] = groups; completion(groups)
             }
         }
     }

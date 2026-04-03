@@ -164,11 +164,6 @@ struct GroupsView: View {
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
     var hideTitle: Bool = false
     
-    init(filter: StashDBViewModel.SavedFilter? = nil, hideTitle: Bool = false) {
-        _selectedFilter = State(initialValue: filter)
-        self.hideTitle = hideTitle
-    }
-    
     // Search function
     private func performSearch(isInitialLoad: Bool = true) {
         viewModel.fetchGroups(sortBy: selectedSortOption, searchQuery: searchText, isInitialLoad: isInitialLoad, filter: selectedFilter)

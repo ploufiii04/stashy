@@ -21,10 +21,9 @@ struct StudiosView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    init(initialSort: StashDBViewModel.StudioSortOption? = nil, filter: StashDBViewModel.SavedFilter? = nil, hideTitle: Bool = false) {
+    init(initialSort: StashDBViewModel.StudioSortOption? = nil, hideTitle: Bool = false) {
         let savedSort = StashDBViewModel.StudioSortOption(rawValue: TabManager.shared.getSortOption(for: .studios) ?? "")
         _selectedSortOption = State(initialValue: initialSort ?? savedSort ?? .nameAsc)
-        _selectedFilter = State(initialValue: filter)
         self.hideTitle = hideTitle
     }
 

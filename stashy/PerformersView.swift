@@ -23,10 +23,9 @@ struct PerformersView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     
-    init(initialSort: StashDBViewModel.PerformerSortOption? = nil, filter: StashDBViewModel.SavedFilter? = nil) {
+    init(initialSort: StashDBViewModel.PerformerSortOption? = nil) {
         let savedSort = StashDBViewModel.PerformerSortOption(rawValue: TabManager.shared.getSortOption(for: .performers) ?? "")
         _selectedSortOption = State(initialValue: initialSort ?? savedSort ?? .sceneCountDesc)
-        _selectedFilter = State(initialValue: filter)
     }
     
     private var columns: [GridItem] {
