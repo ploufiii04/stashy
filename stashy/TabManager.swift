@@ -130,20 +130,24 @@ struct HomeRowConfig: Codable, Identifiable, Equatable {
     var isEnabled: Bool
     var sortOrder: Int
     var type: HomeRowType
+    var filterId: String?     // Only for type .savedFilter
+    var category: AppTab?     // Only for type .savedFilter
     
     static func == (lhs: HomeRowConfig, rhs: HomeRowConfig) -> Bool {
         return lhs.id == rhs.id && 
                lhs.title == rhs.title && 
                lhs.isEnabled == rhs.isEnabled && 
                lhs.sortOrder == rhs.sortOrder && 
-               lhs.type == rhs.type
+               lhs.type == rhs.type &&
+               lhs.filterId == rhs.filterId &&
+               lhs.category == rhs.category
     }
 }
 
 enum HomeRowType: String, Codable {
     case lastPlayed
-    case lastAdded3Min
-    case newest3Min
+    case lastAdded3Min     // New Added
+    case newest3Min        // New Released
     case mostViewed3Min
     case topCounter3Min
     case topRating3Min
@@ -156,12 +160,13 @@ enum HomeRowType: String, Codable {
     case newGalleries
     case recentlyUpdatedGalleries
     case performersHighestOCount
+    case savedFilter       // New dynamic type
     
     var defaultTitle: String {
         switch self {
         case .lastPlayed: return "Last Played"
-        case .lastAdded3Min: return "Recently Added"
-        case .newest3Min: return "Newest Scenes"
+        case .lastAdded3Min: return "New Added"
+        case .newest3Min: return "New Released"
         case .mostViewed3Min: return "Most Viewed"
         case .topCounter3Min: return "Top Counter"
         case .topRating3Min: return "Top Rated"
@@ -174,6 +179,7 @@ enum HomeRowType: String, Codable {
         case .newGalleries: return "New Galleries"
         case .recentlyUpdatedGalleries: return "Recently Updated Galleries"
         case .performersHighestOCount: return "Highest Count Performers"
+        case .savedFilter: return "Saved Filter"
         }
     }
 }
@@ -451,8 +457,10 @@ class TabManager: ObservableObject {
         if let data = data,
            let decoded = try? JSONDecoder().decode([HomeRowConfig].self, from: data) {
             // Deduplicate by type (keep the first occurrence of each type)
+            // For saved filters, we deduplicate by ID to allow multiple different saved filters
             var seenTypes = Set<HomeRowType>()
             let unique = decoded.sorted { $0.sortOrder < $1.sortOrder }.filter { row in
+                if row.type == .savedFilter { return true } // Multiple saved filters allowed
                 if seenTypes.contains(row.type) { return false }
                 seenTypes.insert(row.type)
                 return true
@@ -462,38 +470,25 @@ class TabManager: ObservableObject {
             // Re-assign sort orders after dedup
             for i in 0..<self.homeRows.count {
                 self.homeRows[i].sortOrder = i
-                self.homeRows[i].title = self.homeRows[i].type.defaultTitle
+                if self.homeRows[i].type != .savedFilter {
+                    self.homeRows[i].title = self.homeRows[i].type.defaultTitle
+                }
             }
             if unique.count != decoded.count { saveHomeRows() }
             ensureStatisticsRow()
-            ensureMostViewedRow()
-            ensureRandomRow()
-            ensureTopCounterRow()
-            ensureTopRatingRow()
-            ensureNewPerformersRow()
-            ensureHighestSceneCountPerformersRow()
-            ensureNewStudiosRow()
-            ensureHighestSceneCountStudiosRow()
-            ensureRecentlyUpdatedGalleriesRow()
-            ensurePerformersHighestOCountRow()
+            // Cleanup: remove standard rows that are no longer in our "reduced" set if they weren't explicitly enabled?
+            // Actually, we'll just keep existing ones but future resets will use the new reduced set.
         } else {
-            // Default Home Rows
+            // Default Reduced Home Rows
             self.homeRows = [
                 HomeRowConfig(id: UUID(), title: HomeRowType.statistics.defaultTitle, isEnabled: true, sortOrder: 0, type: .statistics),
                 HomeRowConfig(id: UUID(), title: HomeRowType.lastPlayed.defaultTitle, isEnabled: true, sortOrder: 1, type: .lastPlayed),
                 HomeRowConfig(id: UUID(), title: HomeRowType.lastAdded3Min.defaultTitle, isEnabled: true, sortOrder: 2, type: .lastAdded3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.newPerformers.defaultTitle, isEnabled: true, sortOrder: 3, type: .newPerformers),
-                HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestSceneCount.defaultTitle, isEnabled: true, sortOrder: 4, type: .performersHighestSceneCount),
-                HomeRowConfig(id: UUID(), title: HomeRowType.newStudios.defaultTitle, isEnabled: true, sortOrder: 5, type: .newStudios),
-                HomeRowConfig(id: UUID(), title: HomeRowType.studiosHighestSceneCount.defaultTitle, isEnabled: true, sortOrder: 6, type: .studiosHighestSceneCount),
-                HomeRowConfig(id: UUID(), title: HomeRowType.newGalleries.defaultTitle, isEnabled: true, sortOrder: 7, type: .newGalleries),
-                HomeRowConfig(id: UUID(), title: HomeRowType.recentlyUpdatedGalleries.defaultTitle, isEnabled: true, sortOrder: 8, type: .recentlyUpdatedGalleries),
-                HomeRowConfig(id: UUID(), title: HomeRowType.newest3Min.defaultTitle, isEnabled: true, sortOrder: 9, type: .newest3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestOCount.defaultTitle, isEnabled: true, sortOrder: 10, type: .performersHighestOCount),
-                HomeRowConfig(id: UUID(), title: HomeRowType.mostViewed3Min.defaultTitle, isEnabled: true, sortOrder: 11, type: .mostViewed3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.random.defaultTitle, isEnabled: true, sortOrder: 12, type: .random),
-                HomeRowConfig(id: UUID(), title: HomeRowType.topCounter3Min.defaultTitle, isEnabled: false, sortOrder: 13, type: .topCounter3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.topRating3Min.defaultTitle, isEnabled: false, sortOrder: 14, type: .topRating3Min)
+                HomeRowConfig(id: UUID(), title: HomeRowType.newest3Min.defaultTitle, isEnabled: true, sortOrder: 3, type: .newest3Min),
+                HomeRowConfig(id: UUID(), title: HomeRowType.newPerformers.defaultTitle, isEnabled: true, sortOrder: 4, type: .newPerformers),
+                HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestSceneCount.defaultTitle, isEnabled: true, sortOrder: 5, type: .performersHighestSceneCount),
+                HomeRowConfig(id: UUID(), title: HomeRowType.newStudios.defaultTitle, isEnabled: true, sortOrder: 6, type: .newStudios),
+                HomeRowConfig(id: UUID(), title: HomeRowType.studiosHighestSceneCount.defaultTitle, isEnabled: true, sortOrder: 7, type: .studiosHighestSceneCount)
             ]
             saveHomeRows()
         }
@@ -617,12 +612,26 @@ class TabManager: ObservableObject {
         saveHomeRows()
     }
     
-    func addCustomHomeRow(title: String, filterId: String) {
-        // Deprecated: Custom rows are no longer supported
+    func addSavedFilterRow(title: String, filterId: String, category: AppTab) {
+        let newRow = HomeRowConfig(
+            id: UUID(),
+            title: title,
+            isEnabled: true,
+            sortOrder: homeRows.count,
+            type: .savedFilter,
+            filterId: filterId,
+            category: category
+        )
+        homeRows.append(newRow)
+        saveHomeRows()
     }
     
-    func removeHomeRow(_ id: UUID) {
-        // Deprecated
+    func removeSavedFilterRow(id: UUID) {
+        homeRows.removeAll(where: { $0.id == id })
+        for i in 0..<homeRows.count {
+            homeRows[i].sortOrder = i
+        }
+        saveHomeRows()
     }
     
     // MARK: - Reels Mode Configuration

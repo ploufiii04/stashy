@@ -24,8 +24,9 @@ struct ImagesView: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
     
-    init(gallery: Gallery? = nil) {
+    init(gallery: Gallery? = nil, filter: StashDBViewModel.SavedFilter? = nil) {
         self.gallery = gallery
+        _selectedFilter = State(initialValue: filter)
     }
     
     // Dynamic Columns to match GalleriesView

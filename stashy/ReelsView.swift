@@ -31,6 +31,17 @@ struct ReelsView: View {
     @State private var isMediaZoomed = false
     @State private var isRotating = false
     @State private var isUIVisible = true
+    
+    init(mode: ReelsMode = .scenes, filter: StashDBViewModel.SavedFilter? = nil) {
+        _reelsMode = State(initialValue: mode)
+        if mode == .markers {
+            _selectedFilter = State(initialValue: filter)
+        } else if mode == .clips {
+            _selectedClipFilter = State(initialValue: filter)
+        } else {
+            _selectedFilter = State(initialValue: filter)
+        }
+    }
 
     // Extracted binding to help the Swift compiler with type-checking
     // Native scroll binding

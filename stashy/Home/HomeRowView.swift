@@ -19,47 +19,87 @@ struct HomeRowView: View {
     
     // Use ViewModel cache instead of local @State
     private var scenes: [Scene] {
-        viewModel.homeRowScenes[config.type] ?? []
+        if config.type == .savedFilter {
+            return config.category == .scenes ? viewModel.homeRowScenes[config.type] ?? [] : []
+        }
+        return viewModel.homeRowScenes[config.type] ?? []
     }
     
     private var performers: [Performer] {
-        viewModel.homeRowPerformers[config.type] ?? []
+        if config.type == .savedFilter {
+            return config.category == .performers ? viewModel.homeRowPerformers[config.type] ?? [] : []
+        }
+        return viewModel.homeRowPerformers[config.type] ?? []
     }
     
     private var studios: [Studio] {
-        viewModel.homeRowStudios[config.type] ?? []
+        if config.type == .savedFilter {
+            return config.category == .studios ? viewModel.homeRowStudios[config.type] ?? [] : []
+        }
+        return viewModel.homeRowStudios[config.type] ?? []
     }
     
     private var galleries: [Gallery] {
-        viewModel.homeRowGalleries[config.type] ?? []
+        if config.type == .savedFilter {
+            return config.category == .galleries ? viewModel.homeRowGalleries[config.type] ?? [] : []
+        }
+        return viewModel.homeRowGalleries[config.type] ?? []
+    }
+
+    private var markers: [SceneMarker] {
+        viewModel.homeRowMarkers[config.type] ?? []
+    }
+
+    private var images: [StashImage] {
+        viewModel.homeRowImages[config.type] ?? []
+    }
+
+    private var groups: [StashGroup] {
+        viewModel.homeRowGroups[config.type] ?? []
     }
     
     private var isLoading: Bool {
-        // Loading if: no cached data AND currently fetching
         let isEmpty: Bool
-        switch config.type {
-        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
-            isEmpty = performers.isEmpty
-        case .newStudios, .studiosHighestSceneCount:
-            isEmpty = studios.isEmpty
-        case .newGalleries, .recentlyUpdatedGalleries:
-            isEmpty = galleries.isEmpty
-        default:
-            isEmpty = scenes.isEmpty
+        if config.type == .savedFilter {
+            switch config.category {
+            case .scenes: isEmpty = scenes.isEmpty
+            case .performers: isEmpty = performers.isEmpty
+            case .studios: isEmpty = studios.isEmpty
+            case .galleries: isEmpty = galleries.isEmpty
+            case .images: isEmpty = images.isEmpty
+            case .groups: isEmpty = groups.isEmpty
+            case .reels: isEmpty = markers.isEmpty
+            default: isEmpty = true
+            }
+        } else {
+            switch config.type {
+            case .newPerformers, .performersHighestSceneCount, .performersHighestOCount: isEmpty = performers.isEmpty
+            case .newStudios, .studiosHighestSceneCount: isEmpty = studios.isEmpty
+            case .newGalleries, .recentlyUpdatedGalleries: isEmpty = galleries.isEmpty
+            default: isEmpty = scenes.isEmpty
+            }
         }
         return isEmpty && (viewModel.homeRowLoadingState[config.type] ?? true)
     }
     
     private var isContentEmpty: Bool {
+        if config.type == .savedFilter {
+             switch config.category {
+             case .scenes: return scenes.isEmpty
+             case .performers: return performers.isEmpty
+             case .studios: return studios.isEmpty
+             case .galleries: return galleries.isEmpty
+             case .images: return images.isEmpty
+             case .groups: return groups.isEmpty
+             case .reels: return markers.isEmpty
+             default: return true
+             }
+        }
         switch config.type {
-        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
-            return performers.isEmpty
-        case .newStudios, .studiosHighestSceneCount:
-            return studios.isEmpty
-        case .newGalleries, .recentlyUpdatedGalleries:
-            return galleries.isEmpty
-        default:
-            return scenes.isEmpty
+        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount: return performers.isEmpty
+        case .newStudios, .studiosHighestSceneCount: return studios.isEmpty
+        case .newGalleries, .recentlyUpdatedGalleries: return galleries.isEmpty
+        default: return scenes.isEmpty
         }
     }
     var body: some View {
@@ -222,7 +262,7 @@ struct HomeRowView: View {
         ZStack(alignment: .bottomTrailing) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: spacing) {
-                    if config.type == .newPerformers || config.type == .performersHighestSceneCount {
+                    if config.type == .newPerformers || config.type == .performersHighestSceneCount || (config.type == .savedFilter && config.category == .performers) {
                         ForEach(performers) { performer in
                             NavigationLink(destination: PerformerDetailView(performer: performer)) {
                                 HomePerformerCardView(performer: performer, badgeType: .sceneCount, isLarge: isLarge)
@@ -242,7 +282,7 @@ struct HomeRowView: View {
                             .frame(width: getItemWidth())
                             .id(performer.id)
                         }
-                    } else if config.type == .newStudios || config.type == .studiosHighestSceneCount {
+                    } else if config.type == .newStudios || config.type == .studiosHighestSceneCount || (config.type == .savedFilter && config.category == .studios) {
                         ForEach(studios) { studio in
                             NavigationLink(destination: StudioDetailView(studio: studio)) {
                                 HomeStudioCardView(studio: studio, isLarge: isLarge)
@@ -252,7 +292,7 @@ struct HomeRowView: View {
                             .frame(width: getItemWidth())
                             .id(studio.id)
                         }
-                    } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries {
+                    } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries || (config.type == .savedFilter && config.category == .galleries) {
                         ForEach(galleries) { gallery in
                             NavigationLink(destination: ImagesView(gallery: gallery)) {
                                 HomeGalleryCardView(gallery: gallery, isLarge: isLarge)
@@ -261,6 +301,36 @@ struct HomeRowView: View {
                             .buttonStyle(.plain)
                             .frame(width: getItemWidth())
                             .id(gallery.id)
+                        }
+                    } else if config.type == .savedFilter && config.category == .reels {
+                        ForEach(markers) { marker in
+                            NavigationLink(destination: SceneDetailView(scene: marker.scene.toScene())) {
+                                HomeMarkerCardView(marker: marker, isLarge: isLarge)
+                                    .padding(.horizontal, padding)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: getItemWidth())
+                            .id(marker.id)
+                        }
+                    } else if config.type == .savedFilter && config.category == .images {
+                        ForEach(images) { image in
+                             NavigationLink(destination: FullScreenImageView(images: .constant(images), selectedImageId: image.id)) {
+                                HomeImageCardView(image: image, isLarge: isLarge)
+                                    .padding(.horizontal, padding)
+                             }
+                             .buttonStyle(.plain)
+                             .frame(width: getItemWidth())
+                             .id(image.id)
+                        }
+                    } else if config.type == .savedFilter && config.category == .groups {
+                        ForEach(groups) { group in
+                             NavigationLink(destination: GroupDetailView(selectedGroup: group)) {
+                                HomeGroupCardView(group: group, isLarge: isLarge)
+                                    .padding(.horizontal, padding)
+                             }
+                             .buttonStyle(.plain)
+                             .frame(width: getItemWidth())
+                             .id(group.id)
                         }
                     } else {
                         ForEach(scenes) { scene in
@@ -306,20 +376,48 @@ struct HomeRowView: View {
     private func loadScenes() {
         let limit = 10
         
-        if config.type == .newPerformers || config.type == .performersHighestSceneCount || config.type == .performersHighestOCount {
-            viewModel.fetchPerformersForHomeRow(config: config, limit: limit) { _ in }
-        } else if config.type == .newStudios || config.type == .studiosHighestSceneCount {
-            viewModel.fetchStudiosForHomeRow(config: config, limit: limit) { _ in }
-        } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries {
-            viewModel.fetchGalleriesForHomeRow(config: config, limit: limit) { _ in }
+        if config.type == .savedFilter {
+            switch config.category {
+            case .scenes: viewModel.fetchScenesForHomeRow(config: config, limit: limit) { _ in }
+            case .performers: viewModel.fetchPerformersForHomeRow(config: config, limit: limit) { _ in }
+            case .studios: viewModel.fetchStudiosForHomeRow(config: config, limit: limit) { _ in }
+            case .galleries: viewModel.fetchGalleriesForHomeRow(config: config, limit: limit) { _ in }
+            case .reels: viewModel.fetchMarkersForHomeRow(config: config, limit: limit) { _ in }
+            case .images: viewModel.fetchImagesForHomeRow(config: config, limit: limit) { _ in }
+            case .groups: viewModel.fetchGroupsForHomeRow(config: config, limit: limit) { _ in }
+            default: break
+            }
         } else {
-            viewModel.fetchScenesForHomeRow(config: config, limit: limit) { _ in }
+            if config.type == .newPerformers || config.type == .performersHighestSceneCount || config.type == .performersHighestOCount {
+                viewModel.fetchPerformersForHomeRow(config: config, limit: limit) { _ in }
+            } else if config.type == .newStudios || config.type == .studiosHighestSceneCount {
+                viewModel.fetchStudiosForHomeRow(config: config, limit: limit) { _ in }
+            } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries {
+                viewModel.fetchGalleriesForHomeRow(config: config, limit: limit) { _ in }
+            } else {
+                viewModel.fetchScenesForHomeRow(config: config, limit: limit) { _ in }
+            }
         }
     }
 
     @ViewBuilder
     private var destinationView: some View {
-        if config.type == .newPerformers {
+        if config.type == .savedFilter {
+             if let filterId = config.filterId, let filter = viewModel.savedFilters[filterId] {
+                 switch config.category {
+                 case .scenes: ScenesView(filter: filter)
+                 case .performers: PerformersView(filter: filter)
+                 case .studios: StudiosView(filter: filter)
+                 case .galleries: GalleriesView(filter: filter)
+                 case .reels: ReelsView(mode: .markers, filter: filter)
+                 case .images: ImagesView(filter: filter)
+                 case .groups: GroupsView(filter: filter)
+                 default: ScenesView()
+                 }
+             } else {
+                 ScenesView()
+             }
+        } else if config.type == .newPerformers {
             PerformersView(initialSort: .createdAtDesc)
         } else if config.type == .performersHighestSceneCount {
             PerformersView(initialSort: .sceneCountDesc)
@@ -350,10 +448,14 @@ struct HomeRowView: View {
         // Standard width for non-hero rows — based on fixed 125pt card height
         let cardHeight: CGFloat = 125
 
-        if config.type == .newPerformers || config.type == .performersHighestSceneCount || config.type == .performersHighestOCount {
+        if config.type == .newPerformers || config.type == .performersHighestSceneCount || config.type == .performersHighestOCount || (config.type == .savedFilter && config.category == .performers) {
             return cardHeight * 2 / 3
-        } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries {
+        } else if config.type == .newGalleries || config.type == .recentlyUpdatedGalleries || (config.type == .savedFilter && config.category == .galleries) {
             return cardHeight
+        } else if config.type == .savedFilter && config.category == .images {
+            return cardHeight // Square images
+        } else if config.type == .savedFilter && config.category == .groups {
+            return cardHeight / 1.5 // 9:12 aspect
         } else {
             return cardHeight * 16 / 9
         }
@@ -386,6 +488,18 @@ struct HomeRowView: View {
     }
     
     private func getItemCount() -> Int {
+        if config.type == .savedFilter {
+            switch config.category {
+            case .scenes: return scenes.count
+            case .performers: return performers.count
+            case .studios: return studios.count
+            case .galleries: return galleries.count
+            case .reels: return markers.count
+            case .images: return images.count
+            case .groups: return groups.count
+            default: return 0
+            }
+        }
         switch config.type {
         case .newPerformers, .performersHighestSceneCount, .performersHighestOCount: return performers.count
         case .newStudios, .studiosHighestSceneCount: return studios.count
@@ -395,6 +509,18 @@ struct HomeRowView: View {
     }
     
     private func getItems() -> [String] {
+        if config.type == .savedFilter {
+            switch config.category {
+            case .scenes: return scenes.map { $0.id }
+            case .performers: return performers.map { $0.id }
+            case .studios: return studios.map { $0.id }
+            case .galleries: return galleries.map { $0.id }
+            case .reels: return markers.map { $0.id }
+            case .images: return images.map { $0.id }
+            case .groups: return groups.map { $0.id }
+            default: return []
+            }
+        }
         switch config.type {
         case .newPerformers, .performersHighestSceneCount, .performersHighestOCount: return performers.map { $0.id }
         case .newStudios, .studiosHighestSceneCount: return studios.map { $0.id }
@@ -628,6 +754,75 @@ struct HomeGalleryCardView: View {
     var body: some View {
         GalleryCardView(gallery: gallery)
             .frame(width: isLarge ? cardWidth : cardHeight, height: cardHeight)
+    }
+}
+
+struct HomeMarkerCardView: View {
+    let marker: SceneMarker
+    var isLarge: Bool = false
+    @ObservedObject var tabManager = TabManager.shared
+    
+    private var cardWidth: CGFloat {
+        if isLarge { return tabManager.dashboardHeroSize == .big ? UIScreen.main.bounds.width - 24 : 280 }
+        return 125 * 16 / 9
+    }
+    private var cardHeight: CGFloat { cardWidth * 9 / 16 }
+    
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            HomeSceneCardView(scene: marker.scene.toScene(), isLarge: isLarge)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(marker.title)
+                    .font(.system(size: isLarge ? 14 : 10, weight: .black))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Text(marker.scene.title ?? "")
+                    .font(.system(size: isLarge ? 10 : 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.4))
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
+    }
+}
+
+struct HomeImageCardView: View {
+    let image: StashImage
+    var isLarge: Bool = false
+    @ObservedObject var tabManager = TabManager.shared
+    
+    private var cardWidth: CGFloat {
+        if isLarge { return tabManager.dashboardHeroSize == .big ? UIScreen.main.bounds.width - 24 : 280 }
+        return 125
+    }
+    private var cardHeight: CGFloat { 125 }
+    
+    var body: some View {
+        ImageThumbnailCard(image: image)
+            .frame(width: cardWidth, height: cardHeight)
+    }
+}
+
+struct HomeGroupCardView: View {
+    let group: StashGroup
+    var isLarge: Bool = false
+    @ObservedObject var tabManager = TabManager.shared
+    
+    private var cardWidth: CGFloat {
+        if isLarge { return tabManager.dashboardHeroSize == .big ? UIScreen.main.bounds.width - 24 : 280 }
+        return 125 / 1.5
+    }
+    private var cardHeight: CGFloat { 125 }
+    
+    var body: some View {
+        GroupCardView(group: group)
+            .frame(width: cardWidth, height: cardHeight)
     }
 }
 
