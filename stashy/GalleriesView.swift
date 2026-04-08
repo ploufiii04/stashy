@@ -750,8 +750,8 @@ struct GalleryItemView: View {
                 
                 Spacer()
                 
-                // Video Controls
-                    
+                // Video Controls (Mute & Play/Pause - only for videos)
+                if image.isVideo {
                     // Mute
                     BottomBarButton(
                         icon: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
@@ -776,6 +776,7 @@ struct GalleryItemView: View {
                         onInteraction()
                     }
                     Spacer()
+                }
             }
             .padding(Edge.Set.horizontal, 16)
             .frame(height: 50)

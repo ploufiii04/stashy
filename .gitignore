@@ -48,5 +48,10 @@ build_detailed.log
 build_log.txt
 
 CLAUDE.md
-gemini.md
+# StashyMarker Training Data
+stashy/scripts/to_be_labeled/
+stashy/scripts/training_data/
+stashy/scripts/skipped/
+*.mlmodel
+*.mlproj
 

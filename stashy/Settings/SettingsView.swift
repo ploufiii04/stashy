@@ -82,17 +82,19 @@ struct SettingsView: View {
                 .listRowBackground(Color.secondaryAppBackground)
             }
 
-            Section(header: Text("StashSync")) {
+            // MARK: - About
+            interactiveDevicesSection
+
+            Section(header: Text("StashyPremium")) {
                 NavigationLink(destination: StashSyncSettingsView()) {
                     Label("StashSync", systemImage: "bolt.fill")
                 }
             }
             .listRowBackground(Color.secondaryAppBackground)
 
-            // MARK: - About
-            interactiveDevicesSection
             tipSection
             aboutSection
+
         }
         .applyAppBackground()
         .navigationTitle("Settings")
@@ -634,4 +636,5 @@ struct StashSyncSettingsView: View {
 #Preview {
     SettingsView()
 }
+
 #endif

@@ -272,9 +272,9 @@ struct ImagesView: View {
 
             // Refresh data
             if let gallery = gallery {
-                viewModel.fetchGalleryImages(galleryId: gallery.id)
+                viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
             } else {
-                viewModel.fetchImages(sortBy: selectedSortOption)
+                viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
             }
         }
     }

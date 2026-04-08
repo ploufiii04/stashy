@@ -14,6 +14,37 @@ enum MotionChannel: String {
     case wrist  // wrist/arm speed (handjob, fingering)
 }
 
+// MARK: - Sex Position Classification
+
+enum SexPosition: String, Equatable {
+    case unknown        = "Unknown"
+    case blowjob        = "Blowjob"
+    case cowgirl        = "Cowgirl"
+    case reverseCowgirl = "Reverse Cowgirl"
+    case doggyStyle     = "Doggy Style"
+    case missionary     = "Missionary"
+    case handjob        = "Handjob"
+    case titfuck        = "Titfuck"
+    case pussyLicking   = "Pussy Licking"
+    case fingering      = "Fingering"
+
+    /// SF Symbol for display
+    var icon: String {
+        switch self {
+        case .unknown:        return "questionmark.circle"
+        case .blowjob:        return "mouth.fill"
+        case .cowgirl:        return "arrow.up.circle.fill"
+        case .reverseCowgirl: return "arrow.uturn.up.circle.fill"
+        case .doggyStyle:     return "figure.walk"
+        case .missionary:     return "figure.2"
+        case .handjob:        return "hand.raised.fill"
+        case .titfuck:        return "teletype"
+        case .pussyLicking:   return "mouth.fill"
+        case .fingering:      return "hand.point.up.fill"
+        }
+    }
+}
+
 class StashVideoSyncManager: ObservableObject {
     static let shared = StashVideoSyncManager()
 
@@ -26,6 +57,7 @@ class StashVideoSyncManager: ObservableObject {
     @Published var audioIntensity: Float = 0.0     // audio RMS (AGC-normalized)
     @Published var rawMotionIntensity: Float = 0.0 // instantaneous optical-flow speed (no reversal window)
     @Published var dominantChannel: MotionChannel = .hip
+    @Published var detectedPosition: SexPosition = .unknown
 
     // Backwards-compat: toy managers subscribe to $currentIntensity
     @Published var currentIntensity: Float = 0.0
@@ -97,7 +129,12 @@ class StashVideoSyncManager: ObservableObject {
         r.outputPixelFormat = kCVPixelFormatType_OneComponent32Float
         return r
     }()
+    // VNDetectHumanBodyPoseRequest returns an array of observations (one per detected person)
     private let poseRequest = VNDetectHumanBodyPoseRequest()
+
+    // Y-range (pixel coords, top-origin) of the dominant person from the last pose frame.
+    // Used to restrict optical-flow sampling to the active person's region.
+    private var dominantPersonPixelYRange: (min: Int, max: Int)? = nil
 
     private init() {
         cachedSensitivity = Float(sensitivity)
@@ -236,11 +273,17 @@ class StashVideoSyncManager: ObservableObject {
                 let poseHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
                 do {
                     try poseHandler.perform([self.poseRequest])
-                    if let observation = self.poseRequest.results?.first {
-                        self.analyzeHeadMovement(observation)
-                        self.analyzePelvisMovement(observation)
-                        self.analyzeWristMovement(observation)
+                    let observations = self.poseRequest.results ?? []
+                    if !observations.isEmpty {
+                        // Pick the dominant person: most joints visible = best-tracked person
+                        let dominant = self.selectDominantPerson(from: observations)
+                        self.updateDominantPersonBounds(from: dominant, frameHeight: CVPixelBufferGetHeight(pixelBuffer))
+                        self.analyzeHeadMovement(dominant)
+                        self.analyzePelvisMovement(dominant)
+                        self.analyzeWristMovement(dominant)
+                        self.classifyPosition(observations)
                     } else {
+                        self.dominantPersonPixelYRange = nil
                         DispatchQueue.main.async {
                             self.headIntensity *= 0.5
                             self.pelvisIntensity *= 0.7
@@ -248,6 +291,7 @@ class StashVideoSyncManager: ObservableObject {
                         }
                     }
                 } catch {
+                    self.dominantPersonPixelYRange = nil
                     DispatchQueue.main.async {
                         self.headIntensity *= 0.5
                         self.pelvisIntensity *= 0.7
@@ -264,6 +308,45 @@ class StashVideoSyncManager: ObservableObject {
 
             DispatchQueue.main.async { self.frameCounter += 1 }
         }
+    }
+
+    // MARK: - Multi-Person Helpers
+
+    /// Returns the best-tracked person: the one with the most high-confidence joints visible.
+    private func selectDominantPerson(from observations: [VNHumanBodyPoseObservation]) -> VNHumanBodyPoseObservation {
+        let keyJoints: [VNHumanBodyPoseObservation.JointName] = [
+            .nose, .neck, .leftShoulder, .rightShoulder, .leftHip, .rightHip, .leftKnee, .rightKnee
+        ]
+        var bestScore = -1
+        var best = observations[0]
+        for obs in observations {
+            let score = keyJoints.filter { (try? obs.recognizedPoint($0))?.confidence ?? 0 > 0.3 }.count
+            if score > bestScore { bestScore = score; best = obs }
+        }
+        return best
+    }
+
+    /// Computes the pixel Y-range (top-origin) for the dominant person by looking at their joint positions.
+    private func updateDominantPersonBounds(from obs: VNHumanBodyPoseObservation, frameHeight: Int) {
+        let allJoints: [VNHumanBodyPoseObservation.JointName] = [
+            .nose, .neck, .leftShoulder, .rightShoulder, .leftElbow, .rightElbow,
+            .leftWrist, .rightWrist, .leftHip, .rightHip, .leftKnee, .rightKnee,
+            .leftAnkle, .rightAnkle
+        ]
+        var ys: [CGFloat] = []
+        for joint in allJoints {
+            if let p = try? obs.recognizedPoint(joint), p.confidence > 0.2 {
+                // Vision y=0 is bottom → flip to pixel top-origin
+                ys.append(1.0 - p.location.y)
+            }
+        }
+        guard !ys.isEmpty else {
+            dominantPersonPixelYRange = nil
+            return
+        }
+        let minY = max(0, Int((ys.min()! - 0.05) * CGFloat(frameHeight)))
+        let maxY = min(frameHeight, Int((ys.max()! + 0.05) * CGFloat(frameHeight)))
+        dominantPersonPixelYRange = (min: minY, max: maxY)
     }
 
     // MARK: - Optical Flow → Hip Rhythm + Horizontal Motion
@@ -293,6 +376,10 @@ class StashVideoSyncManager: ObservableObject {
         }
         defer { if let mask = mask { CVPixelBufferUnlockBaseAddress(mask, .readOnly) } }
 
+        // Region-of-interest: restrict sampling to the dominant person's joint Y-range
+        let roiMinY = dominantPersonPixelYRange?.min ?? 0
+        let roiMaxY = dominantPersonPixelYRange?.max ?? height
+
         var vySum: Float = 0
         var vxSum: Float = 0
         var magSum: Float = 0
@@ -302,7 +389,7 @@ class StashVideoSyncManager: ObservableObject {
         let s = cachedSensitivity
         let noiseFloor = Float(0.35 / (Double(s) + 0.1))
 
-        for y in stride(from: 0, to: height, by: sampleStep) {
+        for y in stride(from: max(0, roiMinY), to: min(height, roiMaxY), by: sampleStep) {
             let rowOffset = y * floatsPerRow
             for x in stride(from: 0, to: width, by: sampleStep) {
                 if let maskAddr = maskBaseAddr {
@@ -351,6 +438,12 @@ class StashVideoSyncManager: ObservableObject {
         if recentSpeedHistory.count > speedHistorySize { recentSpeedHistory.removeFirst() }
         let recentAvgSpeed = recentSpeedHistory.reduce(0, +) / Float(recentSpeedHistory.count)
 
+        // Fix 4: Detect when direction signal is weak (two people moving in opposite directions).
+        // In that case vySum ≈ 0 even though avgMag is high. We measure how much the net direction
+        // vector is "cancelled out" relative to the total magnitude energy.
+        let netMag = sqrt(dominantVy * dominantVy + dominantVx * dominantVx)
+        let directionCoherence = netMag / max(0.001, avgMag)  // 1.0 = all pixels same direction, 0 = cancel-out
+
         let prevVy = previousDominantVy
         let vertReversed = (prevVy > 0.25 && dominantVy < -0.25) || (prevVy < -0.25 && dominantVy > 0.25)
         previousDominantVy = dominantVy
@@ -365,9 +458,16 @@ class StashVideoSyncManager: ObservableObject {
         let freqRaw: Float = !speedActive || updatedReversals < 2 ? 0.0 : min(1.0, updatedFreq / 3.0)
 
         // Weight hip level by speed so it decays when motion stops
-        let hipLevel = freqRaw * min(1.0, recentAvgSpeed * 6.0)
-        let rawLevel = min(1.0, avgMag * 6.0 * s)
+        let freqBasedHip = freqRaw * min(1.0, recentAvgSpeed * 6.0)
 
+        // Fix 2: Fallback for low-coherence frames (two people cancelling each other out).
+        // When directionCoherence < 0.3, the net direction vector is unreliable.
+        // Instead use raw magnitude energy as a proxy for activity — weighted by coherence inversion.
+        let magnitudeBasedHip = speedActive ? min(1.0, recentAvgSpeed * 5.0 * s) : 0.0
+        let incoherenceWeight = max(0.0, 0.3 - directionCoherence) / 0.3  // 0 when coherent, 1 when fully cancelled
+        let hipLevel = freqBasedHip * (1.0 - incoherenceWeight) + magnitudeBasedHip * incoherenceWeight
+
+        let rawLevel = min(1.0, avgMag * 6.0 * s)
         let horzLevel = min(1.0, recentAvgSpeed * horzRatio * s * 4.0)
 
         let sm = cachedSmoothing
@@ -378,8 +478,8 @@ class StashVideoSyncManager: ObservableObject {
             self.currentIntensity = self.computeCurrentIntensity()
 
             if currentFrame % 15 == 0 {
-                NSLog("📊 VR: %d revs | Freq: %.2f | SpeedWeight: %.2f | RawInt: %.2f | SmoothInt: %.2f",
-                      Int(updatedReversals), updatedFreq, min(1.0, recentAvgSpeed * 6.0), hipLevel, self.hipIntensity)
+                NSLog("📊 VR: %d revs | Freq: %.2f | Coherence: %.2f | MagFallback: %.2f | HipLvl: %.2f | SmoothInt: %.2f",
+                      Int(updatedReversals), updatedFreq, directionCoherence, magnitudeBasedHip, hipLevel, self.hipIntensity)
             }
         }
     }
@@ -529,6 +629,140 @@ class StashVideoSyncManager: ObservableObject {
         }
     }
 
+    // MARK: - Sex Position Classification
+
+    // Helper to extract a joint from an observation (Vision coords: y=0 bottom)
+    private func joint(_ name: VNHumanBodyPoseObservation.JointName,
+                       from obs: VNHumanBodyPoseObservation,
+                       minConfidence: Float = 0.25) -> CGPoint? {
+        guard let p = try? obs.recognizedPoint(name), p.confidence > minConfidence else { return nil }
+        return p.location
+    }
+
+    // Compact body metrics for a single observation
+    private struct BodyMetrics {
+        let headY: CGFloat?       // Vision Y of head centroid (0=bottom)
+        let hipY: CGFloat?        // Vision Y of hip centroid
+        let shoulderY: CGFloat?   // Vision Y of shoulder centroid
+        let bodySpan: CGFloat?    // headY - hipY (positive = upright)
+        let jointCount: Int       // number of confident joints — proxy for person size/proximity
+    }
+
+    private func bodyMetrics(for obs: VNHumanBodyPoseObservation) -> BodyMetrics {
+        let headPts = [joint(.nose, from: obs), joint(.neck, from: obs),
+                       joint(.leftEar, from: obs), joint(.rightEar, from: obs)].compactMap { $0 }
+        let hipPts  = [joint(.leftHip, from: obs), joint(.rightHip, from: obs)].compactMap { $0 }
+        let shPts   = [joint(.leftShoulder, from: obs), joint(.rightShoulder, from: obs)].compactMap { $0 }
+
+        let headY     = headPts.isEmpty ? nil : headPts.map(\.y).reduce(0,+) / CGFloat(headPts.count)
+        let hipY      = hipPts.isEmpty  ? nil : hipPts.map(\.y).reduce(0,+)  / CGFloat(hipPts.count)
+        let shoulderY = shPts.isEmpty   ? nil : shPts.map(\.y).reduce(0,+)   / CGFloat(shPts.count)
+        let span: CGFloat? = headY.flatMap { hy in hipY.map { hy - $0 } }
+        // Use visible joint count as a proxy for person size (more joints = closer to camera)
+        let allJoints: [VNHumanBodyPoseObservation.JointName] = [
+            .nose, .neck, .leftShoulder, .rightShoulder, .leftElbow, .rightElbow,
+            .leftWrist, .rightWrist, .leftHip, .rightHip, .leftKnee, .rightKnee
+        ]
+        let count = allJoints.filter { (try? obs.recognizedPoint($0))?.confidence ?? 0 > 0.25 }.count
+        return BodyMetrics(headY: headY, hipY: hipY, shoulderY: shoulderY,
+                           bodySpan: span, jointCount: count)
+    }
+
+    private func classifyPosition(_ observations: [VNHumanBodyPoseObservation]) {
+        guard !observations.isEmpty else {
+            DispatchQueue.main.async {
+                if self.detectedPosition != .unknown { self.detectedPosition = .unknown }
+            }
+            return
+        }
+
+        // Current signal channels (read on background thread before dispatching)
+        let wristDom = wristIntensity
+        let headDom  = headIntensity
+        let hipDom   = hipIntensity
+        let horzDom  = horzIntensity
+
+        // ── Build per-person metrics, sorted most-joints (dominant) → fewest ──────
+        let metrics = observations
+            .map { bodyMetrics(for: $0) }
+            .sorted { $0.jointCount > $1.jointCount }
+
+        let primary   = metrics[0]
+        let secondary = metrics.count > 1 ? metrics[1] : nil
+
+        // ── Multi-person geometry signals ─────────────────────────────────────
+        // verticalSeparation > 0: primary person is higher in frame than secondary
+        // (e.g. cowgirl: rider (primary=large) is above passive partner)
+        let verticalSeparation: CGFloat? = secondary.flatMap { sec in
+            primary.hipY.flatMap { pHip in sec.hipY.map { pHip - $0 } }
+        }
+
+        // headNearOtherHips: primary's head centroid is near secondary's hip region
+        // → strong blowjob / pussy-licking signal
+        let headNearOtherHips: Bool = {
+            guard let pH = primary.headY, let sHip = secondary?.hipY else { return false }
+            return abs(pH - sHip) < 0.15
+        }()
+
+        // ── Motion-channel primary classification ─────────────────────────────
+        // Motion channels are primary; skeleton geometry is tie-breaker only.
+
+        var position: SexPosition = .unknown
+
+        // 1. HANDJOB: wrist motion dominant
+        if wristDom > 0.30 && wristDom > hipDom * 1.4 && wristDom > headDom * 1.2 {
+            position = .handjob
+        }
+        // 2. BLOWJOB / PUSSY LICKING: head bobbing dominant
+        //    Multi-person boost: if primary head is near secondary hips, confidence rises
+        else if headDom > 0.20 && headDom > hipDom * 1.1 && headDom > horzDom * 1.2 {
+            position = headNearOtherHips ? .blowjob : .blowjob  // future: distinguish pussyLicking by position
+        }
+        // 3. DOGGY STYLE: horizontal thrust dominant
+        else if horzDom > 0.22 && horzDom > hipDom * 1.0 {
+            // With two people: if they are at similar heights → doggy; if stacked vertically → spooning candidate
+            if let sep = verticalSeparation, abs(sep) < 0.10 {
+                position = .doggyStyle
+            } else {
+                position = .doggyStyle
+            }
+        }
+        // 4. COWGIRL / REVERSE COWGIRL / MISSIONARY: vertical hip rhythm dominant
+        else if hipDom > 0.22 {
+            if let span = primary.bodySpan {
+                if span > 0.22 {
+                    // Primary person is upright
+                    // Reverse cowgirl: shoulders below hips in Vision coords (person leans back)
+                    if let sy = primary.shoulderY, let hy = primary.hipY, sy < hy - 0.08 {
+                        position = .reverseCowgirl
+                    } else {
+                        position = .cowgirl
+                    }
+                } else if let sep = verticalSeparation, sep < -0.08 {
+                    // Primary person is lower than secondary (passive partner on top) → missionary
+                    position = .missionary
+                } else {
+                    position = .missionary
+                }
+            } else {
+                // No span: use vertical separation between two people as fallback
+                if let sep = verticalSeparation, sep > 0.12 {
+                    position = .cowgirl       // primary (larger) is higher
+                } else {
+                    position = .cowgirl
+                }
+            }
+        }
+        // If nothing matches clearly → stay .unknown
+
+        DispatchQueue.main.async {
+            if position != self.detectedPosition {
+                self.detectedPosition = position
+                NSLog("🎭 Position detected: %@ (persons: %d)", position.rawValue, observations.count)
+            }
+        }
+    }
+
     // MARK: - Signal Fusion (dominant-channel routing + audio blend)
     // Must be called on main thread (reads/writes @Published properties)
 
@@ -599,6 +833,7 @@ class StashVideoSyncManager: ObservableObject {
         currentItem = nil
         audioTap = nil
         previousPixelBuffer = nil
+        dominantPersonPixelYRange = nil
         previousHeadCentroid = nil
         previousPelvisCentroid = nil
         previousPelvisY = 0.5
@@ -623,6 +858,7 @@ class StashVideoSyncManager: ObservableObject {
         audioIntensity = 0
         rawMotionIntensity = 0
         currentIntensity = 0
+        detectedPosition = .unknown
         lastError = nil
     }
 

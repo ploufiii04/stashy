@@ -31,6 +31,7 @@ struct ReelsView: View {
     @State private var isMediaZoomed = false
     @State private var isRotating = false
     @State private var isUIVisible = true
+    @State private var lastMainListPosition: String? // Remember position before filtering
 
     // Extracted binding to help the Swift compiler with type-checking
     // Native scroll binding
@@ -272,7 +273,31 @@ struct ReelsView: View {
 
     private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false) {
         if let providedMode = mode { reelsMode = providedMode }
-        currentVisibleSceneId = nil // Reset to allow onAppear to pick up the new first item
+
+        // Position Persistence Logic:
+        // If we change the mode, the saved position is invalid (different IDs)
+        if mode != nil && mode != reelsMode {
+            lastMainListPosition = nil
+        }
+
+        // If we are clearing filters (returning to main list) and have a saved position, restore it.
+        let isClearingFilters = performer == nil && tags.isEmpty
+        if isClearingFilters, let savedPos = lastMainListPosition {
+            print("🔄 ReelsView: Restoring scroll position to \(savedPos)")
+            currentVisibleSceneId = savedPos
+            lastMainListPosition = nil
+        } else if !isClearingFilters && lastMainListPosition == nil {
+            // If we are ADDING a filter for the first time (not already filtering), save.
+            // Check if we already have criterion set (avoid overwriting on second tag)
+            if selectedPerformer == nil && selectedTags.isEmpty {
+                print("💾 ReelsView: Saving position \(currentVisibleSceneId ?? "none") before filtering")
+                lastMainListPosition = currentVisibleSceneId
+            }
+            currentVisibleSceneId = nil // Start at top for filter results
+        } else if !isClearingFilters {
+            // Already filtered, just reset for new filter results
+            currentVisibleSceneId = nil
+        }
 
         // Update local state and handle random re-roll
         if let sortBy = sortBy {
@@ -337,7 +362,8 @@ struct ReelsView: View {
         case .clips: expectedPrefix = "clip"
         }
 
-        if currentVisibleSceneId == nil || currentPrefix != expectedPrefix {
+        // Only auto-select if nothing is selected AND we aren't restoring a position
+        if (currentVisibleSceneId == nil || currentPrefix != expectedPrefix) && lastMainListPosition == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 switch reelsMode {
                 case .scenes:
@@ -1798,39 +1824,8 @@ extension ReelItemView {
     @ViewBuilder
     private var bottomOverlay: some View {
         VStack(spacing: 0) {
-            // Tags overlay (toggled by button)
-            if showTagsOverlay {
-                let tags = item.tags
-                if !tags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(tags) { tag in
-                                Button(action: {
-                                        let fullTag = Tag(id: tag.id, name: tag.name, imagePath: nil, sceneCount: nil, galleryCount: nil, favorite: nil, createdAt: nil, updatedAt: nil)
-                                        onTagTap(fullTag)
-                                        onInteraction()
-                                    }) {
-                                        Text("#\(tag.name)")
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundColor(.white)
-                                            .padding(Edge.Set.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.black.opacity(DesignTokens.Opacity.badge))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 0.5))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(Edge.Set.horizontal, 16)
-                        }
-                        .padding(Edge.Set.bottom, 5)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                
-                // Rating overlay (expands upward)
-                if showRatingOverlay {
+            // Rating overlay (expands upward)
+            if showRatingOverlay {
                     let rating = item.rating100 ?? 0
                     HStack {
                         StarRatingView(
@@ -1858,53 +1853,76 @@ extension ReelItemView {
                 }
                 
 
-                // Performer and Title labels moved here
-                VStack(alignment: .leading, spacing: 4) {
-                    performerLabel(for: item)
-                    titleLabel(for: item)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Edge.Set.horizontal, 16)
-                .padding(Edge.Set.bottom, 8)
-
-                // Full-width progress bar
-                if !item.isAnimated {
-                    CustomVideoScrubber(
-                        value: Binding(get: { currentTime }, set: { val in
-                            currentTime = val
-                            seek(to: val)
-                        }),
-                        total: duration,
-                        onEditingChanged: { editing in
-                            isSeeking = editing
-                            if editing {
-                                player?.pause()
-                            } else {
-                                if isPlaying { player?.play() }
-                                onInteraction()
+                // Combined Info & Control Stack with even tighter spacing
+                VStack(alignment: .leading, spacing: 6) {
+                    // 1. Performer - Title (Single Line)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if !item.performers.isEmpty {
+                            performerLabel(for: item)
+                                .layoutPriority(1)
+                            Text("-")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        titleLabel(for: item)
+                    }
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    // 2. Permanent Tags
+                    let tags = item.tags
+                    if !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(tags) { tag in
+                                    Button(action: {
+                                        let fullTag = Tag(id: tag.id, name: tag.name, imagePath: nil, sceneCount: nil, galleryCount: nil, favorite: nil, createdAt: nil, updatedAt: nil)
+                                        onTagTap(fullTag)
+                                        onInteraction()
+                                    }) {
+                                        Text("#\(tag.name)")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.8))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(Color.black.opacity(0.3))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
-                    )
-                    .padding(.horizontal, 0)
-                    .padding(Edge.Set.bottom, 15) // Restore padding after progress bar
+                    }
+                    
+                    // 3. Full-width progress bar (only for videos)
+                    if !item.isAnimated {
+                        CustomVideoScrubber(
+                            value: Binding(get: { currentTime }, set: { val in
+                                currentTime = val
+                                seek(to: val)
+                            }),
+                            total: duration,
+                            onEditingChanged: { editing in
+                                isSeeking = editing
+                                if editing {
+                                    player?.pause()
+                                } else {
+                                    if isPlaying { player?.play() }
+                                    onInteraction()
+                                }
+                            }
+                        )
+                        .padding(.horizontal, 0)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6) // Tighter spacing before action buttons
                 
                 // Bottom row: Action buttons distributed across full width
                 HStack(alignment: .center, spacing: 0) {
                     Spacer()
                     
-                    // Tags button
-                    let tags = item.tags
-                    if !tags.isEmpty {
-                        BottomBarButton(icon: "tag.fill", count: tags.count) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                showTagsOverlay.toggle()
-                                showRatingOverlay = false
-                            }
-                            onInteraction()
-                        }
-                        Spacer()
-                    }
                     
                     // Rating
                     let rating = item.rating100 ?? 0
@@ -2033,7 +2051,7 @@ extension ReelItemView {
             Text(title)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.white.opacity(0.9))
-                .lineLimit(2)
+                .lineLimit(1)
                 .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
             
             // Download Indicator

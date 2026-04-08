@@ -229,6 +229,8 @@ struct SceneDetailView: View {
         }
     }
 
+
+
     var body: some View {
         mainContentView
             .background(Color.appBackground)
@@ -236,79 +238,44 @@ struct SceneDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { sceneToolbarContent }
             .toolbar(.visible, for: .navigationBar)
-            .alert("Really delete scene and files?", isPresented: $showDeleteWithFilesConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) { deleteSceneWithFiles() }
-            } message: {
-                Text("The scene '\(activeScene.title ?? "Unknown Title")' and all associated files will be permanently deleted. This action cannot be undone.")
-            }
-            .sheet(isPresented: $showingAddMarkerSheet) {
-                AddMarkerSheet(sceneId: activeScene.id, seconds: capturedMarkerTime, viewModel: viewModel) {
-                    refreshSceneDetails()
-                }
-            }
-            .onAppear { handleOnAppear() }
-            .onDisappear { handleOnDisappear() }
-            .onChange(of: isMuted) { _, newValue in
-                player?.isMuted = newValue
-            }
-            .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
-                handlePeriodicSync()
-            }
-            .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
-                handlePlaybackMarkerUpdate()
-            }
-            .overlay(
-                Group {
-                    if let player = player {
-                        Color.clear
-                            .onReceive(player.publisher(for: \.timeControlStatus)) { status in
-                                handleTimeControlStatusChange(status)
-                            }
-                                .onReceive(player.publisher(for: \.status)) { _ in
-                                                                    }
-                                .onChange(of: player.currentItem) { _, newItem in
-                                                                        ensureVideoAnalysis(for: newItem)
-                                }
-                                .onChange(of: handyManager.isStashSyncMode) { _, isStash in
-                                    if isStash { 
-                                                                                ensureVideoAnalysis(for: player.currentItem)
-                                        initialSync()
-                                    }
-                                }
-                                .onChange(of: buttplugManager.isStashSyncMode) { _, isStash in
-                                    if isStash { 
-                                                                                ensureVideoAnalysis(for: player.currentItem)
-                                        initialSync()
-                                    }
-                                }
-                                .onChange(of: loveSpouseManager.isStashSyncMode) { _, isStash in
-                                    if isStash { 
-                                                                                ensureVideoAnalysis(for: player.currentItem)
-                                        initialSync()
-                                    }
-                                }
-                    }
-                }
-            )
-            .onChange(of: handyManager.isSyncing) { _, isSyncing in
-                // Standard HSSP handling
-            }
-            .onChange(of: StashSyncManager.shared.isActive) { _, active in
-                if active { initialSync() }
-            }
-            .onChange(of: player) { _, newPlayer in
-                // When player is assigned after StashSync was already activated, set up video analysis
-                if StashSyncManager.shared.isActive, let item = newPlayer?.currentItem {
-                    ensureVideoAnalysis(for: item)
-                }
-            }
+            .modifier(SceneDetailAlertModifier(
+                showDeleteConfirmation: $showDeleteWithFilesConfirmation,
+                showingAddMarkerSheet: $showingAddMarkerSheet,
+                title: activeScene.title ?? "Unknown Title",
+                capturedMarkerTime: capturedMarkerTime,
+                sceneId: activeScene.id,
+                viewModel: viewModel,
+                onRefresh: refreshSceneDetails,
+                onDelete: deleteSceneWithFiles
+            ))
+            .modifier(lifecycleModifier)
     }
+
+    private var lifecycleModifier: SceneDetailLifecycleModifier {
+        SceneDetailLifecycleModifier(
+            sceneId: activeScene.id,
+            isMuted: $isMuted,
+            player: player,
+            onAppear: handleOnAppear,
+            onDisappear: handleOnDisappear,
+            onPeriodicSync: handlePeriodicSync,
+            onPlaybackUpdate: handlePlaybackMarkerUpdate,
+            onRefreshMarkers: refreshSceneDetails,
+            onInitialSync: initialSync,
+            onEnsureAnalysis: ensureVideoAnalysis,
+            onTimeControlChange: handleTimeControlStatusChange,
+            handyManager: handyManager,
+            buttplugManager: buttplugManager,
+            loveSpouseManager: loveSpouseManager
+        )
+    }
+
 
     private func ensureVideoAnalysis(for item: AVPlayerItem?) {
         guard let item = item else { return }
-        if handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode {
-            print("🎬 SceneDetail: Ensuring Video Analysis is setup for current item")
+        let needsForDevice = handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode
+        if needsForDevice {
+            print("🎬 SceneDetail: Ensuring Video Analysis for StashSync")
             StashVideoSyncManager.shared.setup(for: item)
             StashVideoSyncManager.shared.isActive = true
         }
@@ -385,6 +352,7 @@ struct SceneDetailView: View {
 
         if !isFullscreen {
             player?.pause()
+            StashSyncManager.shared.stop()
             if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
             if buttplugManager.isConnected { buttplugManager.stop() }
             if loveSpouseManager.isConnected { loveSpouseManager.stop() }
@@ -437,11 +405,14 @@ struct SceneDetailView: View {
         let currentTime = player.currentTime().seconds
         
         if status == .paused {
+            StashSyncManager.shared.stop()
             if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
             if buttplugManager.isSyncing || buttplugManager.isStashSyncMode { buttplugManager.pause() }
             if loveSpouseManager.isSyncing || loveSpouseManager.isStashSyncMode { loveSpouseManager.pause() }
         } else if status == .playing {
             ensureVideoAnalysis(for: player.currentItem)
+            let stashSyncActive = handyManager.isStashSyncMode || buttplugManager.isStashSyncMode || loveSpouseManager.isStashSyncMode
+            if stashSyncActive { StashSyncManager.shared.start() }
             if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.play(at: currentTime) }
             if buttplugManager.isSyncing || buttplugManager.isStashSyncMode { buttplugManager.play(at: currentTime) }
             if loveSpouseManager.isSyncing || loveSpouseManager.isStashSyncMode { loveSpouseManager.play(at: currentTime) }
@@ -870,5 +841,82 @@ struct AddMarkerSheet: View {
     }
 }
 
+
+// MARK: - Alert + Sheet Modifier (splits body chain to help type-checker)
+
+private struct SceneDetailAlertModifier: ViewModifier {
+    @Binding var showDeleteConfirmation: Bool
+    @Binding var showingAddMarkerSheet: Bool
+    let title:              String
+    let capturedMarkerTime: Double
+    let sceneId:            String
+    let viewModel:          StashDBViewModel
+    let onRefresh:          () -> Void
+    let onDelete:           () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Really delete scene and files?", isPresented: $showDeleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) { onDelete() }
+            } message: {
+                Text("The scene '\(title)' and all associated files will be permanently deleted. This action cannot be undone.")
+            }
+            .sheet(isPresented: $showingAddMarkerSheet) {
+                AddMarkerSheet(sceneId: sceneId, seconds: capturedMarkerTime, viewModel: viewModel) {
+                    onRefresh()
+                }
+            }
+    }
+}
+
+// MARK: - Lifecycle Modifier
+
+private struct SceneDetailLifecycleModifier: ViewModifier {
+    let sceneId:           String
+    @Binding var isMuted:  Bool
+    let player:            AVPlayer?
+    let onAppear:          () -> Void
+    let onDisappear:       () -> Void
+    let onPeriodicSync:    () -> Void
+    let onPlaybackUpdate:  () -> Void
+    let onRefreshMarkers:  () -> Void
+    let onInitialSync:     () -> Void
+    let onEnsureAnalysis:  (AVPlayerItem?) -> Void
+    let onTimeControlChange: (AVPlayer.TimeControlStatus) -> Void
+    let handyManager:      HandyManager
+    let buttplugManager:   ButtplugManager
+    let loveSpouseManager: LoveSpouseManager
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { onAppear() }
+            .onDisappear { onDisappear() }
+            .onChange(of: isMuted) { _, v in player?.isMuted = v }
+            .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in onPeriodicSync() }
+            .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in onPlaybackUpdate() }
+            .onChange(of: StashSyncManager.shared.isActive) { _, active in if active { onInitialSync() } }
+            .overlay(playerOverlay)
+    }
+
+    @ViewBuilder
+    private var playerOverlay: some View {
+        if let player {
+            Color.clear
+                .onReceive(player.publisher(for: \.timeControlStatus)) { onTimeControlChange($0) }
+                .onReceive(player.publisher(for: \.status)) { _ in }
+                .onChange(of: player.currentItem) { _, item in onEnsureAnalysis(item) }
+                .onChange(of: handyManager.isStashSyncMode) { _, on in
+                    if on { onEnsureAnalysis(player.currentItem); onInitialSync() }
+                }
+                .onChange(of: buttplugManager.isStashSyncMode) { _, on in
+                    if on { onEnsureAnalysis(player.currentItem); onInitialSync() }
+                }
+                .onChange(of: loveSpouseManager.isStashSyncMode) { _, on in
+                    if on { onEnsureAnalysis(player.currentItem); onInitialSync() }
+                }
+        }
+    }
+}
 
 #endif

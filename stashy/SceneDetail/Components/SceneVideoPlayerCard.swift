@@ -21,6 +21,7 @@ struct SceneVideoPlayerCard: View {
     @ObservedObject var buttplugManager = ButtplugManager.shared
     @ObservedObject var loveSpouseManager = LoveSpouseManager.shared
     
+
     // Preview state
     @State private var previewPlayer: AVPlayer?
     @State private var isPressing = false
@@ -313,6 +314,7 @@ struct SceneVideoPlayerCard: View {
                     Spacer(minLength: 4)
                     stashSyncButton
                 }
+
             }
             .frame(maxWidth: .infinity)
         }
@@ -367,6 +369,7 @@ struct SceneVideoPlayerCard: View {
         }
         .buttonStyle(.plain)
     }
+
 
     @ViewBuilder
     private var ratingMenu: some View {
