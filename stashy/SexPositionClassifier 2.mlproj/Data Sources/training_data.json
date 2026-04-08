@@ -1,0 +1,51 @@
+{
+  "activityEntities" : [
+    "dataSourceMetrics",
+    [
+      {
+        "createdDate" : "2026-04-04T20:38:58Z",
+        "event" : "dataSourceMetrics",
+        "id" : "084227BF-619B-4B72-86BB-AF54043D0AD6",
+        "subtitle" : "6 Classes, 370 Items",
+        "title" : "Data Summary"
+      }
+    ],
+    "dataSourceCreated",
+    [
+      {
+        "createdDate" : "2026-04-04T20:38:11Z",
+        "event" : "dataSourceCreated",
+        "id" : "5FC5E9C5-04E8-4A4D-9815-D03269213D4C",
+        "subtitle" : "training_data",
+        "title" : "Data Source Created"
+      }
+    ],
+    "dataSourceTrainingStarted",
+    [
+      {
+        "createdDate" : "2026-04-04T20:38:58Z",
+        "event" : "dataSourceTrainingStarted",
+        "id" : "742023BF-E341-4895-A9C2-B93C45FA9BB7",
+        "subtitle" : "SexPositionClassifier 1",
+        "title" : "Used By"
+      }
+    ]
+  ],
+  "createdDate" : "2026-04-04T20:38:11Z",
+  "dataPathRelativeToProjectURL" : "../stashy/scripts/training_data/",
+  "dataResult" : {
+    "createdDate" : "2026-04-04T20:38:11Z",
+    "dataSourceID" : "966F5B05-B54C-461E-8F8C-68DA0DF87051",
+    "dataURL" : "file:///Users/letzgo/Nextcloud/code/stashy/stashy/scripts/training_data/"
+  },
+  "dataURL" : "file:///Users/letzgo/Nextcloud/code/stashy/stashy/scripts/training_data/",
+  "experimentIDs" : [
+    "5087C96A-0BDB-4E2E-8855-006CEB924E74"
+  ],
+  "id" : "966F5B05-B54C-461E-8F8C-68DA0DF87051",
+  "modifiedDate" : "2026-04-04T20:38:58Z",
+  "pathType" : 0,
+  "preferredFilename" : "training_data",
+  "title" : "training_data",
+  "version" : "1.0"
+}

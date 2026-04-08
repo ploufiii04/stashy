@@ -1,0 +1,29 @@
+{
+  "activityEntities" : [
+    "projectCreated",
+    [
+      {
+        "createdDate" : "2026-04-04T20:37:24Z",
+        "event" : "projectCreated",
+        "id" : "031ED858-4664-458F-9DC4-57B7D5004C28",
+        "subtitle" : "SexPositionClassifier",
+        "title" : "Project Created"
+      }
+    ]
+  ],
+  "authorName" : "Daniel Goletz",
+  "createdDate" : "2026-04-04T20:37:24Z",
+  "description" : "",
+  "id" : "8172A352-F3D0-4DB0-A964-47A7404F93B5",
+  "license" : "",
+  "location" : "",
+  "modifiedDate" : "2026-04-04T20:37:24Z",
+  "projectName" : "SexPositionClassifier",
+  "settingsEntity" : {
+    "snapshotOnExtendTraining" : true,
+    "snapshotOnResumeTraining" : false
+  },
+  "taskType" : "actionClassifier",
+  "title" : "Action Classification",
+  "version" : "1.1"
+}
