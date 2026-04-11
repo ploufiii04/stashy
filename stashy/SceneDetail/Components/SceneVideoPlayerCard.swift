@@ -297,9 +297,10 @@ struct SceneVideoPlayerCard: View {
     private var metadataSwipeBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 0) {
-                oCounterButton
-                Spacer(minLength: 4)
                 ratingMenu
+                
+                Spacer(minLength: 4)
+                oCounterButton
                 
                 if let playCount = activeScene.playCount, playCount > 0 {
                     Spacer(minLength: 4)
@@ -373,39 +374,37 @@ struct SceneVideoPlayerCard: View {
 
     @ViewBuilder
     private var ratingMenu: some View {
-        Menu {
-            Section("Rate Scene") {
-                ForEach((1...5).reversed(), id: \.self) { starCount in
-                    Button(action: {
-                        let newRating = starCount * 20
-                        viewModel.updateSceneRating(sceneId: activeScene.id, rating100: newRating) { success in
-                            if success {
-                                DispatchQueue.main.async { activeScene = activeScene.withRating(newRating) }
+        HStack(spacing: 4) {
+            StarRatingView(
+                rating100: activeScene.rating100,
+                isInteractive: true,
+                size: 14,
+                spacing: 2,
+                onRatingChanged: { newRating in
+                    // Optimistic UI: Update locally immediately
+                    let originalScene = activeScene
+                    DispatchQueue.main.async {
+                        activeScene = activeScene.withRating(newRating)
+                    }
+                    
+                    // Perform server update
+                    viewModel.updateSceneRating(sceneId: activeScene.id, rating100: newRating) { success in
+                        if !success {
+                            // Revert on failure
+                            DispatchQueue.main.async {
+                                activeScene = originalScene
+                                ToastManager.shared.show("Failed to update rating", icon: "exclamationmark.triangle", style: .error)
                             }
                         }
-                    }) {
-                        Label("\(starCount) Stars", systemImage: "star.fill")
                     }
                 }
-                
-                Button(role: .destructive, action: {
-                    viewModel.updateSceneRating(sceneId: activeScene.id, rating100: nil) { success in
-                        if success {
-                            DispatchQueue.main.async { activeScene = activeScene.withRating(nil) }
-                        }
-                    }
-                }) {
-                    Label("No Rating", systemImage: "star.slash")
-                }
-            }
-        } label: {
-            let stars = Double(activeScene.rating100 ?? 0) / 20.0
-            infoPill(
-                icon: activeScene.rating100 == nil ? "star" : "star.fill",
-                text: activeScene.rating100 == nil ? "Rate" : String(format: "%.1f", stars),
-                color: activeScene.rating100 == nil ? Color.pillAccent : .orange
             )
         }
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(Color.pillAccent.opacity(0.1))
+        .foregroundColor(Color.pillAccent)
+        .clipShape(Capsule())
     }
 
 

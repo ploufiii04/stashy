@@ -21,6 +21,7 @@ struct CatalogsView: View {
         case studios = "Studios"
         case tags = "Tags"
         case groups = "Groups"
+        case markers = "Markers"
         
         var icon: String {
             switch self {
@@ -32,13 +33,14 @@ struct CatalogsView: View {
             case .studios: return "building.2"
             case .tags: return "tag"
             case .groups: return "rectangle.stack.fill"
+            case .markers: return "bookmark.fill"
             }
         }
     }
     
     private var sortedVisibleTabs: [CatalogsTab] {
         tabManager.tabs
-            .filter { ($0.id == .dashboard || $0.id == .performers || $0.id == .studios || $0.id == .tags || $0.id == .scenes || $0.id == .galleries || $0.id == .groups) && $0.isVisible }
+            .filter { ($0.id == .dashboard || $0.id == .performers || $0.id == .studios || $0.id == .tags || $0.id == .scenes || $0.id == .galleries || $0.id == .groups || $0.id == .markers) && $0.isVisible }
             .sorted { $0.sortOrder < $1.sortOrder }
             .compactMap { (config: TabConfig) -> CatalogsTab? in
                 switch config.id {
@@ -49,6 +51,7 @@ struct CatalogsView: View {
                 case .studios: return .studios
                 case .tags: return .tags
                 case .groups: return .groups
+                case .markers: return .markers
                 default: return nil
                 }
             }
@@ -107,6 +110,8 @@ struct CatalogsView: View {
                     TagsView(hideTitle: false)
                 case .groups:
                     GroupsView(hideTitle: false)
+                case .markers:
+                    MarkersView(hideTitle: false)
                 }
             } else {
                 VStack {
@@ -114,7 +119,7 @@ struct CatalogsView: View {
                     Image(systemName: "square.grid.2x2")
                         .font(.system(size: 64))
                         .foregroundColor(.secondary)
-                    Text("Please enable Dashboard, Performers, Studios, Tags or Groups in Settings")
+                    Text("Please enable Dashboard, Performers, Studios, Tags, Groups or Markers in Settings")
                         .foregroundColor(.secondary)
                     Spacer()
                 }

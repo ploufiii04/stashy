@@ -23,6 +23,7 @@ struct DefaultFilterView: View {
                 filterPicker(for: .studios, title: "Studios", icon: "building.2")
                 filterPicker(for: .groups, title: "Groups", icon: "rectangle.stack.fill")
                 filterPicker(for: .tags, title: "Tags", icon: "tag")
+                filterPicker(for: .markers, title: "Markers", icon: "bookmark.fill", modeOverride: .sceneMarkers)
             } header: {
                 Text("Default Filters")
             } footer: {

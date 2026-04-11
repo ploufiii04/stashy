@@ -730,7 +730,7 @@ struct CustomVideoScrubber: View {
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .frame(height: 10) // Small height container
+        .frame(height: 20) // Match touch area height
         .focusable(false)
         #if !os(tvOS)
         .focusEffectDisabled()
@@ -860,7 +860,9 @@ public struct FilterMapper {
     // MARK: - Private Helpers
     
     private static func isSceneSpecificKey(_ key: String) -> Bool {
-        let keys: Set<String> = ["orientation", "duration", "rating100", "organized", "performers", "tags", "studios", "movies"]
+        // "tags" is NOT scene-specific for markers — SceneMarkerFilterType has its own
+        // top-level "tags" field (the marker's tag). Only truly scene-only fields go here.
+        let keys: Set<String> = ["orientation", "duration", "rating100", "organized", "performers", "studios", "movies"]
         return keys.contains(key)
     }
     

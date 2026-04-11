@@ -44,6 +44,7 @@ struct DefaultSortView: View {
         case .tags:     tagsSortRow(tab: tab)
         case .images:   imagesSortRow(tab: tab)
         case .groups:   groupsSortRow(tab: tab)
+        case .markers:  markersSortRow(tab: tab)
         default:        EmptyView()
         }
     }
@@ -538,6 +539,57 @@ struct DefaultSortView: View {
                     }
                 } label: {
                     HStack { Text("Date"); if binding.wrappedValue == .dateAsc || binding.wrappedValue == .dateDesc { Image(systemName: "checkmark") } }
+                }
+            } label: {
+                Text(binding.wrappedValue.displayName).foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    // MARK: Markers
+    
+    private func markersSortRow(tab: AppTab) -> some View {
+        let binding = Binding<StashDBViewModel.SceneMarkerSortOption>(
+            get: { StashDBViewModel.SceneMarkerSortOption(rawValue: tabManager.getPersistentSortOption(for: tab) ?? "") ?? .createdAtDesc },
+            set: { tabManager.setPersistentSortOption(for: tab, option: $0.rawValue) }
+        )
+        return HStack {
+            Label(tab.title, systemImage: tab.icon)
+            Spacer()
+            Menu {
+                Button(action: { binding.wrappedValue = .random }) {
+                    HStack { Text("Random"); if binding.wrappedValue == .random { Image(systemName: "checkmark") } }
+                }
+                Divider()
+                Menu {
+                    Button(action: { binding.wrappedValue = .titleAsc }) {
+                        HStack { Text("A → Z"); if binding.wrappedValue == .titleAsc { Image(systemName: "checkmark") } }
+                    }
+                    Button(action: { binding.wrappedValue = .titleDesc }) {
+                        HStack { Text("Z → A"); if binding.wrappedValue == .titleDesc { Image(systemName: "checkmark") } }
+                    }
+                } label: {
+                    HStack { Text("Name"); if binding.wrappedValue == .titleAsc || binding.wrappedValue == .titleDesc { Image(systemName: "checkmark") } }
+                }
+                Menu {
+                    Button(action: { binding.wrappedValue = .createdAtDesc }) {
+                        HStack { Text("Newest First"); if binding.wrappedValue == .createdAtDesc { Image(systemName: "checkmark") } }
+                    }
+                    Button(action: { binding.wrappedValue = .createdAtAsc }) {
+                        HStack { Text("Oldest First"); if binding.wrappedValue == .createdAtAsc { Image(systemName: "checkmark") } }
+                    }
+                } label: {
+                    HStack { Text("Created"); if binding.wrappedValue == .createdAtAsc || binding.wrappedValue == .createdAtDesc { Image(systemName: "checkmark") } }
+                }
+                Menu {
+                    Button(action: { binding.wrappedValue = .updatedAtDesc }) {
+                        HStack { Text("Recently Updated"); if binding.wrappedValue == .updatedAtDesc { Image(systemName: "checkmark") } }
+                    }
+                    Button(action: { binding.wrappedValue = .updatedAtAsc }) {
+                        HStack { Text("Least Recently"); if binding.wrappedValue == .updatedAtAsc { Image(systemName: "checkmark") } }
+                    }
+                } label: {
+                    HStack { Text("Updated"); if binding.wrappedValue == .updatedAtAsc || binding.wrappedValue == .updatedAtDesc { Image(systemName: "checkmark") } }
                 }
             } label: {
                 Text(binding.wrappedValue.displayName).foregroundColor(.secondary)

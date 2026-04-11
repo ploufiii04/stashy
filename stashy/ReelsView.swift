@@ -135,26 +135,23 @@ struct ReelsView: View {
                 return s.bestStream(for: quality) ?? s.videoURL
                 
             case .marker(let m):
-                // 0. Check local first (using the scene's video)
-                if let scene = m.scene, let local = scene.videoURL, !local.absoluteString.hasPrefix("http") {
-                    print("📂 Reels: Using local download for marker's scene")
-                    return local
+                let potentialURL: URL?
+                if let streamPath = m.stream, let url = URL(string: streamPath) {
+                    potentialURL = url
+                } else if let config = ServerConfigManager.shared.loadConfig() {
+                    potentialURL = URL(string: "\(config.baseURL)/scenemarker/\(m.id)/stream")
+                } else {
+                    potentialURL = nil
                 }
                 
-                // Always use the full scene stream for markers to allow seeking/looping
-                if let sceneID = m.scene?.id, let config = ServerConfigManager.shared.loadConfig() {
-                    // Try to get HLS stream for the scene with reels quality first
-                    if let scene = m.scene, let url = scene.bestStream(for: quality) {
-                        return url
-                    }
-                    
-                    var urlString = "\(config.baseURL)/scene/\(sceneID)/stream"
-                    if let key = config.secureApiKey {
-                        urlString += "?apikey=\(key)"
-                    }
-                    return URL(string: urlString)
+                guard let config = ServerConfigManager.shared.activeConfig, let key = config.secureApiKey, !key.isEmpty, let url = potentialURL else { return potentialURL }
+                var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                var items = comps?.queryItems ?? []
+                if !items.contains(where: { $0.name == "apikey" }) {
+                    items.append(URLQueryItem(name: "apikey", value: key.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    comps?.queryItems = items
                 }
-                return m.videoURL
+                return comps?.url ?? url
                 
             case .clip(let c):
                 // For clips (images that are videos or animations), the imagePath IS the video path
@@ -165,14 +162,14 @@ struct ReelsView: View {
         var startTime: Double {
             switch self {
             case .scene: return 0
-            case .marker(let m): return m.seconds
+            case .marker: return 0
             case .clip: return 0
             }
         }
 
         var endTime: Double? {
             switch self {
-            case .marker(let m): return m.endSeconds
+            case .marker: return nil
             default: return nil
             }
         }
@@ -180,7 +177,9 @@ struct ReelsView: View {
         var duration: Double? {
             switch self {
             case .scene(let s): return s.duration
-            case .marker(let m): return m.scene?.files?.first?.duration
+            case .marker(let m): 
+                if let end = m.endSeconds { return end - m.seconds }
+                return nil
             case .clip(let c): return c.visual_files?.first?.duration
             }
         }
@@ -264,7 +263,7 @@ struct ReelsView: View {
     private var currentReelItems: [ReelItemData] {
         switch reelsMode {
         case .scenes: return viewModel.scenes.map { ReelItemData.scene($0) }
-        case .markers: return viewModel.sceneMarkers.map { ReelItemData.marker($0) }
+        case .markers: return viewModel.sceneMarkers.filter { $0.stream != nil && !$0.stream!.isEmpty }.map { ReelItemData.marker($0) }
         case .clips: return viewModel.clips.map { ReelItemData.clip($0) }
         }
     }
@@ -1853,8 +1852,8 @@ extension ReelItemView {
                 }
                 
 
-                // Combined Info & Control Stack with even tighter spacing
-                VStack(alignment: .leading, spacing: 6) {
+                // Combined Info & Control Stack
+                VStack(alignment: .leading, spacing: 0) {
                     // 1. Performer - Title (Single Line)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         if !item.performers.isEmpty {
@@ -1868,7 +1867,8 @@ extension ReelItemView {
                     }
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    
+                    .padding(.horizontal, 16)
+
                     // 2. Permanent Tags
                     let tags = item.tags
                     if !tags.isEmpty {
@@ -1892,10 +1892,13 @@ extension ReelItemView {
                                     .buttonStyle(.plain)
                                 }
                             }
+                            .padding(.horizontal, 16)
                         }
+                        .frame(height: 20)
+                        .padding(.top, 6)
                     }
-                    
-                    // 3. Full-width progress bar (only for videos)
+
+                    // 3. Full-width progress bar — edge to edge, no horizontal padding
                     if !item.isAnimated {
                         CustomVideoScrubber(
                             value: Binding(get: { currentTime }, set: { val in
@@ -1913,11 +1916,10 @@ extension ReelItemView {
                                 }
                             }
                         )
-                        .padding(.horizontal, 0)
+                        .padding(.top, 8)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6) // Tighter spacing before action buttons
+                .padding(.bottom, 4)
                 
                 // Bottom row: Action buttons distributed across full width
                 HStack(alignment: .center, spacing: 0) {
@@ -2212,23 +2214,9 @@ extension ReelItemView {
                 self.currentTime = time.seconds
             }
             
-            // Marker Loop Logic (use end_seconds if available, otherwise 20s clip)
-            if case .marker = self.item {
-                 let start = self.item.startTime
-                 let end = self.item.endTime ?? (start + 20.0)
-                 if time.seconds >= end {
-                     if TabManager.shared.reelsContinuousPlay {
-                         self.onVideoEnded()
-                     } else {
-                         player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-                         player.play()
-                     }
-                 }
-            } else {
-                 // Scene duration update
-                 if let d = player.currentItem?.duration.seconds, d > 0, !d.isNaN {
-                     self.duration = d
-                 }
+            // Media duration update
+            if let d = player.currentItem?.duration.seconds, d > 0, !d.isNaN {
+                self.duration = d
             }
         }
         

@@ -51,7 +51,7 @@ struct TabSettingsView: View {
                 ForEach(tabManager.tabs.filter { 
                     $0.id == .scenes || $0.id == .galleries || $0.id == .performers || 
                     $0.id == .studios || $0.id == .tags || $0.id == .images || 
-                    $0.id == .groups
+                    $0.id == .groups || $0.id == .markers
                 }.sorted { $0.sortOrder < $1.sortOrder }) { tab in
                     Toggle(isOn: Binding(
                         get: { tab.isVisible },

@@ -840,6 +840,7 @@ class StashDBViewModel: ObservableObject {
         isLoadingSavedFilters = false // Reset filter loading state
         errorMessage = nil
         isFetchingStats = false
+        lastStatsFetch = nil
         isFetchingFilters = false
         isFetchingHomeRows.removeAll()
         
@@ -1143,23 +1144,78 @@ class StashDBViewModel: ObservableObject {
           "query": "{ stats { scene_count scenes_size scenes_duration image_count images_size gallery_count performer_count studio_count movie_count tag_count } }"
         }
         """
-        
+
         performGraphQLQuery(query: statisticsQuery) { [weak self] (response: StashStatisticsResponse?) in
             guard let self = self else { return }
             self.isFetchingStats = false
             self.lastStatsFetch = Date()
-            
+
             if let stats = response?.data?.stats {
                 DispatchQueue.main.async {
                     self.statistics = stats
-                    self.errorMessage = nil // Clear error on success
+                    self.errorMessage = nil
+                    self.fetchMarkerCountStandalone()
                     completion?(true)
                 }
             } else {
                 DispatchQueue.main.async {
-                    self.errorMessage = "Statistics could not be loaded - possibly not supported"
+                    self.errorMessage = "Statistics could not be loaded"
                     completion?(false)
                 }
+            }
+        }
+    }
+
+    private var cachedMarkerCountKey: String {
+        let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
+        return "cachedMarkerCount_\(serverID)"
+    }
+
+    private func fetchMarkerCountStandalone() {
+        // Apply cached value immediately so the card never shows 0
+        let cached = UserDefaults.standard.integer(forKey: cachedMarkerCountKey)
+        if cached > 0 {
+            DispatchQueue.main.async {
+                guard let current = self.statistics, current.sceneMarkerCount == nil else { return }
+                self.statistics = Statistics(
+                    sceneCount: current.sceneCount,
+                    scenesSize: current.scenesSize,
+                    scenesDuration: current.scenesDuration,
+                    imageCount: current.imageCount,
+                    imagesSize: current.imagesSize,
+                    galleryCount: current.galleryCount,
+                    performerCount: current.performerCount,
+                    studioCount: current.studioCount,
+                    movieCount: current.movieCount,
+                    tagCount: current.tagCount,
+                    sceneMarkerCount: cached
+                )
+            }
+        }
+
+        let markersCountQuery = """
+        {
+          "query": "{ findSceneMarkers(filter: { per_page: 1 }) { count } }"
+        }
+        """
+        performGraphQLQuery(query: markersCountQuery) { [weak self] (response: MarkersResponse?) in
+            guard let self = self, let count = response?.data?.findSceneMarkers.count else { return }
+            UserDefaults.standard.set(count, forKey: self.cachedMarkerCountKey)
+            DispatchQueue.main.async {
+                guard let current = self.statistics else { return }
+                self.statistics = Statistics(
+                    sceneCount: current.sceneCount,
+                    scenesSize: current.scenesSize,
+                    scenesDuration: current.scenesDuration,
+                    imageCount: current.imageCount,
+                    imagesSize: current.imagesSize,
+                    galleryCount: current.galleryCount,
+                    performerCount: current.performerCount,
+                    studioCount: current.studioCount,
+                    movieCount: current.movieCount,
+                    tagCount: current.tagCount,
+                    sceneMarkerCount: count
+                )
             }
         }
     }
@@ -1253,16 +1309,16 @@ class StashDBViewModel: ObservableObject {
             if let result = response?.data?.findSceneMarkers {
                 DispatchQueue.main.async {
                     if isInitialLoad {
-                        self.sceneMarkers = result.scene_markers
+                        self.sceneMarkers = result.scene_markers ?? []
                         self.totalSceneMarkers = result.count
                     } else {
                         // Deduplicate: Only add markers that aren't already in the list
                         let existingIds = Set(self.sceneMarkers.map { $0.id })
-                        let newMarkers = result.scene_markers.filter { !existingIds.contains($0.id) }
+                        let newMarkers = (result.scene_markers ?? []).filter { !existingIds.contains($0.id) }
                         self.sceneMarkers.append(contentsOf: newMarkers)
                     }
                     
-                    self.hasMoreMarkers = result.scene_markers.count == self.markersPerPage
+                    self.hasMoreMarkers = (result.scene_markers ?? []).count == self.markersPerPage
                     self.currentMarkerPage = page
                     self.isLoadingMarkers = false
                     self.isLoading = false
@@ -1378,6 +1434,20 @@ class StashDBViewModel: ObservableObject {
     
     // MARK: - Home Tab Support
     
+    /// Convenience: dispatch to the correct fetch method based on row content type.
+    func refreshHomeRow(config: HomeRowConfig, limit: Int = 10) {
+        switch config.type {
+        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
+            fetchPerformersForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
+        case .newStudios, .studiosHighestSceneCount:
+            fetchStudiosForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
+        case .newGalleries, .recentlyUpdatedGalleries:
+            fetchGalleriesForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
+        default:
+            fetchScenesForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
+        }
+    }
+
     func fetchScenesForHomeRow(config: HomeRowConfig, limit: Int = 10, forceRefresh: Bool = false, completion: @escaping ([Scene]) -> Void) {
         let rowType = config.type
         
@@ -3989,6 +4059,7 @@ struct Statistics: Codable {
     let studioCount: Int
     let movieCount: Int
     let tagCount: Int
+    let sceneMarkerCount: Int?
     
     enum CodingKeys: String, CodingKey {
         case sceneCount = "scene_count"
@@ -4001,6 +4072,7 @@ struct Statistics: Codable {
         case studioCount = "studio_count"
         case movieCount = "movie_count"
         case tagCount = "tag_count"
+        case sceneMarkerCount = "scene_marker_count"
     }
 }
 
@@ -4050,7 +4122,7 @@ struct MarkersData: Codable {
 
 struct FindMarkersResult: Codable {
     let count: Int
-    let scene_markers: [SceneMarker]
+    let scene_markers: [SceneMarker]?
 }
 
 struct SingleSceneResponse: Codable {
@@ -6109,6 +6181,35 @@ extension StashDBViewModel {
             
             performGraphQLQuery(query: bodyString) { (response: GalleriesResponse?) in
                 continuation.resume(returning: response?.data?.findGalleries.galleries ?? [])
+            }
+        }
+    }
+
+    func searchMarkersAsync(query: String, limit: Int = 5) async -> [SceneMarker] {
+        await withCheckedContinuation { continuation in
+            let graphqlQuery = GraphQLQueries.queryWithFragments("findSceneMarkers")
+            
+            let body: [String: Any] = [
+                "query": graphqlQuery,
+                "variables": [
+                    "filter": [
+                        "q": query,
+                        "per_page": limit,
+                        "page": 1,
+                        "sort": "title",
+                        "direction": "ASC"
+                    ]
+                ]
+            ]
+            
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: body),
+                  let bodyString = String(data: bodyData, encoding: .utf8) else {
+                continuation.resume(returning: [])
+                return
+            }
+            
+            performGraphQLQuery(query: bodyString) { (response: MarkersResponse?) in
+                continuation.resume(returning: response?.data?.findSceneMarkers.scene_markers ?? [])
             }
         }
     }

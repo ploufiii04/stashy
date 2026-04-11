@@ -147,58 +147,72 @@ struct SettingsView: View {
                 openURL(url)
             }
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "apple.logo")
-                    .font(.system(size: 20))
-                    .foregroundColor(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.15))
-                    .clipShape(Circle())
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Get on the App Store")
-                        .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "apple.logo")
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("Support with an App Store download")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("You're using a TestFlight build")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundColor(.white)
+                        Text("Help support stashy on the App Store")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+
+                    Spacer()
                 }
 
-                Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    featureRow(icon: "arrow.triangle.2.circlepath", text: "Free updates, forever")
+                    featureRow(icon: "star.fill", text: "Ratings help others discover stashy")
+                    featureRow(icon: "bolt.heart.fill", text: "Directly supports solo development")
+                }
 
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.white.opacity(0.6))
+                HStack {
+                    Spacer()
+                    Text("Get stashy on the App Store")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+                .padding(.top, 2)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
         }
         .listRowBackground(
             LinearGradient(
-                colors: [Color.blue, Color.purple.opacity(0.8)],
-                startPoint: .leading,
-                endPoint: .trailing
+                colors: [Color(red: 0.18, green: 0.38, blue: 0.95), Color(red: 0.55, green: 0.2, blue: 0.85)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
         )
+    }
+
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.9))
+                .frame(width: 18)
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.9))
+        }
     }
 
     // MARK: - Tip Jar
 
     private var tipSection: some View {
-        Section(
-            header: Text("Tipp"),
-            footer: VStack(alignment: .leading, spacing: 4) {
-                if storeManager.totalTipsCount > 0 {
-                    Text("You have tipped \(storeManager.totalTipsCount) times. Thank you! 💖")
-                        .foregroundColor(appearanceManager.tintColor)
-                        .fontWeight(.medium)
-                        .padding(.top, 2)
-                } else {
-                    Text("Support the development of stashy!")
-                }
-            }
-        ) {
+        Section(header: Text("Tipp")) {
             if storeManager.products.isEmpty {
                 // Fallback / Loading state
                 tipRow(icon: "heart", title: "Small", price: "2,99 €")
@@ -259,18 +273,13 @@ struct SettingsView: View {
                     Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                         .foregroundColor(appearanceManager.tintColor)
                 }
-                Link(destination: URL(string: "https://discord.gg/hYWBxY7P")!) {
+                Link(destination: URL(string: "https://discord.gg/D8wXv6Pm")!) {
                     Label("Discord", systemImage: "bubble.left.and.bubble.right.fill")
                         .foregroundColor(appearanceManager.tintColor)
                 }
             }
             .listRowBackground(Color.secondaryAppBackground)
             
-            Text("🚧 crafted by letzgo")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity)
-                .listRowBackground(Color.clear)
         }
     }
     // MARK: - Interactive Devices

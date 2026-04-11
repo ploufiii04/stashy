@@ -142,6 +142,13 @@ class NavigationCoordinator: ObservableObject {
         self.catalogueSubTab = "Groups"
         self.selectedTab = .catalogue
     }
+
+    func navigateToMarkers(search: String = "") {
+        self.activeSearchText = search
+        self.catalogueTabID = UUID()
+        self.catalogueSubTab = "Markers"
+        self.selectedTab = .catalogue
+    }
     
     func navigateToReels(performer: ScenePerformer? = nil, tags: [Tag] = []) {
         self.reelsPerformer = performer

@@ -15,27 +15,28 @@ struct DashboardSettingsView: View {
     var body: some View {
         List {
             Section {
+                Toggle("Show Hero Background", isOn: Binding(
+                    get: { tabManager.showDashboardHeroBackground },
+                    set: { tabManager.showDashboardHeroBackground = $0 }
+                ))
+                .tint(appearanceManager.tintColor)
+
                 Toggle("Compact Statistics", isOn: Binding(
                     get: { tabManager.useCompactStatistics },
                     set: { tabManager.useCompactStatistics = $0 }
                 ))
                 .tint(appearanceManager.tintColor)
-            } footer: {
-                Text("Show statistics as a single compact card with a 2-column layout instead of a horizontal scrolling row.")
-            }
-            .listRowBackground(Color.secondaryAppBackground)
 
-            Section {
-                Toggle("Big Hero Layout", isOn: Binding(
-                    get: { tabManager.dashboardHeroSize == .big },
-                    set: { tabManager.dashboardHeroSize = $0 ? .big : .small }
+                Toggle("Colored Statistics", isOn: Binding(
+                    get: { tabManager.useColoredStatistics },
+                    set: { tabManager.useColoredStatistics = $0 }
                 ))
                 .tint(appearanceManager.tintColor)
             } footer: {
-                Text("Enable Big Hero to show one item at a time with full-width paging. If disabled, a standard carousel will be shown.")
+                Text("Show statistics as a single compact card, toggle the blurred hero background, and choose between colorful or appearance-colored stat cards.")
             }
             .listRowBackground(Color.secondaryAppBackground)
-            
+
             Section {
                 ForEach(tabManager.homeRows) { row in
                     Toggle(isOn: Binding(

@@ -7,65 +7,37 @@ struct HomeStatisticsRowView: View {
     @ObservedObject var tabManager = TabManager.shared
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @EnvironmentObject var coordinator: NavigationCoordinator
-    
+    var isFirst: Bool = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Statistics")
                 .font(.headline)
                 .foregroundColor(.primary)
                 .padding(.horizontal, 12)
+                .padding(.top, isFirst ? 16 : 0)
 
-            // Einzeiliges scrollbares Menü
             if let stats = viewModel.statistics {
                 let sortedTabs = tabManager.tabs
-                    .filter { tab in
-                        (tab.id == .scenes || tab.id == .galleries || tab.id == .images ||
-                         tab.id == .performers || tab.id == .studios || tab.id == .tags || tab.id == .groups) && tab.isVisible
-                    }
+                    .filter { [.scenes, .galleries, .images, .performers, .studios, .tags, .groups, .markers].contains($0.id) && $0.isVisible }
                     .sorted { $0.sortOrder < $1.sortOrder }
 
                 if tabManager.useCompactStatistics {
-                    compactStatisticsCard(sortedTabs: sortedTabs, stats: stats)
+                    compactCard(sortedTabs: sortedTabs, stats: stats)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                        ForEach(sortedTabs) { tab in
-                            Group {
-                                switch tab.id {
-                                case .scenes:
-                                    StatCard(title: "Scenes", value: formatCount(stats.sceneCount), icon: "film", color: .blue)
-                                        .onTapGesture { coordinator.navigateToScenes() }
-                                case .galleries:
-                                    StatCard(title: "Galleries", value: formatCount(stats.galleryCount), icon: "photo.stack", color: .green)
-                                        .onTapGesture { coordinator.navigateToGalleries() }
-                                case .images:
-                                    StatCard(title: "Images", value: formatCount(stats.imageCount), icon: "photo", color: .teal)
-                                        .onTapGesture { coordinator.navigateToImages() }
-                                case .performers:
-                                    StatCard(title: "Performers", value: formatCount(stats.performerCount), icon: "person.2", color: .purple)
-                                        .onTapGesture { coordinator.navigateToPerformers() }
-                                case .studios:
-                                    StatCard(title: "Studios", value: formatCount(stats.studioCount), icon: "building.2", color: .orange)
-                                        .onTapGesture { coordinator.navigateToStudios() }
-                                case .tags:
-                                    StatCard(title: "Tags", value: formatCount(stats.tagCount), icon: "tag", color: .pink)
-                                        .onTapGesture { coordinator.navigateToTags() }
-                                case .groups:
-                                    StatCard(title: "Groups", value: formatCount(stats.movieCount), icon: "rectangle.stack.fill", color: Color(red: 0.1, green: 0.7, blue: 0.9))
-                                        .onTapGesture { coordinator.navigateToGroups() }
-                                default:
-                                    EmptyView()
-                                }
+                            ForEach(sortedTabs) { tab in
+                                statCard(for: tab, stats: stats)
                             }
                         }
+                        .padding(.horizontal, 12)
                     }
-                    .padding(.horizontal, 12)
                 }
-            }
-        } else if viewModel.isLoading {
+            } else if viewModel.isLoading {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(0..<6) { _ in
+                        ForEach(0..<6, id: \.self) { _ in
                             RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
                                 .fill(Color.gray.opacity(DesignTokens.Opacity.placeholder))
                                 .frame(width: 80, height: 90)
@@ -74,82 +46,90 @@ struct HomeStatisticsRowView: View {
                     .padding(.horizontal, 12)
                 }
             } else {
-                // Error state
                 HStack {
-                    Image(systemName: "exclamationmark.triangle")
-                    .foregroundColor(.secondary)
-                    Text("Stats unavailable")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Image(systemName: "exclamationmark.triangle").foregroundColor(.secondary)
+                    Text("Stats unavailable").font(.caption).foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 12)
             }
         }
     }
-    
-    // MARK: - Formatting Helpers
-    
-    private func formatCount(_ value: Int) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = Locale.current // Respect user's country/region
-        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    }
-    
-    private func formatSize(_ value: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowedUnits = [.useTB, .useGB, .useMB]
-        formatter.includesUnit = true
-        return formatter.string(fromByteCount: value)
-    }
-    
-    private func formatDuration(_ value: Float) -> String {
-        let totalSeconds = Int(value)
-        let hours = totalSeconds / 3600
-        
-        // Formatter for nicer output "124h 30m"
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute]
-        formatter.unitsStyle = .abbreviated
-        formatter.maximumUnitCount = 2
-        
-        return formatter.string(from: TimeInterval(value)) ?? "\(hours)h"
-    }
 
-    // MARK: - Compact View Helpers
+    // MARK: - Stat card builders (single source of truth for both layouts)
 
     @ViewBuilder
-    private func compactStatisticsCard(sortedTabs: [TabConfig], stats: Statistics) -> some View {
-        VStack(spacing: 8) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 24, alignment: .leading), GridItem(.flexible(), alignment: .leading)], spacing: 16) {
-                ForEach(sortedTabs) { tab in
-                    Group {
-                        switch tab.id {
-                        case .scenes: compactStatRow(title: "Scenes", value: formatCount(stats.sceneCount), icon: "film", color: .blue)
-                                .onTapGesture { coordinator.navigateToScenes() }
-                        case .galleries: compactStatRow(title: "Galleries", value: formatCount(stats.galleryCount), icon: "photo.stack", color: .green)
-                                .onTapGesture { coordinator.navigateToGalleries() }
-                        case .images: compactStatRow(title: "Images", value: formatCount(stats.imageCount), icon: "photo", color: .teal)
-                                .onTapGesture { coordinator.navigateToImages() }
-                        case .performers: compactStatRow(title: "Performers", value: formatCount(stats.performerCount), icon: "person.2", color: .purple)
-                                .onTapGesture { coordinator.navigateToPerformers() }
-                        case .studios: compactStatRow(title: "Studios", value: formatCount(stats.studioCount), icon: "building.2", color: .orange)
-                                .onTapGesture { coordinator.navigateToStudios() }
-                        case .tags: compactStatRow(title: "Tags", value: formatCount(stats.tagCount), icon: "tag", color: .pink)
-                                .onTapGesture { coordinator.navigateToTags() }
-                        case .groups: compactStatRow(title: "Groups", value: formatCount(stats.movieCount), icon: "rectangle.stack.fill", color: Color(red: 0.1, green: 0.7, blue: 0.9))
-                                .onTapGesture { coordinator.navigateToGroups() }
-                        default: EmptyView()
-                        }
-                    }
-                }
-            }
+    private func statCard(for tab: TabConfig, stats: Statistics) -> some View {
+        switch tab.id {
+        case .scenes:
+            StatCard(title: "Scenes", value: formatCount(stats.sceneCount), icon: "film", color: tabManager.useColoredStatistics ? .blue : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToScenes() }
+        case .galleries:
+            StatCard(title: "Galleries", value: formatCount(stats.galleryCount), icon: "photo.stack", color: tabManager.useColoredStatistics ? .green : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToGalleries() }
+        case .images:
+            StatCard(title: "Images", value: formatCount(stats.imageCount), icon: "photo", color: tabManager.useColoredStatistics ? .teal : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToImages() }
+        case .performers:
+            StatCard(title: "Performers", value: formatCount(stats.performerCount), icon: "person.2", color: tabManager.useColoredStatistics ? .purple : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToPerformers() }
+        case .studios:
+            StatCard(title: "Studios", value: formatCount(stats.studioCount), icon: "building.2", color: tabManager.useColoredStatistics ? .orange : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToStudios() }
+        case .tags:
+            StatCard(title: "Tags", value: formatCount(stats.tagCount), icon: "tag", color: tabManager.useColoredStatistics ? .pink : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToTags() }
+        case .groups:
+            StatCard(title: "Groups", value: formatCount(stats.movieCount), icon: "rectangle.stack.fill", color: tabManager.useColoredStatistics ? Color(red: 0.1, green: 0.7, blue: 0.9) : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToGroups() }
+        case .markers:
+            StatCard(title: "Markers", value: formatCount(stats.sceneMarkerCount ?? 0), icon: "bookmark.fill", color: tabManager.useColoredStatistics ? .red : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToMarkers() }
+        default:
+            EmptyView()
         }
-        .padding(16)
-        .background(Color.secondaryAppBackground)
-        .cornerRadius(DesignTokens.CornerRadius.card)
-        .cardShadow()
+    }
+
+    @ViewBuilder
+    private func compactRow(for tab: TabConfig, stats: Statistics) -> some View {
+        switch tab.id {
+        case .scenes:
+            compactStatRow(title: "Scenes", value: formatCount(stats.sceneCount), icon: "film", color: tabManager.useColoredStatistics ? .blue : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToScenes() }
+        case .galleries:
+            compactStatRow(title: "Galleries", value: formatCount(stats.galleryCount), icon: "photo.stack", color: tabManager.useColoredStatistics ? .green : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToGalleries() }
+        case .images:
+            compactStatRow(title: "Images", value: formatCount(stats.imageCount), icon: "photo", color: tabManager.useColoredStatistics ? .teal : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToImages() }
+        case .performers:
+            compactStatRow(title: "Performers", value: formatCount(stats.performerCount), icon: "person.2", color: tabManager.useColoredStatistics ? .purple : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToPerformers() }
+        case .studios:
+            compactStatRow(title: "Studios", value: formatCount(stats.studioCount), icon: "building.2", color: tabManager.useColoredStatistics ? .orange : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToStudios() }
+        case .tags:
+            compactStatRow(title: "Tags", value: formatCount(stats.tagCount), icon: "tag", color: tabManager.useColoredStatistics ? .pink : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToTags() }
+        case .groups:
+            compactStatRow(title: "Groups", value: formatCount(stats.movieCount), icon: "rectangle.stack.fill", color: tabManager.useColoredStatistics ? Color(red: 0.1, green: 0.7, blue: 0.9) : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToGroups() }
+        case .markers:
+            compactStatRow(title: "Markers", value: formatCount(stats.sceneMarkerCount ?? 0), icon: "bookmark.fill", color: tabManager.useColoredStatistics ? .red : appearanceManager.tintColor)
+                .onTapGesture { coordinator.navigateToMarkers() }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func compactCard(sortedTabs: [TabConfig], stats: Statistics) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 12),
+                      GridItem(.flexible(), spacing: 12)],
+            spacing: 8
+        ) {
+            ForEach(sortedTabs) { tab in compactRow(for: tab, stats: stats) }
+        }
         .padding(.horizontal, 12)
     }
 
@@ -157,25 +137,35 @@ struct HomeStatisticsRowView: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
+                .foregroundColor(color)
                 .frame(width: 20)
-            
-            Text(title)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-                .lineLimit(1)
-            
+            HStack(spacing: 4) {
+                Text(title).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                Spacer()
+                Text(value).font(.subheadline).fontWeight(.bold).foregroundColor(.primary).lineLimit(1)
+            }
             Spacer()
-            
-            Text(value)
-                .font(.subheadline)
-                .fontWeight(.bold)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
         }
-        .contentShape(Rectangle()) // makes the whole row tappable
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity)
+        .frame(height: 36) // Reduced height for more compact look
+        .background(Color.secondaryAppBackground)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.small))
+        .cardShadow()
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Formatters
+
+    private func formatCount(_ value: Int) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = .current
+        return f.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }
+
+// MARK: - StatCard
 
 struct StatCard: View {
     let title: String
@@ -185,14 +175,8 @@ struct StatCard: View {
 
     var body: some View {
         VStack(alignment: .center, spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.white)
-            
-            Text(value)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(.white)
-
+            Image(systemName: icon).font(.system(size: 22, weight: .bold)).foregroundColor(.white)
+            Text(value).font(.system(size: 16, weight: .bold)).foregroundColor(.white)
             Text(title.uppercased())
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.white.opacity(0.8))
@@ -202,13 +186,9 @@ struct StatCard: View {
         .padding(.vertical, 12)
         .frame(width: 80, height: 90)
         .background(
-            LinearGradient(
-                colors: [color, color.opacity(0.6)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            LinearGradient(colors: [color, color.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing)
         )
-        .cornerRadius(DesignTokens.CornerRadius.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
     }
 }
 #endif

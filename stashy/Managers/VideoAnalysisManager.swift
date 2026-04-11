@@ -237,76 +237,84 @@ class StashVideoSyncManager: ObservableObject {
     private func processFrame(_ pixelBuffer: CVPixelBuffer) {
         guard processingLock.try() else { return }
         let localCounter = frameCounter
-
         analysisQueue.async { [weak self] in
             guard let self = self else { return }
             defer { self.processingLock.unlock() }
-
-            // --- Stage A: Person Segmentation ---
-            var personMask: CVPixelBuffer? = nil
-            let segHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-            do {
-                try segHandler.perform([self.segmentationRequest])
-                personMask = self.segmentationRequest.results?.first?.pixelBuffer
-            } catch {
-                DispatchQueue.main.async { self.lastError = "Seg: \(error.localizedDescription)" }
-            }
-
-            // --- Stage B: Optical Flow → hip rhythm + horizontal motion ---
-            if let previous = self.previousPixelBuffer {
-                let flowRequest = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: previous, options: [:])
-                flowRequest.computationAccuracy = .low
-                let flowHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-                do {
-                    try flowHandler.perform([flowRequest])
-                    if let result = flowRequest.results?.first as? VNPixelBufferObservation {
-                        self.analyzeOpticalFlow(result.pixelBuffer, mask: personMask)
-                    }
-                } catch {
-                    DispatchQueue.main.async { self.lastError = "Flow: \(error.localizedDescription)" }
-                }
-            }
-            self.previousPixelBuffer = pixelBuffer
-
-            // --- Stage C: Full Body Pose (every 6th frame) ---
-            if localCounter % 6 == 0 {
-                let poseHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-                do {
-                    try poseHandler.perform([self.poseRequest])
-                    let observations = self.poseRequest.results ?? []
-                    if !observations.isEmpty {
-                        // Pick the dominant person: most joints visible = best-tracked person
-                        let dominant = self.selectDominantPerson(from: observations)
-                        self.updateDominantPersonBounds(from: dominant, frameHeight: CVPixelBufferGetHeight(pixelBuffer))
-                        self.analyzeHeadMovement(dominant)
-                        self.analyzePelvisMovement(dominant)
-                        self.analyzeWristMovement(dominant)
-                        self.classifyPosition(observations)
-                    } else {
-                        self.dominantPersonPixelYRange = nil
-                        DispatchQueue.main.async {
-                            self.headIntensity *= 0.5
-                            self.pelvisIntensity *= 0.7
-                            self.wristIntensity *= 0.7
-                        }
-                    }
-                } catch {
-                    self.dominantPersonPixelYRange = nil
-                    DispatchQueue.main.async {
-                        self.headIntensity *= 0.5
-                        self.pelvisIntensity *= 0.7
-                        self.wristIntensity *= 0.7
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    self.headIntensity *= 0.90
-                    self.pelvisIntensity *= 0.95
-                    self.wristIntensity *= 0.93
-                }
-            }
-
+            let mask = self.runSegmentation(pixelBuffer)
+            self.runOpticalFlow(pixelBuffer, mask: mask)
+            self.runPoseAnalysis(pixelBuffer, frameCounter: localCounter)
             DispatchQueue.main.async { self.frameCounter += 1 }
+        }
+    }
+
+    private func runSegmentation(_ pixelBuffer: CVPixelBuffer) -> CVPixelBuffer? {
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+        do {
+            try handler.perform([segmentationRequest])
+            return segmentationRequest.results?.first?.pixelBuffer
+        } catch {
+            DispatchQueue.main.async { self.lastError = "Seg: \(error.localizedDescription)" }
+            return nil
+        }
+    }
+
+    private func runOpticalFlow(_ pixelBuffer: CVPixelBuffer, mask: CVPixelBuffer?) {
+        guard let previous = previousPixelBuffer else {
+            previousPixelBuffer = pixelBuffer
+            return
+        }
+        let flowRequest = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: previous, options: [:])
+        flowRequest.computationAccuracy = .low
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+        do {
+            try handler.perform([flowRequest])
+            if let result = flowRequest.results?.first as? VNPixelBufferObservation {
+                analyzeOpticalFlow(result.pixelBuffer, mask: mask)
+            }
+        } catch {
+            DispatchQueue.main.async { self.lastError = "Flow: \(error.localizedDescription)" }
+        }
+        previousPixelBuffer = pixelBuffer
+    }
+
+    private func runPoseAnalysis(_ pixelBuffer: CVPixelBuffer, frameCounter: Int) {
+        guard frameCounter % 6 == 0 else {
+            DispatchQueue.main.async {
+                self.headIntensity *= 0.90
+                self.pelvisIntensity *= 0.95
+                self.wristIntensity *= 0.93
+            }
+            return
+        }
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+        do {
+            try handler.perform([poseRequest])
+            let observations = poseRequest.results ?? []
+            if observations.isEmpty {
+                decayPoseIntensities(strong: true)
+                dominantPersonPixelYRange = nil
+            } else {
+                let dominant = selectDominantPerson(from: observations)
+                updateDominantPersonBounds(from: dominant, frameHeight: CVPixelBufferGetHeight(pixelBuffer))
+                analyzeHeadMovement(dominant)
+                analyzePelvisMovement(dominant)
+                analyzeWristMovement(dominant)
+                classifyPosition(observations)
+            }
+        } catch {
+            dominantPersonPixelYRange = nil
+            decayPoseIntensities(strong: true)
+        }
+    }
+
+    private func decayPoseIntensities(strong: Bool) {
+        let headFactor: Float = strong ? 0.5 : 0.90
+        let pelvisFactor: Float = strong ? 0.7 : 0.95
+        let wristFactor: Float = strong ? 0.7 : 0.93
+        DispatchQueue.main.async {
+            self.headIntensity *= headFactor
+            self.pelvisIntensity *= pelvisFactor
+            self.wristIntensity *= wristFactor
         }
     }
 

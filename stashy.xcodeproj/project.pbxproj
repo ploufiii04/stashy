@@ -24,6 +24,7 @@
 		372E2D6B2F633DB400603361 /* LoginAuthHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D692F6339EE00603361 /* LoginAuthHelper.swift */; };
 		372E2D992F64272300603361 /* VideoAnalysisManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D982F64272300603361 /* VideoAnalysisManager.swift */; };
 		372E2D9B2F64425000603361 /* StashSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D9A2F64425000603361 /* StashSyncManager.swift */; };
+		37D092D62F8980B400DB7A08 /* MarkersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D092D52F8980B400DB7A08 /* MarkersView.swift */; };
 		37D3E2E52F39384000AB8FAD /* ServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FB779EFE84155DC02AAC07 /* ServerConfig.swift */; };
 		37D3E3262F39444C00AB8FAD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000022E8A9C0000000001 /* Assets.xcassets */; };
 		37D3E4922F3A305D00AB8FAD /* SceneHeatmapCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D3E4912F3A305D00AB8FAD /* SceneHeatmapCard.swift */; };
@@ -134,6 +135,7 @@
 		372E2D692F6339EE00603361 /* LoginAuthHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginAuthHelper.swift; sourceTree = "<group>"; };
 		372E2D982F64272300603361 /* VideoAnalysisManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoAnalysisManager.swift; sourceTree = "<group>"; };
 		372E2D9A2F64425000603361 /* StashSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StashSyncManager.swift; sourceTree = "<group>"; };
+		37D092D52F8980B400DB7A08 /* MarkersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkersView.swift; sourceTree = "<group>"; };
 		37D3E24E2F3932C400AB8FAD /* stashyTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = stashyTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		37D3E4912F3A305D00AB8FAD /* SceneHeatmapCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneHeatmapCard.swift; sourceTree = "<group>"; };
 		AA0000022E8A9C0000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -265,6 +267,7 @@
 				DF06EF252F18EC1100299105 /* SceneCardView.swift */,
 				DFE504632E8A8C5000323FF0 /* SceneDelegate.swift */,
 				DFE5045D2E8A8C2000323FF1 /* SceneDetailView.swift */,
+				37D092D52F8980B400DB7A08 /* MarkersView.swift */,
 				DFE5045D2E8A8C2000323FF0 /* ScenesView.swift */,
 				08FB779EFE84155DC02AAC07 /* ServerConfig.swift */,
 				DFSM000062F2NEWFILE006 /* ServerFormViewNew.swift */,
@@ -524,6 +527,7 @@
 				DF22BB362F1832AD007C2090 /* NavigationCoordinator.swift in Sources */,
 				DF22BB272F167CDC007C2090 /* ImageCacheManager.swift in Sources */,
 				08FB77A1FE84155DC02AAC07 /* StashDBViewModel.swift in Sources */,
+				37D092D62F8980B400DB7A08 /* MarkersView.swift in Sources */,
 				DF90B7662F1B72E5003ED852 /* UniversalSearchView.swift in Sources */,
 				DF22BB3A2F1832E8007C2090 /* PerformersView.swift in Sources */,
 				DF22BB152F167223007C2090 /* CatalogsView.swift in Sources */,

@@ -23,6 +23,7 @@ struct UniversalSearchView: View {
     @State private var scenes: [Scene] = []
     @State private var galleries: [Gallery] = []
     @State private var groups: [StashGroup] = []
+    @State private var markers: [SceneMarker] = []
     
     // Per-category result limits
     private let scenesLimit = 20
@@ -31,11 +32,12 @@ struct UniversalSearchView: View {
     private let tagsLimit = 50
     private let studiosLimit = 50
     private let groupsLimit = 20
+    private let markersLimit = 20
     
     // Get ordered content types based on TabManager
     private var orderedSections: [AppTab] {
         tabManager.tabs
-            .filter { [.scenes, .performers, .studios, .tags, .galleries, .groups].contains($0.id) && $0.isVisible }
+            .filter { [.scenes, .performers, .studios, .tags, .galleries, .groups, .markers].contains($0.id) && $0.isVisible }
             .sorted { $0.sortOrder < $1.sortOrder }
             .map { $0.id }
     }
@@ -80,7 +82,7 @@ struct UniversalSearchView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 
-                Text("Find scenes, performers, studios, tags, galleries and groups")
+                Text("Find scenes, performers, studios, tags, galleries, groups and markers")
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
@@ -110,7 +112,7 @@ struct UniversalSearchView: View {
                     }
                     
                     // Show no results message if all empty
-                    if performers.isEmpty && studios.isEmpty && tags.isEmpty && scenes.isEmpty && galleries.isEmpty && groups.isEmpty {
+                    if performers.isEmpty && studios.isEmpty && tags.isEmpty && scenes.isEmpty && galleries.isEmpty && groups.isEmpty && markers.isEmpty {
                         VStack(spacing: 16) {
                             Image(systemName: "doc.text.magnifyingglass")
                                 .font(.system(size: 50))
@@ -157,6 +159,10 @@ struct UniversalSearchView: View {
         case .groups:
             if !groups.isEmpty {
                 groupsSection
+            }
+        case .markers:
+            if !markers.isEmpty {
+                markersSection
             }
         default:
             EmptyView()
@@ -308,7 +314,8 @@ struct UniversalSearchView: View {
     }
     
     private func sceneCard(_ scene: Scene) -> some View {
-        HomeSceneCardView(scene: scene, isLarge: false)
+        HomeSceneCardView(scene: scene, isLarge: false,
+                          screenWidth: UIScreen.main.bounds.width)
     }
     
     private var scenePlaceholder: some View {
@@ -446,7 +453,93 @@ struct UniversalSearchView: View {
             )
     }
     
-    // MARK: - Helpers
+    private var markersSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Markers", count: markers.count, limit: markersLimit) {
+                coordinator.navigateToMarkers(search: searchText)
+            }
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(markers) { marker in
+                        if let scene = marker.scene?.toScene() {
+                            let mappedScene = scene.withResumeTime(marker.seconds)
+                            NavigationLink(destination: SceneDetailView(scene: mappedScene, autoPlay: true)) {
+                                searchMarkerCard(marker)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+        }
+    }
+    
+    private func searchMarkerCard(_ marker: SceneMarker) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .bottomTrailing) {
+                if let thumbURL = marker.thumbnailURL {
+                    CustomAsyncImage(url: thumbURL) { loader in
+                        if loader.isLoading {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.2))
+                                .overlay(ProgressView())
+                        } else if let image = loader.image {
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            markerPlaceholder
+                        }
+                    }
+                } else {
+                    markerPlaceholder
+                }
+                
+                // Timestamp badge
+                Text(formatDuration(marker.seconds))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(4)
+                    .padding(4)
+            }
+            .frame(width: 160, height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(marker.title ?? marker.scene?.title ?? "Unknown Marker")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                
+                if let tagName = marker.primaryTag?.name {
+                    Text(tagName)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(appearanceManager.tintColor)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(appearanceManager.tintColor.opacity(0.1))
+                        .cornerRadius(4)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+        .frame(width: 160)
+    }
+    
+    private var markerPlaceholder: some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.2))
+            .overlay(
+                Image(systemName: "bookmark.fill")
+                    .foregroundColor(.secondary)
+            )
+    }
     
     private func sectionHeader(title: String, count: Int, limit: Int, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -512,15 +605,17 @@ struct UniversalSearchView: View {
             async let scenesTask = viewModel.searchScenesAsync(query: query, limit: scenesLimit)
             async let galleriesTask = viewModel.searchGalleriesAsync(query: query, limit: galleriesLimit)
             async let groupsTask = viewModel.searchGroupsAsync(query: query, limit: groupsLimit)
+            async let markersTask = viewModel.searchMarkersAsync(query: query, limit: markersLimit)
             
             // Await all results
-            let (performersResult, studiosResult, tagsResult, scenesResult, galleriesResult, groupsResult) = await (
+            let (performersResult, studiosResult, tagsResult, scenesResult, galleriesResult, groupsResult, markersResult) = await (
                 performersTask,
                 studiosTask,
                 tagsTask,
                 scenesTask,
                 galleriesTask,
-                groupsTask
+                groupsTask,
+                markersTask
             )
             
             // Update state on main actor
@@ -530,6 +625,7 @@ struct UniversalSearchView: View {
             scenes = scenesResult
             galleries = galleriesResult
             groups = groupsResult
+            markers = markersResult
             isSearching = false
         }
     }
@@ -541,6 +637,7 @@ struct UniversalSearchView: View {
         scenes = []
         galleries = []
         groups = []
+        markers = []
     }
 }
 

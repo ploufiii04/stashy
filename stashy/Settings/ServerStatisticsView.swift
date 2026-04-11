@@ -23,6 +23,13 @@ struct ServerStatisticsView: View {
                     }
 
                     HStack {
+                        Label("Markers", systemImage: "bookmark.fill")
+                        Spacer()
+                        Text("\(stats.sceneMarkerCount ?? 0)")
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
                         Label("Performers", systemImage: "person.2")
                         Spacer()
                         Text("\(stats.performerCount)")

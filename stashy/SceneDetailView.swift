@@ -23,8 +23,11 @@ struct SceneDetailView: View {
     
     @ObservedObject private var downloadManager = DownloadManager.shared
     
-    init(scene: Scene) {
+    let autoPlay: Bool
+    
+    init(scene: Scene, autoPlay: Bool = false) {
         self.scene = scene
+        self.autoPlay = autoPlay
         _activeScene = State(initialValue: scene)
     }
     @State private var player: AVPlayer?
@@ -298,7 +301,12 @@ struct SceneDetailView: View {
         viewModel.fetchSceneDetails(sceneId: activeScene.id) { updatedScene in
             if let updated = updatedScene {
                 DispatchQueue.main.async {
-                    self.activeScene = updated
+                    let preservedResumeTime = self.activeScene.resumeTime
+                    var newScene = updated
+                    if let resTime = preservedResumeTime, resTime > 0 {
+                        newScene = newScene.withResumeTime(resTime)
+                    }
+                    self.activeScene = newScene
                 }
             }
         }
@@ -334,13 +342,25 @@ struct SceneDetailView: View {
             viewModel.fetchSceneDetails(sceneId: activeScene.id) { updatedScene in
                 if let updated = updatedScene {
                     DispatchQueue.main.async {
-                        self.activeScene = updated.withStreams(self.activeScene.streams)
+                        let preservedResumeTime = self.activeScene.resumeTime
+                        var newScene = updated.withStreams(self.activeScene.streams)
+                        if let resTime = preservedResumeTime, resTime > 0 {
+                            newScene = newScene.withResumeTime(resTime)
+                        }
+                        self.activeScene = newScene
                     }
                 }
             }
         }
         
-        // Removed automatic setupScene to enforce manual activation
+        // Removed automatic setupScene to enforce manual activation unless explicitly requested via autoPlay
+        if autoPlay {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if !isPlaybackStarted { 
+                    startPlayback(resume: true) 
+                }
+            }
+        }
     }
 
     private func handleOnDisappear() {

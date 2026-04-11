@@ -20,6 +20,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
     case settings
     case images
     case groups
+    case markers
     
     var id: String { rawValue }
     
@@ -39,7 +40,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .search: return "Search"
         case .settings: return "Settings"
         case .groups: return "Groups"
-
+        case .markers: return "Markers"
         }
     }
     
@@ -59,7 +60,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .search: return "magnifyingglass"
         case .settings: return "gear"
         case .groups: return "rectangle.stack.fill"
-
+        case .markers: return "bookmark.fill"
         }
     }
 }
@@ -254,6 +255,16 @@ class TabManager: ObservableObject {
             UserDefaults.standard.set(useCompactStatistics, forKey: useCompactStatisticsKey)
         }
     }
+    @Published var showDashboardHeroBackground: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showDashboardHeroBackground, forKey: showDashboardHeroBackgroundKey)
+        }
+    }
+    @Published var useColoredStatistics: Bool = true {
+        didSet {
+            UserDefaults.standard.set(useColoredStatistics, forKey: useColoredStatisticsKey)
+        }
+    }
 
     // Session-only sort options (not persisted)
     private var sessionSortOptions: [AppTab: String] = [:]
@@ -268,6 +279,8 @@ class TabManager: ObservableObject {
     private let isPiPEnabledKey = "isPiPEnabled"
     private let dashboardHeroSizeKey = "DashboardHeroSize"
     private let useCompactStatisticsKey = "useCompactStatistics"
+    private let showDashboardHeroBackgroundKey = "showDashboardHeroBackground"
+    private let useColoredStatisticsKey = "useColoredStatistics"
     
     init() {
         // Initial load based on currently active server
@@ -297,6 +310,8 @@ class TabManager: ObservableObject {
             self.dashboardHeroSize = .big
         }
         self.useCompactStatistics = UserDefaults.standard.bool(forKey: useCompactStatisticsKey)
+        self.showDashboardHeroBackground = UserDefaults.standard.object(forKey: showDashboardHeroBackgroundKey) as? Bool ?? true
+        self.useColoredStatistics = UserDefaults.standard.object(forKey: useColoredStatisticsKey) as? Bool ?? true
     }
     
     private var currentServerSuffix: String {
@@ -397,7 +412,8 @@ class TabManager: ObservableObject {
                 TabConfig(id: .downloads, isVisible: true, sortOrder: 8, defaultSortOption: nil),
                 TabConfig(id: .reels, isVisible: true, sortOrder: 10, defaultSortOption: "random"),
                 TabConfig(id: .settings, isVisible: true, sortOrder: 9, defaultSortOption: nil),
-                TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil)
+                TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil),
+                TabConfig(id: .markers, isVisible: true, sortOrder: 12, defaultSortOption: "createdAtDesc", defaultFilterId: nil, defaultFilterName: nil)
             ]
             
             var hasChanges = false
@@ -428,7 +444,8 @@ class TabManager: ObservableObject {
                 TabConfig(id: .downloads, isVisible: true, sortOrder: 8, defaultSortOption: nil),
                 TabConfig(id: .reels, isVisible: true, sortOrder: 10, defaultSortOption: "random"),
                 TabConfig(id: .settings, isVisible: true, sortOrder: 9, defaultSortOption: nil),
-                TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil)
+                TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil),
+                TabConfig(id: .markers, isVisible: true, sortOrder: 12, defaultSortOption: "createdAtDesc", defaultFilterId: nil, defaultFilterName: nil)
             ]
             saveConfig()
         }
@@ -887,7 +904,7 @@ class TabManager: ObservableObject {
     
     func move(from source: IndexSet, to destination: Int) {
         // We only allow reordering of the top-level content tabs (excluding settings and sub-tabs)
-        var configurableTabs = tabs.filter { $0.id != .settings && $0.id != .studios && $0.id != .tags && $0.id != .scenes && $0.id != .galleries && $0.id != .performers && $0.id != .dashboard && $0.id != .media && $0.id != .catalogue }
+        var configurableTabs = tabs.filter { $0.id != .settings && $0.id != .studios && $0.id != .tags && $0.id != .scenes && $0.id != .galleries && $0.id != .performers && $0.id != .dashboard && $0.id != .media && $0.id != .catalogue && $0.id != .images && $0.id != .groups && $0.id != .markers }
             .sorted { $0.sortOrder < $1.sortOrder }
             
         configurableTabs.move(fromOffsets: source, toOffset: destination)
@@ -906,7 +923,7 @@ class TabManager: ObservableObject {
         let filter: (TabConfig) -> Bool = {
             switch parent {
             case .catalogue:
-                return $0.id == .performers || $0.id == .studios || $0.id == .tags || $0.id == .scenes || $0.id == .galleries || $0.id == .images || $0.id == .dashboard || $0.id == .groups
+                return $0.id == .performers || $0.id == .studios || $0.id == .tags || $0.id == .scenes || $0.id == .galleries || $0.id == .images || $0.id == .dashboard || $0.id == .groups || $0.id == .markers
             case .media:
                 return false
             default:
