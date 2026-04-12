@@ -137,19 +137,28 @@ struct HomeStatisticsRowView: View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(color)
-                .frame(width: 20)
-            HStack(spacing: 4) {
-                Text(title).font(.caption).foregroundColor(.secondary).lineLimit(1)
-                Spacer()
-                Text(value).font(.subheadline).fontWeight(.bold).foregroundColor(.primary).lineLimit(1)
-            }
+                .foregroundColor(.white)
+                .frame(width: 20, alignment: .leading)
+            
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+            
             Spacer()
+            
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
         .frame(height: 36) // Reduced height for more compact look
-        .background(Color.secondaryAppBackground)
+        .background(
+            LinearGradient(colors: [color, color.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.small))
         .cardShadow()
         .contentShape(Rectangle())

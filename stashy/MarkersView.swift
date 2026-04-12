@@ -316,79 +316,81 @@ struct MarkerCardView: View {
     @ObservedObject var appearanceManager = AppearanceManager.shared
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Background Image
-            ZStack {
-                Color.studioHeaderGray
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomLeading) {
+                // Background Image
+                ZStack {
+                    Color.studioHeaderGray
+                    
+                    if let thumbURL = marker.thumbnailURL {
+                        CustomAsyncImage(url: thumbURL) { loader in
+                            if loader.isLoading {
+                                ProgressView()
+                            } else if let image = loader.image {
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                Image(systemName: "bookmark.fill")
+                                    .font(.largeTitle)
+                                    .foregroundColor(appearanceManager.tintColor)
+                            }
+                        }
+                    } else {
+                        Image(systemName: "bookmark.fill")
+                            .font(.largeTitle)
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
                 
-                if let thumbURL = marker.thumbnailURL {
-                    CustomAsyncImage(url: thumbURL) { loader in
-                        if loader.isLoading {
-                            ProgressView()
-                        } else if let image = loader.image {
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        } else {
-                            Image(systemName: "bookmark.fill")
-                                .font(.largeTitle)
-                                .foregroundColor(appearanceManager.tintColor)
+                // Bottom Gradient for contrast
+                LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .top)
+                    .frame(height: 60)
+                
+                // Overlay Info
+                VStack {
+                    HStack(alignment: .top) {
+                        // Marker Name (Top Left)
+                        Text(marker.title ?? "Marker")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                            .clipShape(Capsule())
+                            .lineLimit(1)
+                        
+                        Spacer()
+                        
+                        // Play count pill (Top Right)
+                        if let playCount = marker.playCount, playCount > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "play.circle.fill")
+                                    .font(.system(size: 8))
+                                Text("\(playCount)")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                            .clipShape(Capsule())
                         }
                     }
-                } else {
-                    Image(systemName: "bookmark.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(appearanceManager.tintColor)
-                }
-            }
-            .aspectRatio(16/9, contentMode: .fill)
-            .clipped()
-            
-            // Bottom Gradient for contrast
-            LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .top)
-                .frame(height: 60)
-            
-            // Overlay Info
-            VStack {
-                HStack(alignment: .top) {
-                    // Marker Name (Top Left)
-                    Text(marker.title ?? "Marker")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.black.opacity(DesignTokens.Opacity.badge))
-                        .clipShape(Capsule())
-                        .lineLimit(1)
                     
                     Spacer()
                     
-                    // Play count pill (Top Right)
-                    if let playCount = marker.playCount, playCount > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 8))
-                            Text("\(playCount)")
-                                .font(.system(size: 10, weight: .bold))
-                        }
+                    // Scene Name (Bottom Left)
+                    Text(marker.scene?.title ?? "Unknown Scene")
+                        .font(.caption)
+                        .fontWeight(.bold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.black.opacity(DesignTokens.Opacity.badge))
-                        .clipShape(Capsule())
-                    }
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .bottomLeading)
+                        .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
                 }
-                
-                Spacer()
-                
-                // Scene Name (Bottom Left)
-                Text(marker.scene?.title ?? "Unknown Scene")
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .bottomLeading)
-                    .shadow(color: .black.opacity(0.8), radius: 2, x: 0, y: 1)
+                .padding(8)
             }
-            .padding(8)
         }
         .aspectRatio(16/9, contentMode: .fit)
         .background(Color.secondaryAppBackground)

@@ -15,7 +15,7 @@ func homeCardWidth(for config: HomeRowConfig, isLarge: Bool, screenWidth: CGFloa
     switch config.type {
     case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
         return 125 * 2 / 3
-    case .newGalleries, .recentlyUpdatedGalleries:
+    case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
         return 125
     default:
         return 125 * 16 / 9
@@ -28,6 +28,8 @@ func homeCardHeight(for config: HomeRowConfig, isLarge: Bool, screenWidth: CGFlo
         switch config.type {
         case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
             return width * 3 / 2
+        case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
+            return 125
         default:
             return width * 9 / 16
         }
@@ -35,6 +37,8 @@ func homeCardHeight(for config: HomeRowConfig, isLarge: Bool, screenWidth: CGFlo
     switch config.type {
     case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
         return width * 3 / 2
+    case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
+        return 125
     default:
         return 125
     }
@@ -62,7 +66,7 @@ struct HomeRowView: View {
         switch config.type {
         case .newPerformers, .performersHighestSceneCount, .performersHighestOCount: return performers.map(\.id)
         case .newStudios, .studiosHighestSceneCount:                                 return studios.map(\.id)
-        case .newGalleries, .recentlyUpdatedGalleries:                               return galleries.map(\.id)
+        case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:  return galleries.map(\.id)
         default:                                                                     return scenes.map(\.id)
         }
     }
@@ -148,9 +152,6 @@ struct HomeRowView: View {
                 Text(config.title)
                     .font(.headline)
                     .foregroundColor(isLarge ? .white : .primary)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(isLarge ? .white.opacity(0.6) : .secondary.opacity(0.5))
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -222,7 +223,7 @@ struct HomeRowView: View {
                             HomeStudioCardView(studio: s, config: config, isLarge: isLarge, screenWidth: screenWidth)
                         }
                     }
-                case .newGalleries, .recentlyUpdatedGalleries:
+                case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
                     ForEach(galleries) { g in
                         cardLink(destination: ImagesView(gallery: g), id: g.id, width: w) {
                             GalleryCardView(gallery: g).frame(width: isLarge ? w : 125, height: 125)

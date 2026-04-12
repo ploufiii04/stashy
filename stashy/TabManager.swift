@@ -157,24 +157,26 @@ enum HomeRowType: String, Codable {
     case newGalleries
     case recentlyUpdatedGalleries
     case performersHighestOCount
+    case galleriesHighestImageCount
     
     var defaultTitle: String {
         switch self {
-        case .lastPlayed: return "Last Played"
-        case .lastAdded3Min: return "Recently Added"
-        case .newest3Min: return "Newest Scenes"
-        case .mostViewed3Min: return "Most Viewed"
-        case .topCounter3Min: return "Top Counter"
-        case .topRating3Min: return "Top Rated"
-        case .random: return "Random Scenes"
+        case .lastPlayed: return "Scenes > Last Played"
+        case .lastAdded3Min: return "Scenes > Recently Added"
+        case .newest3Min: return "Scenes > New"
+        case .mostViewed3Min: return "Scenes > Most Viewed"
+        case .topCounter3Min: return "Scenes > Top Counter"
+        case .topRating3Min: return "Scenes > Top Rated"
+        case .random: return "Scenes > Random"
         case .statistics: return "Statistics"
-        case .newPerformers: return "New Performers"
-        case .performersHighestSceneCount: return "Top Performers"
-        case .newStudios: return "New Studios"
-        case .studiosHighestSceneCount: return "Top Studios"
-        case .newGalleries: return "New Galleries"
-        case .recentlyUpdatedGalleries: return "Recently Updated Galleries"
-        case .performersHighestOCount: return "Highest Count Performers"
+        case .newPerformers: return "Performers > New"
+        case .performersHighestSceneCount: return "Performers > Top"
+        case .newStudios: return "Studios > New"
+        case .studiosHighestSceneCount: return "Studios > Top"
+        case .newGalleries: return "Galleries > New"
+        case .recentlyUpdatedGalleries: return "Galleries > Recently Updated"
+        case .performersHighestOCount: return "Performers > Counter"
+        case .galleriesHighestImageCount: return "Galleries > Image Count"
         }
     }
 }
@@ -493,6 +495,7 @@ class TabManager: ObservableObject {
             ensureHighestSceneCountStudiosRow()
             ensureRecentlyUpdatedGalleriesRow()
             ensurePerformersHighestOCountRow()
+            ensureGalleriesHighestImageCountRow()
         } else {
             // Default Home Rows
             self.homeRows = [
@@ -505,12 +508,13 @@ class TabManager: ObservableObject {
                 HomeRowConfig(id: UUID(), title: HomeRowType.studiosHighestSceneCount.defaultTitle, isEnabled: true, sortOrder: 6, type: .studiosHighestSceneCount),
                 HomeRowConfig(id: UUID(), title: HomeRowType.newGalleries.defaultTitle, isEnabled: true, sortOrder: 7, type: .newGalleries),
                 HomeRowConfig(id: UUID(), title: HomeRowType.recentlyUpdatedGalleries.defaultTitle, isEnabled: true, sortOrder: 8, type: .recentlyUpdatedGalleries),
-                HomeRowConfig(id: UUID(), title: HomeRowType.newest3Min.defaultTitle, isEnabled: true, sortOrder: 9, type: .newest3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestOCount.defaultTitle, isEnabled: true, sortOrder: 10, type: .performersHighestOCount),
-                HomeRowConfig(id: UUID(), title: HomeRowType.mostViewed3Min.defaultTitle, isEnabled: true, sortOrder: 11, type: .mostViewed3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.random.defaultTitle, isEnabled: true, sortOrder: 12, type: .random),
-                HomeRowConfig(id: UUID(), title: HomeRowType.topCounter3Min.defaultTitle, isEnabled: false, sortOrder: 13, type: .topCounter3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.topRating3Min.defaultTitle, isEnabled: false, sortOrder: 14, type: .topRating3Min)
+                HomeRowConfig(id: UUID(), title: HomeRowType.galleriesHighestImageCount.defaultTitle, isEnabled: true, sortOrder: 9, type: .galleriesHighestImageCount),
+                HomeRowConfig(id: UUID(), title: HomeRowType.newest3Min.defaultTitle, isEnabled: true, sortOrder: 10, type: .newest3Min),
+                HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestOCount.defaultTitle, isEnabled: true, sortOrder: 11, type: .performersHighestOCount),
+                HomeRowConfig(id: UUID(), title: HomeRowType.mostViewed3Min.defaultTitle, isEnabled: true, sortOrder: 12, type: .mostViewed3Min),
+                HomeRowConfig(id: UUID(), title: HomeRowType.random.defaultTitle, isEnabled: true, sortOrder: 13, type: .random),
+                HomeRowConfig(id: UUID(), title: HomeRowType.topCounter3Min.defaultTitle, isEnabled: false, sortOrder: 14, type: .topCounter3Min),
+                HomeRowConfig(id: UUID(), title: HomeRowType.topRating3Min.defaultTitle, isEnabled: false, sortOrder: 15, type: .topRating3Min)
             ]
             saveHomeRows()
         }
@@ -614,6 +618,14 @@ class TabManager: ObservableObject {
     private func ensurePerformersHighestOCountRow() {
          if !homeRows.contains(where: { $0.type == .performersHighestOCount }) {
              let newRow = HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestOCount.defaultTitle, isEnabled: true, sortOrder: homeRows.count, type: .performersHighestOCount)
+             homeRows.append(newRow)
+             saveHomeRows()
+         }
+    }
+    
+    private func ensureGalleriesHighestImageCountRow() {
+         if !homeRows.contains(where: { $0.type == .galleriesHighestImageCount }) {
+             let newRow = HomeRowConfig(id: UUID(), title: HomeRowType.galleriesHighestImageCount.defaultTitle, isEnabled: true, sortOrder: homeRows.count, type: .galleriesHighestImageCount)
              homeRows.append(newRow)
              saveHomeRows()
          }

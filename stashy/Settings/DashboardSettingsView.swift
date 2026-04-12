@@ -14,7 +14,7 @@ struct DashboardSettingsView: View {
 
     var body: some View {
         List {
-            Section {
+            Section("Dashboard Configuration") {
                 Toggle("Show Hero Background", isOn: Binding(
                     get: { tabManager.showDashboardHeroBackground },
                     set: { tabManager.showDashboardHeroBackground = $0 }
@@ -32,12 +32,10 @@ struct DashboardSettingsView: View {
                     set: { tabManager.useColoredStatistics = $0 }
                 ))
                 .tint(appearanceManager.tintColor)
-            } footer: {
-                Text("Show statistics as a single compact card, toggle the blurred hero background, and choose between colorful or appearance-colored stat cards.")
             }
             .listRowBackground(Color.secondaryAppBackground)
 
-            Section {
+            Section("Visible Dashboard Rows") {
                 ForEach(tabManager.homeRows) { row in
                     Toggle(isOn: Binding(
                         get: { row.isEnabled },
@@ -50,8 +48,6 @@ struct DashboardSettingsView: View {
                 .onMove { indices, newOffset in
                     tabManager.moveHomeRow(from: indices, to: newOffset)
                 }
-            } footer: {
-                Text("Enable and reorder the rows shown on the Dashboard.")
             }
             .listRowBackground(Color.secondaryAppBackground)
         }

@@ -1441,7 +1441,7 @@ class StashDBViewModel: ObservableObject {
             fetchPerformersForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
         case .newStudios, .studiosHighestSceneCount:
             fetchStudiosForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
-        case .newGalleries, .recentlyUpdatedGalleries:
+        case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
             fetchGalleriesForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
         default:
             fetchScenesForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
@@ -1507,7 +1507,7 @@ class StashDBViewModel: ObservableObject {
             setSort(.ratingDesc)
         case .random:
             setSort(.random)
-        case .statistics, .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .newStudios, .studiosHighestSceneCount, .newGalleries, .recentlyUpdatedGalleries:
+        case .statistics, .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .newStudios, .studiosHighestSceneCount, .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
             homeRowLoadingState[rowType] = false
             completion([])
             return
@@ -1745,6 +1745,8 @@ class StashDBViewModel: ObservableObject {
             setSort(.createdAtDesc)
         case .recentlyUpdatedGalleries:
             setSort(.updatedAtDesc)
+        case .galleriesHighestImageCount:
+            setSort(.imageCountDesc)
         default:
             homeRowLoadingState[rowType] = false
             completion([])
