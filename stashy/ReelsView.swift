@@ -27,6 +27,7 @@ struct ReelsView: View {
     @State private var selectedMarkerSortOption: StashDBViewModel.SceneMarkerSortOption = StashDBViewModel.SceneMarkerSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .markers) ?? "") ?? .random
     @State private var selectedClipSortOption: StashDBViewModel.ImageSortOption = StashDBViewModel.ImageSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .clips) ?? "") ?? .random
     @State private var selectedClipFilter: StashDBViewModel.SavedFilter?
+    @State private var selectedPreviewFilter: StashDBViewModel.SavedFilter?
     @State private var isMenuOpen = false
     @State private var isMediaZoomed = false
     @State private var isRotating = false
@@ -48,12 +49,14 @@ struct ReelsView: View {
         case scenes = "Scenes"
         case markers = "Markers"
         case clips = "Clips"
+        case previews = "Previews"
         
         var icon: String {
             switch self {
             case .scenes: return "film"
             case .markers: return "mappin.and.ellipse"
             case .clips: return "photo.on.rectangle.angled"
+            case .previews: return "play.rectangle.on.rectangle.fill"
             }
         }
         
@@ -62,6 +65,7 @@ struct ReelsView: View {
             case .scenes: return .scenes
             case .markers: return .markers
             case .clips: return .clips
+            case .previews: return .previews
             }
         }
         
@@ -70,6 +74,7 @@ struct ReelsView: View {
             case .scenes: self = .scenes
             case .markers: self = .markers
             case .clips: self = .clips
+            case .previews: self = .previews
             }
         }
     }
@@ -78,12 +83,14 @@ struct ReelsView: View {
         case scene(Scene)
         case marker(SceneMarker)
         case clip(StashImage)
+        case preview(Scene)
         
         var id: String {
             switch self {
             case .scene(let s): return "scene-\(s.id)"
             case .marker(let m): return "marker-\(m.id)"
             case .clip(let c): return "clip-\(c.id)"
+            case .preview(let s): return "preview-\(s.id)"
             }
         }
         
@@ -92,6 +99,7 @@ struct ReelsView: View {
             case .scene(let s): return s.title
             case .marker(let m): return m.scene?.title
             case .clip(let c): return c.title
+            case .preview(let s): return s.title
             }
         }
         
@@ -100,6 +108,7 @@ struct ReelsView: View {
             case .scene(let s): return s.performers
             case .marker(let m): return m.scene?.performers ?? []
             case .clip(let c): return c.performers?.map { ScenePerformer(id: $0.id, name: $0.name, sceneCount: nil, galleryCount: nil, oCounter: nil, updatedAt: nil) } ?? []
+            case .preview(let s): return s.performers
             }
         }
         
@@ -113,6 +122,7 @@ struct ReelsView: View {
                 }
                 return allTags
             case .clip(let c): return c.tags ?? []
+            case .preview(let s): return s.tags ?? []
             }
         }
         
@@ -121,6 +131,7 @@ struct ReelsView: View {
             case .scene(let s): return s.thumbnailURL
             case .marker(let m): return m.thumbnailURL
             case .clip(let c): return c.thumbnailURL
+            case .preview(let s): return s.thumbnailURL
             }
         }
         
@@ -156,6 +167,8 @@ struct ReelsView: View {
             case .clip(let c):
                 // For clips (images that are videos or animations), the imagePath IS the video path
                 return c.imageURL
+            case .preview(let s):
+                return s.previewURL
             }
         }
         
@@ -164,12 +177,14 @@ struct ReelsView: View {
             case .scene: return 0
             case .marker: return 0
             case .clip: return 0
+            case .preview: return 0
             }
         }
 
         var endTime: Double? {
             switch self {
             case .marker: return nil
+            case .preview: return nil
             default: return nil
             }
         }
@@ -181,6 +196,7 @@ struct ReelsView: View {
                 if let end = m.endSeconds { return end - m.seconds }
                 return nil
             case .clip(let c): return c.visual_files?.first?.duration
+            case .preview(let s): return s.duration
             }
         }
         
@@ -197,6 +213,7 @@ struct ReelsView: View {
                     return (file.height ?? 0) > (file.width ?? 0)
                 }
                 return false
+            case .preview(let s): return s.isPortrait
             }
         }
         
@@ -205,6 +222,7 @@ struct ReelsView: View {
             case .scene(let s): return s.rating100
             case .marker(let m): return m.scene?.rating100
             case .clip(let c): return c.rating100
+            case .preview(let s): return s.rating100
             }
         }
         
@@ -213,6 +231,7 @@ struct ReelsView: View {
             case .scene(let s): return s.oCounter
             case .marker(let m): return m.scene?.oCounter
             case .clip(let c): return c.o_counter
+            case .preview(let s): return s.oCounter
             }
         }
         
@@ -221,6 +240,7 @@ struct ReelsView: View {
             case .scene(let s): return s.playCount
             case .marker(let m): return m.playCount
             case .clip: return nil  // Images don't track play count
+            case .preview(let s): return s.playCount
             }
         }
         
@@ -229,6 +249,7 @@ struct ReelsView: View {
             case .scene(let s): return s.date
             case .marker(let m): return m.scene?.date
             case .clip(let c): return c.date
+            case .preview(let s): return s.date
             }
         }
         
@@ -237,6 +258,7 @@ struct ReelsView: View {
             case .scene(let s): return s.id
             case .marker(let m): return m.scene?.id
             case .clip: return nil  // Clips are images, not scenes
+            case .preview(let s): return s.id
             }
         }
         
@@ -247,6 +269,7 @@ struct ReelsView: View {
                 return ext == "GIF" || ext == "WEBP"
             case .scene: return false
             case .marker: return false
+            case .preview: return false
             }
         }
 
@@ -255,6 +278,7 @@ struct ReelsView: View {
             case .scene(let s): return s
             case .marker(let m): return m.scene?.toScene()
             case .clip: return nil
+            case .preview(let s): return s
             }
         }
 
@@ -265,12 +289,13 @@ struct ReelsView: View {
         case .scenes: return viewModel.scenes.map { ReelItemData.scene($0) }
         case .markers: return viewModel.sceneMarkers.filter { $0.stream != nil && !$0.stream!.isEmpty }.map { ReelItemData.marker($0) }
         case .clips: return viewModel.clips.map { ReelItemData.clip($0) }
+        case .previews: return viewModel.previews.map { ReelItemData.preview($0) }
         }
     }
 
     
 
-    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false) {
+    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, previewSortBy: StashDBViewModel.SceneSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, previewFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false, clearPreviewFilter: Bool = false) {
         if let providedMode = mode { reelsMode = providedMode }
 
         // Position Persistence Logic:
@@ -320,6 +345,14 @@ struct ReelsView: View {
             selectedClipSortOption = clipSortBy
         }
 
+        if let previewSortBy = previewSortBy {
+            if previewSortBy == .random && selectedSortOption == .random && reelsMode == .previews {
+                viewModel.refreshRandomSeed()
+            }
+            // Previews use standard selectedSortOption since they are scenes
+            selectedSortOption = previewSortBy
+        }
+
         // For clip filter: use explicitly passed value; fall back to existing selectedClipFilter
         // unless clearClipFilter is true (used when explicitly removing the clip filter).
         let resolvedClipFilter: StashDBViewModel.SavedFilter?
@@ -331,6 +364,17 @@ struct ReelsView: View {
             resolvedClipFilter = selectedClipFilter
         }
         selectedClipFilter = resolvedClipFilter
+        
+        let resolvedPreviewFilter: StashDBViewModel.SavedFilter?
+        if clearPreviewFilter {
+            resolvedPreviewFilter = nil
+        } else if previewFilter != nil {
+            resolvedPreviewFilter = previewFilter
+        } else {
+            resolvedPreviewFilter = selectedPreviewFilter
+        }
+        selectedPreviewFilter = resolvedPreviewFilter
+        
         selectedFilter = filter
         selectedPerformer = performer
         selectedTags = tags
@@ -340,6 +384,7 @@ struct ReelsView: View {
         // because @State might not have propagated yet.
         let mergedFilter = viewModel.mergeFilterWithCriteria(filter: filter, performer: performer, tags: tags, mode: .scenes)
         let mergedClipFilter = viewModel.mergeFilterWithCriteria(filter: resolvedClipFilter, performer: performer, tags: tags, mode: .images)
+        let mergedPreviewFilter = viewModel.mergeFilterWithCriteria(filter: resolvedPreviewFilter, performer: performer, tags: tags, mode: .scenes)
 
         switch reelsMode {
         case .scenes:
@@ -348,6 +393,8 @@ struct ReelsView: View {
             viewModel.fetchSceneMarkers(sortBy: selectedMarkerSortOption, filter: mergedFilter)
         case .clips:
             viewModel.fetchClips(sortBy: selectedClipSortOption, filter: mergedClipFilter, isInitialLoad: true)
+        case .previews:
+            viewModel.fetchPreviews(sortBy: selectedSortOption, isInitialLoad: true, filter: mergedPreviewFilter)
         }
     }
     
@@ -359,6 +406,7 @@ struct ReelsView: View {
         case .scenes: expectedPrefix = "scene"
         case .markers: expectedPrefix = "marker"
         case .clips: expectedPrefix = "clip"
+        case .previews: expectedPrefix = "preview"
         }
 
         // Only auto-select if nothing is selected AND we aren't restoring a position
@@ -377,6 +425,10 @@ struct ReelsView: View {
                     if let firstId = viewModel.clips.first?.id {
                         currentVisibleSceneId = "clip-\(firstId)"
                     }
+                case .previews:
+                    if let firstId = viewModel.previews.first?.id {
+                        currentVisibleSceneId = "preview-\(firstId)"
+                    }
                 }
             }
         }
@@ -385,16 +437,36 @@ struct ReelsView: View {
 
 
     private func handleRatingChange(item: ReelItemData, newRating: Int?) {
+        // Preview items live in viewModel.previews, not viewModel.scenes
+        if case .preview(let scene) = item {
+            let sceneId = scene.id
+            if let index = viewModel.previews.firstIndex(where: { $0.id == sceneId }) {
+                let originalRating = viewModel.previews[index].rating100
+                viewModel.previews[index] = viewModel.previews[index].withRating(newRating)
+                if let r = newRating {
+                    viewModel.updateSceneRating(sceneId: sceneId, rating100: r) { success in
+                        if !success {
+                            DispatchQueue.main.async {
+                                viewModel.previews[index] = viewModel.previews[index].withRating(originalRating)
+                                ToastManager.shared.show("Failed to save rating", icon: "exclamationmark.triangle", style: .error)
+                            }
+                        }
+                    }
+                }
+            }
+            return
+        }
+
         var targetSceneId: String?
         if case .scene(let scene) = item { targetSceneId = scene.id }
         else if case .marker(let marker) = item { targetSceneId = marker.scene?.id }
-        
+
         if let sceneId = targetSceneId {
             // 1. Optimistic Update for Scene List
             if let sceneIndex = viewModel.scenes.firstIndex(where: { $0.id == sceneId }) {
                 let originalRating = viewModel.scenes[sceneIndex].rating100
                 viewModel.scenes[sceneIndex] = viewModel.scenes[sceneIndex].withRating(newRating)
-                
+
                 if let r = newRating {
                     viewModel.updateSceneRating(sceneId: sceneId, rating100: r) { success in
                         if !success {
@@ -406,18 +478,18 @@ struct ReelsView: View {
                     }
                 }
             }
-            
+
             // 2. Optimistic Update for Scene Markers
             let markerIndices = viewModel.sceneMarkers.enumerated().compactMap { index, marker in
                 marker.scene?.id == sceneId ? index : nil
             }
-            
+
             for index in markerIndices {
                 if let markerScene = viewModel.sceneMarkers[index].scene {
                     viewModel.sceneMarkers[index] = viewModel.sceneMarkers[index].withScene(markerScene.withRating(newRating))
                 }
             }
-            
+
             // If not in scenes list
             if !viewModel.scenes.contains(where: { $0.id == sceneId }) {
                 if let r = newRating {
@@ -445,10 +517,32 @@ struct ReelsView: View {
     }
 
     private func handleOCounterChange(item: ReelItemData, newCount: Int) {
+        // Preview items live in viewModel.previews, not viewModel.scenes
+        if case .preview(let scene) = item {
+            let sceneId = scene.id
+            if let index = viewModel.previews.firstIndex(where: { $0.id == sceneId }) {
+                let originalCount = viewModel.previews[index].oCounter ?? 0
+                viewModel.previews[index] = viewModel.previews[index].withOCounter(newCount)
+                viewModel.incrementOCounter(sceneId: sceneId) { returnedCount in
+                    if let count = returnedCount {
+                        DispatchQueue.main.async {
+                            viewModel.previews[index] = viewModel.previews[index].withOCounter(count)
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            viewModel.previews[index] = viewModel.previews[index].withOCounter(originalCount)
+                            ToastManager.shared.show("Counter update failed", icon: "exclamationmark.triangle", style: .error)
+                        }
+                    }
+                }
+            }
+            return
+        }
+
         var targetSceneId: String?
         if case .scene(let scene) = item { targetSceneId = scene.id }
         else if case .marker(let marker) = item { targetSceneId = marker.scene?.id }
-        
+
         if let sceneId = targetSceneId {
             // 1. Scene List Update
             if let index = viewModel.scenes.firstIndex(where: { $0.id == sceneId }) {
@@ -528,6 +622,9 @@ struct ReelsView: View {
     }
 
     private func handlePlayCountChange(item: ReelItemData, newCount: Int) {
+        // As requested: bypass view counter for Previews
+        if case .preview = item { return }
+        
         if case .scene(let scene) = item {
             let sceneId = scene.id
             // 1. Scene List Update
@@ -613,6 +710,7 @@ struct ReelsView: View {
         case .scenes: return viewModel.scenes.isEmpty
         case .markers: return viewModel.sceneMarkers.isEmpty
         case .clips: return viewModel.clips.isEmpty
+        case .previews: return viewModel.previews.isEmpty
         }
     }
 
@@ -653,146 +751,11 @@ struct ReelsView: View {
         .toolbar {
             reelsToolbar
         }
-        .onChange(of: reelsMode) { _, newValue in
-            switch newValue {
-            case .markers:
-                if let defaultId = TabManager.shared.getDefaultMarkerFilterId(for: .reels),
-                   let filter = viewModel.savedFilters[defaultId] {
-                    applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-                } else {
-                    applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-                }
-            case .scenes:
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .reels),
-                   let filter = viewModel.savedFilters[defaultId] {
-                    applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-                } else {
-                    applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-                }
-            case .clips:
-                if let defaultId = TabManager.shared.getDefaultClipFilterId(for: .reels),
-                   let filter = viewModel.savedFilters[defaultId] {
-                    applySettings(filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-                } else {
-                    // Maintain current selectedClipFilter when switching modes if no default
-                    applySettings(filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-                }
-            }
-        }
+        .onChange(of: reelsMode) { _, newValue in handleModeChange(newValue) }
         .onChange(of: viewModel.scenes.first?.id) { _, _ in autoSelectFirstItem() }
         .onChange(of: viewModel.sceneMarkers.first?.id) { _, _ in autoSelectFirstItem() }
         .onChange(of: viewModel.clips.first?.id) { _, _ in autoSelectFirstItem() }
-        .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = true
-            
-            // Audio Optimization: Ensure session is active once for Reels
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                print("🎬 Reels: Audio setup error: \(error)")
-            }
-
-            // 0. Guard against rotation-triggered onAppear
-            if isRotating {
-                print("🔄 ReelsView: Skipping recursive onAppear during rotation")
-                isRotating = false
-                return
-            }
-
-            if viewModel.savedFilters.isEmpty {
-                viewModel.fetchSavedFilters()
-            }
-            
-            autoSelectFirstItem()
-            
-            // 1. Initialize reelsMode ONLY if current mode is disabled in settings
-            let enabledTypes = tabManager.enabledReelsModes
-            if !enabledTypes.contains(reelsMode.toModeType) {
-                if let first = enabledTypes.first {
-                    reelsMode = ReelsMode(from: first)
-                }
-            }
-            
-            // Determine initial state from coordinator
-            let initialPerformer: ScenePerformer? = coordinator.reelsPerformer
-            let initialTags: [Tag] = coordinator.reelsTags
-            
-            // Priority 1: Navigation Context
-            if initialPerformer != nil || !initialTags.isEmpty {
-                coordinator.reelsPerformer = nil
-                coordinator.reelsTags = []
-
-                // Load saved sort for Scenes mode (default for nav context)
-                let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .scenes)
-                let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-
-                // Resolve default filter so removing the performer/tag pill reverts to it (not nil)
-                var baseFilter = selectedFilter
-                if baseFilter == nil, let defId = TabManager.shared.getDefaultFilterId(for: .reels) {
-                    baseFilter = viewModel.savedFilters[defId]
-                }
-
-                applySettings(sortBy: savedSort, filter: baseFilter, performer: initialPerformer, tags: initialTags)
-            } else {
-                let isCurrentlyEmpty: Bool = {
-                    switch reelsMode {
-                    case .scenes: return viewModel.scenes.isEmpty
-                    case .markers: return viewModel.sceneMarkers.isEmpty
-                    case .clips: return viewModel.clips.isEmpty
-                    }
-                }()
-
-                if isCurrentlyEmpty {
-                    // Priority 2: Try to apply default filter
-                    let defaultId: String? = {
-                        switch reelsMode {
-                        case .scenes: return TabManager.shared.getDefaultFilterId(for: .reels)
-                        case .markers: return TabManager.shared.getDefaultMarkerFilterId(for: .reels)
-                        case .clips: return TabManager.shared.getDefaultClipFilterId(for: .reels)
-                        }
-                    }()
-                        
-                    let hasFiltersArrived = !viewModel.savedFilters.isEmpty
-                    
-                    if defaultId != nil, !hasFiltersArrived {
-                        // We need to wait for onChange(of: viewModel.savedFilters) to trigger applySettings
-                        print("🕓 ReelsView: Waiting for filters before initial load...")
-                    } else {
-                        // Filters are ready OR no default filter is configured
-                        var initialFilter = selectedFilter
-                        if initialFilter == nil, let defId = defaultId {
-                            initialFilter = viewModel.savedFilters[defId]
-                        }
-                        
-                        // Load saved sort for current mode
-                        let currentModeType = reelsMode.toModeType
-                        let savedSortStr = TabManager.shared.getReelsDefaultSort(for: currentModeType)
-                        
-                        // Apply based on mode
-                        switch reelsMode {
-                        case .scenes:
-                            let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-                            selectedSortOption = savedSort
-                            applySettings(sortBy: savedSort, filter: initialFilter, performer: selectedPerformer, tags: selectedTags)
-                        case .markers:
-                            let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
-                            selectedMarkerSortOption = savedSort
-                            applySettings(markerSortBy: savedSort, filter: initialFilter, performer: selectedPerformer, tags: selectedTags)
-                        case .clips:
-                            let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
-                            selectedClipSortOption = savedSort
-                            var clipFilter = selectedClipFilter
-                            if clipFilter == nil, let defId = defaultId {
-                                clipFilter = viewModel.savedFilters[defId]
-                            }
-                            selectedClipFilter = clipFilter
-                            applySettings(clipSortBy: savedSort, filter: nil, clipFilter: clipFilter)
-                        }
-                    }
-                }
-            }
-        }
+        .onAppear { handleOnAppear() }
         .onChange(of: isMenuOpen) { _, _ in }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -826,6 +789,11 @@ struct ReelsView: View {
                     let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
                     selectedClipFilter = newFilter
                     applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
+                case .previews:
+                    let defaultId = TabManager.shared.getDefaultPreviewFilterId(for: .reels)
+                    let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
+                    selectedPreviewFilter = newFilter
+                    applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
                 }
             }
         }
@@ -844,6 +812,7 @@ struct ReelsView: View {
                 case .scenes: return viewModel.scenes.isEmpty
                 case .markers: return viewModel.sceneMarkers.isEmpty
                 case .clips: return viewModel.clips.isEmpty
+                case .previews: return viewModel.previews.isEmpty
                 }
             }()
 
@@ -856,6 +825,7 @@ struct ReelsView: View {
                     case .scenes: return TabManager.shared.getDefaultFilterId(for: .reels)
                     case .markers: return TabManager.shared.getDefaultMarkerFilterId(for: .reels)
                     case .clips: return TabManager.shared.getDefaultClipFilterId(for: .reels)
+                    case .previews: return TabManager.shared.getDefaultPreviewFilterId(for: .reels)
                     }
                 }()
 
@@ -868,6 +838,9 @@ struct ReelsView: View {
                     case .clips:
                         selectedClipFilter = filter
                         applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    case .previews:
+                        selectedPreviewFilter = filter
+                        applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
                     }
                 } else {
                     // No default filter, just load unfiltered with saved sort
@@ -884,8 +857,168 @@ struct ReelsView: View {
                     case .clips:
                         let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
                         applySettings(clipSortBy: savedSort, filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, clearClipFilter: true)
+                    case .previews:
+                        let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        applySettings(previewSortBy: savedSort, filter: nil, previewFilter: nil, performer: selectedPerformer, tags: selectedTags, clearPreviewFilter: true)
                     }
                 }
+            }
+        }
+    }
+
+    private func handleOnAppear() {
+        UIApplication.shared.isIdleTimerDisabled = true
+        
+        // Audio Optimization: Ensure session is active once for Reels
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("🎬 Reels: Audio setup error: \(error)")
+        }
+
+        // 0. Guard against rotation-triggered onAppear
+        if isRotating {
+            print("🔄 ReelsView: Skipping recursive onAppear during rotation")
+            isRotating = false
+            return
+        }
+
+        if viewModel.savedFilters.isEmpty {
+            viewModel.fetchSavedFilters()
+        }
+        
+        autoSelectFirstItem()
+        
+        // 1. Initialize reelsMode ONLY if current mode is disabled in settings
+        let enabledTypes = tabManager.enabledReelsModes
+        if !enabledTypes.contains(reelsMode.toModeType) {
+            if let first = enabledTypes.first {
+                reelsMode = ReelsMode(from: first)
+            }
+        }
+        
+        // Determine initial state from coordinator
+        let initialPerformer: ScenePerformer? = coordinator.reelsPerformer
+        let initialTags: [Tag] = coordinator.reelsTags
+        
+        // Priority 1: Navigation Context
+        if initialPerformer != nil || !initialTags.isEmpty {
+            coordinator.reelsPerformer = nil
+            coordinator.reelsTags = []
+
+            // Load saved sort for Scenes mode (default for nav context)
+            let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .scenes)
+            let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+
+            // Resolve default filter so removing the performer/tag pill reverts to it (not nil)
+            var baseFilter = selectedFilter
+            if baseFilter == nil, let defId = TabManager.shared.getDefaultFilterId(for: .reels) {
+                baseFilter = viewModel.savedFilters[defId]
+            }
+
+            applySettings(sortBy: savedSort, filter: baseFilter, performer: initialPerformer, tags: initialTags)
+        } else {
+            let isCurrentlyEmpty: Bool = {
+                switch reelsMode {
+                case .scenes: return viewModel.scenes.isEmpty
+                case .markers: return viewModel.sceneMarkers.isEmpty
+                case .clips: return viewModel.clips.isEmpty
+                case .previews: return viewModel.previews.isEmpty
+                }
+            }()
+
+            if isCurrentlyEmpty {
+                // Priority 2: Try to apply default filter
+                let defaultId: String? = {
+                    switch reelsMode {
+                    case .scenes: return TabManager.shared.getDefaultFilterId(for: .reels)
+                    case .markers: return TabManager.shared.getDefaultMarkerFilterId(for: .reels)
+                    case .clips: return TabManager.shared.getDefaultClipFilterId(for: .reels)
+                    case .previews: return TabManager.shared.getDefaultPreviewFilterId(for: .reels)
+                    }
+                }()
+                    
+                let hasFiltersArrived = !viewModel.savedFilters.isEmpty
+                
+                if defaultId != nil, !hasFiltersArrived {
+                    // We need to wait for onChange(of: viewModel.savedFilters) to trigger applySettings
+                    print("🕓 ReelsView: Waiting for filters before initial load...")
+                } else {
+                    // Filters are ready OR no default filter is configured
+                    var initialFilter = selectedFilter
+                    if initialFilter == nil, let defId = defaultId {
+                        initialFilter = viewModel.savedFilters[defId]
+                    }
+                    
+                    // Load saved sort for current mode
+                    let currentModeType = reelsMode.toModeType
+                    let savedSortStr = TabManager.shared.getReelsDefaultSort(for: currentModeType)
+                    
+                    // Apply based on mode
+                    switch reelsMode {
+                    case .scenes:
+                        let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        selectedSortOption = savedSort
+                        applySettings(sortBy: savedSort, filter: initialFilter, performer: selectedPerformer, tags: selectedTags)
+                    case .markers:
+                        let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        selectedMarkerSortOption = savedSort
+                        applySettings(markerSortBy: savedSort, filter: initialFilter, performer: selectedPerformer, tags: selectedTags)
+                    case .clips:
+                        let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        selectedClipSortOption = savedSort
+                        var clipFilter = selectedClipFilter
+                        if clipFilter == nil, let defId = defaultId {
+                            clipFilter = viewModel.savedFilters[defId]
+                        }
+                        selectedClipFilter = clipFilter
+                        applySettings(clipSortBy: savedSort, filter: nil, clipFilter: clipFilter)
+                    case .previews:
+                        let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        selectedSortOption = savedSort
+                        var prevFilter = selectedPreviewFilter
+                        if prevFilter == nil, let defId = defaultId {
+                            prevFilter = viewModel.savedFilters[defId]
+                        }
+                        selectedPreviewFilter = prevFilter
+                        applySettings(previewSortBy: savedSort, filter: nil, previewFilter: prevFilter)
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleModeChange(_ newValue: ReelsMode) {
+        switch newValue {
+        case .markers:
+            if let defaultId = TabManager.shared.getDefaultMarkerFilterId(for: .reels),
+               let filter = viewModel.savedFilters[defaultId] {
+                applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            } else {
+                applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            }
+        case .scenes:
+            if let defaultId = TabManager.shared.getDefaultFilterId(for: .reels),
+               let filter = viewModel.savedFilters[defaultId] {
+                applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            } else {
+                applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            }
+        case .clips:
+            if let defaultId = TabManager.shared.getDefaultClipFilterId(for: .reels),
+               let filter = viewModel.savedFilters[defaultId] {
+                applySettings(filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            } else {
+                // Maintain current selectedClipFilter when switching modes if no default
+                applySettings(filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            }
+        case .previews:
+            if let defaultId = TabManager.shared.getDefaultPreviewFilterId(for: .reels),
+               let filter = viewModel.savedFilters[defaultId] {
+                applySettings(filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            } else {
+                applySettings(filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
             }
         }
     }
@@ -971,6 +1104,7 @@ struct ReelsView: View {
                 case .scenes: viewModel.loadMoreScenes()
                 case .markers: viewModel.loadMoreMarkers()
                 case .clips: viewModel.loadMoreClips()
+                case .previews: viewModel.loadMorePreviews()
                 }
             }
         }
@@ -1126,6 +1260,8 @@ struct ReelsView: View {
                 markerSortOptions
             case .clips:
                 clipSortOptions
+            case .previews:
+                previewSortOptions
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down.circle")
@@ -1388,9 +1524,168 @@ struct ReelsView: View {
                 if selectedMarkerSortOption == .secondsAsc || selectedMarkerSortOption == .secondsDesc { Image(systemName: "checkmark") }
             }
         }
-
     }
+    
+    @ViewBuilder
+    private var previewSortOptions: some View {
+        // Previews are scenes — same sort options as sceneSortOptions
+        Button(action: { applySettings(previewSortBy: .random, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+            HStack {
+                Text("Random")
+                if selectedSortOption == .random { Image(systemName: "checkmark") }
+            }
+        }
 
+        Divider()
+
+        // Date
+        Menu {
+            Button(action: { applySettings(previewSortBy: .dateDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Newest First")
+                    if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .dateAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Oldest First")
+                    if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Date")
+                if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
+            }
+        }
+
+        // Title
+        Menu {
+            Button(action: { applySettings(previewSortBy: .titleAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("A → Z")
+                    if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .titleDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Z → A")
+                    if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Title")
+                if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
+            }
+        }
+
+        // Duration
+        Menu {
+            Button(action: { applySettings(previewSortBy: .durationDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Longest First")
+                    if selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .durationAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Shortest First")
+                    if selectedSortOption == .durationAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Duration")
+                if selectedSortOption == .durationAsc || selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
+            }
+        }
+
+        // Last Played
+        Menu {
+            Button(action: { applySettings(previewSortBy: .lastPlayedAtDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Recently Played")
+                    if selectedSortOption == .lastPlayedAtDesc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .lastPlayedAtAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Least Recently")
+                    if selectedSortOption == .lastPlayedAtAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Last Played")
+                if selectedSortOption == .lastPlayedAtAsc || selectedSortOption == .lastPlayedAtDesc { Image(systemName: "checkmark") }
+            }
+        }
+
+        // Created
+        Menu {
+            Button(action: { applySettings(previewSortBy: .createdAtDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Newest First")
+                    if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .createdAtAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Oldest First")
+                    if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Created")
+                if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
+            }
+        }
+
+        // O-Counter
+        Menu {
+            Button(action: { applySettings(previewSortBy: .oCounterDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("High → Low")
+                    if selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .oCounterAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Low → High")
+                    if selectedSortOption == .oCounterAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("O-Counter")
+                if selectedSortOption == .oCounterAsc || selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
+            }
+        }
+
+        // Rating
+        Menu {
+            Button(action: { applySettings(previewSortBy: .ratingDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("High → Low")
+                    if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
+                }
+            }
+            Button(action: { applySettings(previewSortBy: .ratingAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+                HStack {
+                    Text("Low → High")
+                    if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Rating")
+                if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
+            }
+        }
+    }
+    
     @ViewBuilder
     private var clipSortOptions: some View {
         // Random
@@ -1529,7 +1824,7 @@ struct ReelsView: View {
                     }
                 }
 
-                let mode: StashDBViewModel.FilterMode = (reelsMode == .scenes ? .scenes : .sceneMarkers)
+                let mode: StashDBViewModel.FilterMode = (reelsMode == .scenes || reelsMode == .previews) ? .scenes : .sceneMarkers
                 let activeFilters = viewModel.savedFilters.values
                     .filter { $0.mode == mode && $0.id != "reels_temp" && $0.id != "reels_merged" }
                     .sorted { $0.name < $1.name }
@@ -1551,10 +1846,7 @@ struct ReelsView: View {
                 .foregroundColor(hasActiveFilter ? appearanceManager.tintColor : .white)
         }
     }
-
 }
-
-
 
 struct ReelItemView: View {
     let item: ReelsView.ReelItemData
@@ -1947,8 +2239,8 @@ extension ReelItemView {
                     
                     Spacer()
                     
-                    // View Counter
-                    if let playCount = item.playCount {
+                    // View Counter (not shown for Previews)
+                    if case .preview = item { } else if let playCount = item.playCount {
                         BottomBarButton(icon: "stopwatch", count: playCount) {
                              onInteraction()
                         }
@@ -2060,6 +2352,7 @@ extension ReelItemView {
             let sceneId: String? = {
                 if case .scene(let s) = item { return s.id }
                 if case .marker(let m) = item { return m.scene?.id }
+                if case .preview(let s) = item { return s.id }
                 return nil
             }()
             
@@ -2119,6 +2412,8 @@ extension ReelItemView {
                 bestURL = m.scene?.withStreams(streams).bestStream(for: quality)
             case .clip:
                 bestURL = nil  // Clips don't use scene streams
+            case .preview(let s):
+                bestURL = s.previewURL
             }
             
             if let targetURL = bestURL {

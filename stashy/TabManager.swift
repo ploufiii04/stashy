@@ -117,9 +117,11 @@ struct TabConfig: Codable, Identifiable, Equatable {
     var defaultMarkerFilterName: String?
     var defaultClipFilterId: String?
     var defaultClipFilterName: String?
+    var defaultPreviewFilterId: String?
+    var defaultPreviewFilterName: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, isVisible, sortOrder, defaultFilterId, defaultFilterName, defaultMarkerFilterId, defaultMarkerFilterName, defaultClipFilterId, defaultClipFilterName
+        case id, isVisible, sortOrder, defaultFilterId, defaultFilterName, defaultMarkerFilterId, defaultMarkerFilterName, defaultClipFilterId, defaultClipFilterName, defaultPreviewFilterId, defaultPreviewFilterName
         case defaultSortOption = "sortOption"
     }
 }
@@ -198,12 +200,14 @@ enum ReelsModeType: String, Codable, CaseIterable {
     case scenes
     case markers
     case clips
+    case previews
     
     var defaultTitle: String {
         switch self {
         case .scenes: return "Scenes"
         case .markers: return "Markers"
         case .clips: return "Clips"
+        case .previews: return "Previews"
         }
     }
     
@@ -212,6 +216,7 @@ enum ReelsModeType: String, Codable, CaseIterable {
         case .scenes: return "film"
         case .markers: return "bookmark.fill"
         case .clips: return "photo.on.rectangle.angled"
+        case .previews: return "play.rectangle.on.rectangle.fill"
         }
     }
 }
@@ -696,7 +701,8 @@ class TabManager: ObservableObject {
             self.reelsModes = [
                 ReelsModeConfig(id: UUID(), type: .scenes, isEnabled: true, sortOrder: 0),
                 ReelsModeConfig(id: UUID(), type: .markers, isEnabled: true, sortOrder: 1),
-                ReelsModeConfig(id: UUID(), type: .clips, isEnabled: true, sortOrder: 2)
+                ReelsModeConfig(id: UUID(), type: .clips, isEnabled: true, sortOrder: 2),
+                ReelsModeConfig(id: UUID(), type: .previews, isEnabled: true, sortOrder: 3)
             ]
             saveReelsModes()
         }
@@ -877,6 +883,30 @@ class TabManager: ObservableObject {
         if let index = tabs.firstIndex(where: { $0.id == tab }) {
             tabs[index].defaultClipFilterId = filterId
             tabs[index].defaultClipFilterName = filterName
+            saveConfig()
+
+            NotificationCenter.default.post(
+                name: NSNotification.Name("DefaultFilterChanged"),
+                object: nil,
+                userInfo: ["tab": tab.id]
+            )
+        }
+    }
+
+    // Helper to get default preview filter for a tab
+    func getDefaultPreviewFilterId(for tab: AppTab) -> String? {
+        return tabs.first(where: { $0.id == tab })?.defaultPreviewFilterId
+    }
+
+    func getDefaultPreviewFilterName(for tab: AppTab) -> String? {
+        return tabs.first(where: { $0.id == tab })?.defaultPreviewFilterName
+    }
+
+    // Helper to set default preview filter for a tab
+    func setDefaultPreviewFilter(for tab: AppTab, filterId: String?, filterName: String?) {
+        if let index = tabs.firstIndex(where: { $0.id == tab }) {
+            tabs[index].defaultPreviewFilterId = filterId
+            tabs[index].defaultPreviewFilterName = filterName
             saveConfig()
 
             NotificationCenter.default.post(

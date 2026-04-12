@@ -282,6 +282,18 @@ class StashDBViewModel: ObservableObject {
     @Published var currentMarkerFilter: SavedFilter? = nil
     private var currentMarkerSearchQuery: String = ""
 
+    // Previews properties
+    @Published var previews: [Scene] = []
+    @Published var totalPreviews: Int = 0
+    @Published var isLoadingPreviews = false
+    @Published var isLoadingMorePreviews = false
+    @Published var hasMorePreviews = true
+    private var currentPreviewPage = 1
+    private var currentPreviewSortOption: SceneSortOption = .dateDesc
+    private let previewsPerPage = 20
+    @Published var currentPreviewFilter: SavedFilter? = nil
+    private var currentPreviewSearchQuery: String = ""
+
     func clearSearchResults() {
         scenes = []
         performers = []
@@ -1249,6 +1261,32 @@ class StashDBViewModel: ObservableObject {
         loadScenesPage(page: currentScenePage, sortBy: currentSceneSortOption, searchQuery: currentSceneSearchQuery)
     }
 
+    func fetchPreviews(sortBy: SceneSortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+        if isInitialLoad {
+            currentPreviewPage = 1
+            previews = []
+            totalPreviews = 0
+            isLoadingPreviews = true
+            hasMorePreviews = true
+            currentPreviewSortOption = sortBy
+            currentPreviewFilter = filter
+            currentPreviewSearchQuery = searchQuery
+            isLoading = true
+        } else {
+            isLoadingPreviews = true
+        }
+
+        errorMessage = nil
+        let page = isInitialLoad ? 1 : currentPreviewPage + 1
+        loadScenesPage(page: page, sortBy: currentPreviewSortOption, searchQuery: currentPreviewSearchQuery, previewOnly: true)
+    }
+
+    func loadMorePreviews() {
+        guard !isLoadingMorePreviews && hasMorePreviews else { return }
+        currentPreviewPage += 1
+        loadScenesPage(page: currentPreviewPage, sortBy: currentPreviewSortOption, searchQuery: currentPreviewSearchQuery, previewOnly: true)
+    }
+
     func fetchSceneMarkers(sortBy: SceneMarkerSortOption = .createdAtDesc, searchQuery: String = "", filter: SavedFilter? = nil) {
         currentMarkerPage = 1
         currentMarkerSortOption = sortBy
@@ -1333,12 +1371,14 @@ class StashDBViewModel: ObservableObject {
         }
     }
 
-    private func loadScenesPage(page: Int, sortBy: SceneSortOption, searchQuery: String = "") {
+    private func loadScenesPage(page: Int, sortBy: SceneSortOption, searchQuery: String = "", previewOnly: Bool = false) {
         let isInitialLoad = (page == 1)
-        if isInitialLoad {
-            isLoadingScenes = true
-        } else {
-            isLoadingMoreScenes = true
+        if !previewOnly {
+            if isInitialLoad {
+                isLoadingScenes = true
+            } else {
+                isLoadingMoreScenes = true
+            }
         }
         errorMessage = nil
 
@@ -1362,7 +1402,7 @@ class StashDBViewModel: ObservableObject {
             "filter": filterDict
         ]
         
-        if let savedFilter = currentSceneFilter {
+        if let savedFilter = previewOnly ? currentPreviewFilter : currentSceneFilter {
             if let dict = savedFilter.filterDict {
                 let sanitized = sanitizeFilter(dict)
                 print("🔍 Scene Filter sanitized: \(sanitized)")
@@ -1397,32 +1437,62 @@ class StashDBViewModel: ObservableObject {
         performGraphQLQuery(query: bodyString) { (response: AltScenesResponse?) in
             if let scenesResult = response?.data?.findScenes {
                 DispatchQueue.main.async {
-                    if isInitialLoad {
-                        self.scenes = scenesResult.scenes
-                        self.totalScenes = scenesResult.count
+                    if previewOnly {
+                        // Client-side filter: only keep scenes that actually have a preview video
+                        let scenesWithPreview = scenesResult.scenes.filter { $0.previewURL != nil }
+                        if isInitialLoad {
+                            self.previews = scenesWithPreview
+                            self.totalPreviews = scenesResult.count
+                        } else {
+                            let existingIds = Set(self.previews.map { $0.id })
+                            let newScenes = scenesWithPreview.filter { !existingIds.contains($0.id) }
+                            self.previews.append(contentsOf: newScenes)
+                        }
+                        self.hasMorePreviews = scenesResult.scenes.count == self.previewsPerPage
+                        self.currentPreviewPage = page
+                        if isInitialLoad {
+                            self.isLoadingPreviews = false
+                            self.isLoading = false
+                        } else {
+                            self.isLoadingMorePreviews = false
+                        }
                     } else {
-                        // Deduplicate: Only add scenes that aren't already in the list
-                        let existingIds = Set(self.scenes.map { $0.id })
-                        let newScenes = scenesResult.scenes.filter { !existingIds.contains($0.id) }
-                        self.scenes.append(contentsOf: newScenes)
-                    }
-                    
-                    // Check if there are more pages
-                    self.hasMoreScenes = scenesResult.scenes.count == self.scenesPerPage
-                    
-                    if isInitialLoad {
-                        self.isLoadingScenes = false
-                        self.errorMessage = nil // Success
-                    } else {
-                        self.isLoadingMoreScenes = false
+                        if isInitialLoad {
+                            self.scenes = scenesResult.scenes
+                            self.totalScenes = scenesResult.count
+                        } else {
+                            // Deduplicate: Only add scenes that aren't already in the list
+                            let existingIds = Set(self.scenes.map { $0.id })
+                            let newScenes = scenesResult.scenes.filter { !existingIds.contains($0.id) }
+                            self.scenes.append(contentsOf: newScenes)
+                        }
+                        
+                        // Check if there are more pages
+                        self.hasMoreScenes = scenesResult.scenes.count == self.scenesPerPage
+                        
+                        if isInitialLoad {
+                            self.isLoadingScenes = false
+                            self.errorMessage = nil // Success
+                        } else {
+                            self.isLoadingMoreScenes = false
+                        }
                     }
                 }
             } else {
                 DispatchQueue.main.async {
-                    if isInitialLoad {
-                        self.isLoadingScenes = false
+                    if previewOnly {
+                        if isInitialLoad {
+                            self.isLoadingPreviews = false
+                            self.isLoading = false
+                        } else {
+                            self.isLoadingMorePreviews = false
+                        }
                     } else {
-                        self.isLoadingMoreScenes = false
+                        if isInitialLoad {
+                            self.isLoadingScenes = false
+                        } else {
+                            self.isLoadingMoreScenes = false
+                        }
                     }
                     // Keep error message processing if present
                 }

@@ -129,6 +129,18 @@ struct ReelsModeSettingsView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+
+        case .previews:
+            Picker("", selection: Binding(
+                get: { StashDBViewModel.SceneSortOption(rawValue: tabManager.getReelsDefaultSort(for: .previews) ?? "") ?? .random },
+                set: { tabManager.setReelsDefaultSort(for: .previews, option: $0.rawValue) }
+            )) {
+                ForEach(StashDBViewModel.SceneSortOption.allCases, id: \.self) { option in
+                    Text(option.displayName).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
         }
     }
 
@@ -139,6 +151,7 @@ struct ReelsModeSettingsView: View {
             case .scenes: return .scenes
             case .markers: return .sceneMarkers
             case .clips: return .images
+            case .previews: return .scenes
             }
         }()
 
@@ -198,6 +211,25 @@ struct ReelsModeSettingsView: View {
                             tabManager.setDefaultClipFilter(for: .reels, filterId: nil, filterName: nil)
                         } else if let filter = filters.first(where: { $0.id == newId }) {
                             tabManager.setDefaultClipFilter(for: .reels, filterId: filter.id, filterName: filter.name)
+                        }
+                    }
+                )) {
+                    Text("None").tag("")
+                    ForEach(filters) { filter in
+                        Text(filter.name).tag(filter.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+
+            case .previews:
+                Picker("", selection: Binding(
+                    get: { tabManager.getDefaultPreviewFilterId(for: .reels) ?? "" },
+                    set: { newId in
+                        if newId.isEmpty {
+                            tabManager.setDefaultPreviewFilter(for: .reels, filterId: nil, filterName: nil)
+                        } else if let filter = filters.first(where: { $0.id == newId }) {
+                            tabManager.setDefaultPreviewFilter(for: .reels, filterId: filter.id, filterName: filter.name)
                         }
                     }
                 )) {
