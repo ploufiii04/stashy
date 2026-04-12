@@ -1438,8 +1438,12 @@ class StashDBViewModel: ObservableObject {
             if let scenesResult = response?.data?.findScenes {
                 DispatchQueue.main.async {
                     if previewOnly {
-                        // Client-side filter: only keep scenes that actually have a preview video
-                        let scenesWithPreview = scenesResult.scenes.filter { $0.previewURL != nil }
+                        // Client-side filter: only keep scenes that actually have a preview path from the server
+                        let scenesWithPreview = scenesResult.scenes.filter { scene in
+                            guard let preview = scene.paths?.preview else { return false }
+                            return !preview.isEmpty
+                        }
+                        let hasMore = scenesResult.scenes.count == self.previewsPerPage
                         if isInitialLoad {
                             self.previews = scenesWithPreview
                             self.totalPreviews = scenesResult.count
@@ -1448,8 +1452,14 @@ class StashDBViewModel: ObservableObject {
                             let newScenes = scenesWithPreview.filter { !existingIds.contains($0.id) }
                             self.previews.append(contentsOf: newScenes)
                         }
-                        self.hasMorePreviews = scenesResult.scenes.count == self.previewsPerPage
+                        self.hasMorePreviews = hasMore
                         self.currentPreviewPage = page
+                        // If the filtered result is still empty but there are more pages, fetch next page automatically
+                        if self.previews.isEmpty && hasMore {
+                            self.currentPreviewPage += 1
+                            self.loadScenesPage(page: self.currentPreviewPage, sortBy: self.currentPreviewSortOption, searchQuery: self.currentPreviewSearchQuery, previewOnly: true)
+                            return
+                        }
                         if isInitialLoad {
                             self.isLoadingPreviews = false
                             self.isLoading = false

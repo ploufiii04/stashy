@@ -329,6 +329,7 @@ struct ReelsView: View {
                 viewModel.refreshRandomSeed()
             }
             selectedSortOption = sortBy
+            currentVisibleSceneId = nil
         }
 
         if let markerSortBy = markerSortBy {
@@ -336,6 +337,7 @@ struct ReelsView: View {
                 viewModel.refreshRandomSeed()
             }
             selectedMarkerSortOption = markerSortBy
+            currentVisibleSceneId = nil
         }
 
         if let clipSortBy = clipSortBy {
@@ -343,6 +345,7 @@ struct ReelsView: View {
                 viewModel.refreshRandomSeed()
             }
             selectedClipSortOption = clipSortBy
+            currentVisibleSceneId = nil
         }
 
         if let previewSortBy = previewSortBy {
@@ -351,6 +354,7 @@ struct ReelsView: View {
             }
             // Previews use standard selectedSortOption since they are scenes
             selectedSortOption = previewSortBy
+            currentVisibleSceneId = nil
         }
 
         // For clip filter: use explicitly passed value; fall back to existing selectedClipFilter
@@ -755,6 +759,7 @@ struct ReelsView: View {
         .onChange(of: viewModel.scenes.first?.id) { _, _ in autoSelectFirstItem() }
         .onChange(of: viewModel.sceneMarkers.first?.id) { _, _ in autoSelectFirstItem() }
         .onChange(of: viewModel.clips.first?.id) { _, _ in autoSelectFirstItem() }
+        .onChange(of: viewModel.previews.first?.id) { _, _ in autoSelectFirstItem() }
         .onAppear { handleOnAppear() }
         .onChange(of: isMenuOpen) { _, _ in }
         .onDisappear {
@@ -793,7 +798,7 @@ struct ReelsView: View {
                     let defaultId = TabManager.shared.getDefaultPreviewFilterId(for: .reels)
                     let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
                     selectedPreviewFilter = newFilter
-                    applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
+                    applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, filter: nil, previewFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
                 }
             }
         }
@@ -840,7 +845,7 @@ struct ReelsView: View {
                         applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags)
                     case .previews:
                         selectedPreviewFilter = filter
-                        applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                        applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
                     }
                 } else {
                     // No default filter, just load unfiltered with saved sort
@@ -1014,11 +1019,12 @@ struct ReelsView: View {
                 applySettings(filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
             }
         case .previews:
+            let savedPreviewSort = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? .random
             if let defaultId = TabManager.shared.getDefaultPreviewFilterId(for: .reels),
                let filter = viewModel.savedFilters[defaultId] {
-                applySettings(filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+                applySettings(previewSortBy: savedPreviewSort, filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
             } else {
-                applySettings(filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+                applySettings(previewSortBy: savedPreviewSort, filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
             }
         }
     }
