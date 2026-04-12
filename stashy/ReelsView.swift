@@ -2504,6 +2504,9 @@ extension ReelItemView {
                 let start = self.item.startTime
                 player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 player.play()
+            } else if case .preview = self.item {
+                player.seek(to: .zero)
+                player.play()
             }
         }
         
