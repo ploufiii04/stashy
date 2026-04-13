@@ -142,33 +142,44 @@ struct SceneDetailView: View {
                 if verticalSizeClass == .compact {
                     // Landscape Mode: Grid Layout for Metadata
                     LazyVGrid(columns: [GridItem(.flexible(), alignment: .top), GridItem(.flexible(), alignment: .top)], spacing: 12) {
-                        
-                        // Item 1: Performers & Studio
-                        if !activeScene.performers.isEmpty || activeScene.studio != nil {
-                            VStack(spacing: 12) {
-                                if !activeScene.performers.isEmpty {
-                                    ScenePerformersCard(performers: activeScene.performers)
-                                }
-                                if let studio = activeScene.studio {
-                                    SceneStudioCard(studio: studio)
-                                }
-                            }
+
+                        // Item 1: Performers & Studio — always visible
+                        VStack(spacing: 12) {
+                            ScenePerformersCard(
+                                sceneId: activeScene.id,
+                                performers: activeScene.performers,
+                                onPerformersUpdated: { updated in
+                                    activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: activeScene.studio, performers: updated, files: activeScene.files, tags: activeScene.tags, galleries: activeScene.galleries, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
+                                },
+                                viewModel: viewModel
+                            )
+                            SceneStudioCard(
+                                sceneId: activeScene.id,
+                                studio: activeScene.studio,
+                                onStudioUpdated: { updated in
+                                    activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: updated, performers: activeScene.performers, files: activeScene.files, tags: activeScene.tags, galleries: activeScene.galleries, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
+                                },
+                                viewModel: viewModel
+                            )
                         }
-                        
+
                         // Item 2: Galleries
                         if let galleries = activeScene.galleries, !galleries.isEmpty {
                             SceneGalleriesCard(galleries: galleries)
                         }
-                        
-                        // Item 3: Tags
-                        if let tags = activeScene.tags, !tags.isEmpty {
-                            SceneTagsCard(
-                                tags: tags,
-                                isTagsExpanded: $isTagsExpanded,
-                                tagsTotalHeight: $tagsTotalHeight
-                            )
-                        }
-                        
+
+                        // Item 3: Tags — always visible
+                        SceneTagsCard(
+                            sceneId: activeScene.id,
+                            tags: activeScene.tags,
+                            onTagsUpdated: { updated in
+                                activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: activeScene.studio, performers: activeScene.performers, files: activeScene.files, tags: updated, galleries: activeScene.galleries, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
+                            },
+                            viewModel: viewModel,
+                            isTagsExpanded: $isTagsExpanded,
+                            tagsTotalHeight: $tagsTotalHeight
+                        )
+
                         // Item 4: Delete Button
                         Button(role: .destructive) {
                             showDeleteWithFilesConfirmation = true
@@ -186,30 +197,41 @@ struct SceneDetailView: View {
                     }
                 } else {
                     // Portrait Mode: Vertical Stack
-                    if !activeScene.performers.isEmpty || activeScene.studio != nil {
-                        HStack(alignment: .top, spacing: 12) {
-                            if !activeScene.performers.isEmpty {
-                                ScenePerformersCard(performers: activeScene.performers)
-                            }
-                            
-                            if let studio = activeScene.studio {
-                                SceneStudioCard(studio: studio)
-                            }
-                        }
+                    HStack(alignment: .top, spacing: 12) {
+                        ScenePerformersCard(
+                            sceneId: activeScene.id,
+                            performers: activeScene.performers,
+                            onPerformersUpdated: { updated in
+                                activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: activeScene.studio, performers: updated, files: activeScene.files, tags: activeScene.tags, galleries: activeScene.galleries, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
+                            },
+                            viewModel: viewModel
+                        )
+                        SceneStudioCard(
+                            sceneId: activeScene.id,
+                            studio: activeScene.studio,
+                            onStudioUpdated: { updated in
+                                activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: updated, performers: activeScene.performers, files: activeScene.files, tags: activeScene.tags, galleries: activeScene.galleries, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
+                            },
+                            viewModel: viewModel
+                        )
                     }
 
                     if let galleries = activeScene.galleries, !galleries.isEmpty {
                         SceneGalleriesCard(galleries: galleries)
                     }
-                    
-                    if let tags = activeScene.tags, !tags.isEmpty {
-                        SceneTagsCard(
-                            tags: tags,
-                            isTagsExpanded: $isTagsExpanded,
-                            tagsTotalHeight: $tagsTotalHeight
-                        )
-                    }
-                    
+
+                    // Tags — always visible
+                    SceneTagsCard(
+                        sceneId: activeScene.id,
+                        tags: activeScene.tags,
+                        onTagsUpdated: { updated in
+                            activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: activeScene.studio, performers: activeScene.performers, files: activeScene.files, tags: updated, galleries: activeScene.galleries, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
+                        },
+                        viewModel: viewModel,
+                        isTagsExpanded: $isTagsExpanded,
+                        tagsTotalHeight: $tagsTotalHeight
+                    )
+
                     // Delete Scene Button (Card Style)
                     Button(role: .destructive) {
                         showDeleteWithFilesConfirmation = true

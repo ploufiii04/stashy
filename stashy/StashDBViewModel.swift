@@ -3996,6 +3996,86 @@ struct GenerateData: Codable {
         }
     }
     
+    func fetchAllPerformers(completion: @escaping ([Performer]) -> Void) {
+        let query = GraphQLQueries.queryWithFragments("findPerformers")
+        let variables: [String: Any] = [
+            "filter": ["per_page": 1000, "sort": "scenes_count", "direction": "DESC"],
+            "performer_filter": [:]
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion([]); return
+        }
+        performGraphQLQuery(query: bodyString) { (response: PerformersResponse?) in
+            completion(response?.data?.findPerformers.performers ?? [])
+        }
+    }
+
+    func fetchAllStudios(completion: @escaping ([Studio]) -> Void) {
+        let query = GraphQLQueries.queryWithFragments("findStudios")
+        let variables: [String: Any] = [
+            "filter": ["per_page": 1000, "sort": "scenes_count", "direction": "DESC"],
+            "studio_filter": [:]
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion([]); return
+        }
+        performGraphQLQuery(query: bodyString) { (response: StudiosResponse?) in
+            completion(response?.data?.findStudios.studios ?? [])
+        }
+    }
+
+    func updateScenePerformers(sceneId: String, performerIds: [String], completion: @escaping (Bool) -> Void) {
+        let mutation = """
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+            sceneUpdate(input: $input) { id performers { id name scene_count gallery_count o_counter updated_at } }
+        }
+        """
+        let variables: [String: Any] = ["input": ["id": sceneId, "performer_ids": performerIds]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion(false); return
+        }
+        performGraphQLQuery(query: bodyString) { (response: SceneUpdateResponse?) in
+            completion(response?.data?.sceneUpdate != nil)
+        }
+    }
+
+    func updateSceneStudio(sceneId: String, studioId: String?, completion: @escaping (Bool) -> Void) {
+        let mutation = """
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+            sceneUpdate(input: $input) { id studio { id name updated_at } }
+        }
+        """
+        var input: [String: Any] = ["id": sceneId]
+        if let sid = studioId { input["studio_id"] = sid } else { input["studio_id"] = NSNull() }
+        let variables: [String: Any] = ["input": input]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion(false); return
+        }
+        performGraphQLQuery(query: bodyString) { (response: SceneUpdateResponse?) in
+            completion(response?.data?.sceneUpdate != nil)
+        }
+    }
+
+    func updateSceneTags(sceneId: String, tagIds: [String], completion: @escaping (Bool) -> Void) {
+        let mutation = """
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+            sceneUpdate(input: $input) { id tags { id name } }
+        }
+        """
+        let variables: [String: Any] = ["input": ["id": sceneId, "tag_ids": tagIds]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion(false); return
+        }
+        performGraphQLQuery(query: bodyString) { (response: SceneUpdateResponse?) in
+            completion(response?.data?.sceneUpdate != nil)
+        }
+    }
+
     func fetchAllTags(completion: @escaping ([Tag]) -> Void) {
         let query = GraphQLQueries.queryWithFragments("findTags")
         
