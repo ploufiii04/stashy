@@ -4076,6 +4076,115 @@ struct GenerateData: Codable {
         }
     }
 
+    func fetchAllGroupsForScene(completion: @escaping ([StashGroup]) -> Void) {
+        let query = """
+        query FindGroups($filter: FindFilterType) {
+            findGroups(filter: $filter) {
+                groups { id name updated_at front_image_path }
+            }
+        }
+        """
+        let variables: [String: Any] = ["filter": ["per_page": -1, "sort": "name", "direction": "ASC"]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { completion([]); return }
+        struct Resp: Codable { let data: RData? }
+        struct RData: Codable { let findGroups: RGroups }
+        struct RGroups: Codable { let groups: [StashGroup] }
+        performGraphQLQuery(query: bodyString) { (response: Resp?) in
+            completion(response?.data?.findGroups.groups ?? [])
+        }
+    }
+
+    func updateSceneGroups(sceneId: String, groupIds: [String], completion: @escaping (Bool) -> Void) {
+        let mutation = """
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+            sceneUpdate(input: $input) { id groups { group { id name updated_at front_image_path } scene_index } }
+        }
+        """
+        let groupsInput = groupIds.map { ["group_id": $0] }
+        let variables: [String: Any] = ["input": ["id": sceneId, "groups": groupsInput]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { completion(false); return }
+        performGraphQLQuery(query: bodyString) { (response: SceneUpdateResponse?) in
+            completion(response?.data?.sceneUpdate != nil)
+        }
+    }
+
+    func updateSceneTitleAndDetails(sceneId: String, title: String?, details: String?, completion: @escaping (Bool) -> Void) {
+        let mutation = """
+        mutation SceneUpdate($input: SceneUpdateInput!) {
+            sceneUpdate(input: $input) { id title details }
+        }
+        """
+        var input: [String: Any] = ["id": sceneId]
+        if let t = title { input["title"] = t } else { input["title"] = NSNull() }
+        if let d = details { input["details"] = d } else { input["details"] = NSNull() }
+        let variables: [String: Any] = ["input": input]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion(false); return
+        }
+        performGraphQLQuery(query: bodyString) { (response: SceneUpdateResponse?) in
+            completion(response?.data?.sceneUpdate != nil)
+        }
+    }
+
+    func createPerformer(name: String, completion: @escaping (Performer?) -> Void) {
+        let mutation = """
+        mutation PerformerCreate($input: PerformerCreateInput!) {
+            performerCreate(input: $input) { id name scene_count gallery_count updated_at }
+        }
+        """
+        let variables: [String: Any] = ["input": ["name": name]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { completion(nil); return }
+        performGraphQLQuery(query: bodyString) { (response: PerformerCreateResponse?) in
+            completion(response?.data?.performerCreate)
+        }
+    }
+
+    func createStudio(name: String, completion: @escaping (Studio?) -> Void) {
+        let mutation = """
+        mutation StudioCreate($input: StudioCreateInput!) {
+            studioCreate(input: $input) { id name scene_count updated_at }
+        }
+        """
+        let variables: [String: Any] = ["input": ["name": name]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { completion(nil); return }
+        performGraphQLQuery(query: bodyString) { (response: StudioCreateResponse?) in
+            completion(response?.data?.studioCreate)
+        }
+    }
+
+    func createGroup(name: String, completion: @escaping (StashGroup?) -> Void) {
+        let mutation = """
+        mutation GroupCreate($input: GroupCreateInput!) {
+            groupCreate(input: $input) { id name updated_at front_image_path scene_count }
+        }
+        """
+        let variables: [String: Any] = ["input": ["name": name]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { completion(nil); return }
+        performGraphQLQuery(query: bodyString) { (response: GroupCreateResponse?) in
+            completion(response?.data?.groupCreate)
+        }
+    }
+
+    func createTag(name: String, completion: @escaping (Tag?) -> Void) {
+        let mutation = """
+        mutation TagCreate($input: TagCreateInput!) {
+            tagCreate(input: $input) { id name scene_count }
+        }
+        """
+        let variables: [String: Any] = ["input": ["name": name]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { completion(nil); return }
+        performGraphQLQuery(query: bodyString) { (response: TagCreateResponse?) in
+            completion(response?.data?.tagCreate)
+        }
+    }
+
     func fetchAllTags(completion: @escaping ([Tag]) -> Void) {
         let query = GraphQLQueries.queryWithFragments("findTags")
         
@@ -4363,6 +4472,33 @@ struct ImageUpdateResponse: Codable {
 struct ImageUpdateData: Codable {
     let imageUpdate: ImageRatingUpdateItem?
 }
+
+struct PerformerCreateResponse: Codable {
+    let data: PerformerCreateData?
+}
+struct PerformerCreateData: Codable {
+    let performerCreate: Performer?
+}
+
+struct StudioCreateResponse: Codable {
+    let data: StudioCreateData?
+}
+struct StudioCreateData: Codable {
+    let studioCreate: Studio?
+}
+
+struct TagCreateResponse: Codable {
+    let data: TagCreateData?
+}
+struct TagCreateData: Codable {
+    let tagCreate: Tag?
+}
+struct GroupCreateResponse: Codable {
+    let data: GroupCreateData?
+}
+struct GroupCreateData: Codable {
+    let groupCreate: StashGroup?
+}
 struct ImageRatingUpdateItem: Codable {
     let id: String
     let rating100: Int?
@@ -4499,6 +4635,7 @@ struct Scene: Codable, Identifiable, Equatable {
     let files: [SceneFile]?
     let tags: [Tag]?
     let galleries: [Gallery]?
+    let groups: [SceneGroupEntry]?
     let organized: Bool?
     let resumeTime: Double?
     let playCount: Int?
@@ -4513,7 +4650,7 @@ struct Scene: Codable, Identifiable, Equatable {
     
     
     enum CodingKeys: String, CodingKey {
-        case id, title, details, date, duration, studio, performers, files, tags, galleries, organized, rating100, paths, interactive, streams
+        case id, title, details, date, duration, studio, performers, files, tags, galleries, groups, organized, rating100, paths, interactive, streams
         case resumeTime = "resume_time"
         case playCount = "play_count"
         case oCounter = "o_counter"
@@ -4523,7 +4660,7 @@ struct Scene: Codable, Identifiable, Equatable {
     }
 
     // Explicit initializer to handle manual updates like 'withStreams'
-    init(id: String, title: String?, details: String?, date: String?, duration: Double?, studio: SceneStudio?, performers: [ScenePerformer], files: [SceneFile]?, tags: [Tag]?, galleries: [Gallery]?, organized: Bool?, resumeTime: Double?, playCount: Int?, oCounter: Int?, rating100: Int?, createdAt: String?, updatedAt: String?, paths: ScenePaths?, sceneMarkers: [SceneMarker]?, interactive: Bool?, streams: [SceneStream]? = nil) {
+    init(id: String, title: String?, details: String?, date: String?, duration: Double?, studio: SceneStudio?, performers: [ScenePerformer], files: [SceneFile]?, tags: [Tag]?, galleries: [Gallery]?, groups: [SceneGroupEntry]? = nil, organized: Bool?, resumeTime: Double?, playCount: Int?, oCounter: Int?, rating100: Int?, createdAt: String?, updatedAt: String?, paths: ScenePaths?, sceneMarkers: [SceneMarker]?, interactive: Bool?, streams: [SceneStream]? = nil) {
         self.id = id
         self.title = title
         self.details = details
@@ -4534,6 +4671,7 @@ struct Scene: Codable, Identifiable, Equatable {
         self.files = files
         self.tags = tags
         self.galleries = galleries
+        self.groups = groups
         self.organized = organized
         self.resumeTime = resumeTime
         self.playCount = playCount
@@ -4560,6 +4698,7 @@ struct Scene: Codable, Identifiable, Equatable {
         files = try container.decodeIfPresent([SceneFile].self, forKey: .files)
         tags = try container.decodeIfPresent([Tag].self, forKey: .tags)
         galleries = try container.decodeIfPresent([Gallery].self, forKey: .galleries)
+        groups = try container.decodeIfPresent([SceneGroupEntry].self, forKey: .groups)
         organized = try container.decodeIfPresent(Bool.self, forKey: .organized)
         resumeTime = try container.decodeIfPresent(Double.self, forKey: .resumeTime)
         playCount = try container.decodeIfPresent(Int.self, forKey: .playCount)
@@ -4861,137 +5000,60 @@ struct Scene: Codable, Identifiable, Equatable {
     /// Creates a copy with updated resume time
     func withResumeTime(_ newResumeTime: Double) -> Scene {
         return Scene(
-            id: id,
-            title: title,
-            details: details,
-            date: date,
-            duration: duration,
-            studio: studio,
-            performers: performers,
-            files: files,
-            tags: tags,
-            galleries: galleries,
-            organized: organized,
-            resumeTime: newResumeTime,
-            playCount: playCount,
-            oCounter: oCounter,
-            rating100: rating100,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            paths: paths,
-            sceneMarkers: sceneMarkers,
-            interactive: interactive,
-            streams: streams
+            id: id, title: title, details: details, date: date, duration: duration,
+            studio: studio, performers: performers, files: files, tags: tags,
+            galleries: galleries, groups: groups, organized: organized,
+            resumeTime: newResumeTime, playCount: playCount, oCounter: oCounter,
+            rating100: rating100, createdAt: createdAt, updatedAt: updatedAt,
+            paths: paths, sceneMarkers: sceneMarkers, interactive: interactive, streams: streams
         )
     }
-    
+
     /// Creates a copy with updated rating
     func withRating(_ newRating: Int?) -> Scene {
         return Scene(
-            id: id,
-            title: title,
-            details: details,
-            date: date,
-            duration: duration,
-            studio: studio,
-            performers: performers,
-            files: files,
-            tags: tags,
-            galleries: galleries,
-            organized: organized,
-            resumeTime: resumeTime,
-            playCount: playCount,
-            oCounter: oCounter,
-            rating100: newRating,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            paths: paths,
-            sceneMarkers: sceneMarkers,
-            interactive: interactive,
-            streams: streams
+            id: id, title: title, details: details, date: date, duration: duration,
+            studio: studio, performers: performers, files: files, tags: tags,
+            galleries: galleries, groups: groups, organized: organized,
+            resumeTime: resumeTime, playCount: playCount, oCounter: oCounter,
+            rating100: newRating, createdAt: createdAt, updatedAt: updatedAt,
+            paths: paths, sceneMarkers: sceneMarkers, interactive: interactive, streams: streams
         )
     }
 
     /// Creates a copy with updated streams
     func withStreams(_ newStreams: [SceneStream]?) -> Scene {
         return Scene(
-            id: id,
-            title: title,
-            details: details,
-            date: date,
-            duration: duration,
-            studio: studio,
-            performers: performers,
-            files: files,
-            tags: tags,
-            galleries: galleries,
-            organized: organized,
-            resumeTime: resumeTime,
-            playCount: playCount,
-            oCounter: oCounter,
-            rating100: rating100,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            paths: paths,
-            sceneMarkers: sceneMarkers,
-            interactive: interactive,
-            streams: newStreams
+            id: id, title: title, details: details, date: date, duration: duration,
+            studio: studio, performers: performers, files: files, tags: tags,
+            galleries: galleries, groups: groups, organized: organized,
+            resumeTime: resumeTime, playCount: playCount, oCounter: oCounter,
+            rating100: rating100, createdAt: createdAt, updatedAt: updatedAt,
+            paths: paths, sceneMarkers: sceneMarkers, interactive: interactive, streams: newStreams
         )
     }
-    
-    
+
     /// Creates a copy with updated play count
     func withPlayCount(_ newPlayCount: Int?) -> Scene {
         return Scene(
-            id: id,
-            title: title,
-            details: details,
-            date: date,
-            duration: duration,
-            studio: studio,
-            performers: performers,
-            files: files,
-            tags: tags,
-            galleries: galleries,
-            organized: organized,
-            resumeTime: resumeTime,
-            playCount: newPlayCount,
-            oCounter: oCounter,
-            rating100: rating100,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            paths: paths,
-            sceneMarkers: sceneMarkers,
-            interactive: interactive,
-            streams: streams
+            id: id, title: title, details: details, date: date, duration: duration,
+            studio: studio, performers: performers, files: files, tags: tags,
+            galleries: galleries, groups: groups, organized: organized,
+            resumeTime: resumeTime, playCount: newPlayCount, oCounter: oCounter,
+            rating100: rating100, createdAt: createdAt, updatedAt: updatedAt,
+            paths: paths, sceneMarkers: sceneMarkers, interactive: interactive, streams: streams
         )
     }
-    
-    
+
     /// Creates a copy with updated o count
     func withOCounter(_ newOCounter: Int?) -> Scene {
         return Scene(
-            id: id,
-            title: title,
-            details: details,
-            date: date,
-            duration: duration,
-            studio: studio,
-            performers: performers,
-            files: files,
-            tags: tags,
-            galleries: galleries,
-            organized: organized,
-            resumeTime: resumeTime,
-            playCount: playCount,
-            oCounter: newOCounter,
-            rating100: rating100,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            paths: paths,
-            sceneMarkers: sceneMarkers,
-            interactive: interactive,
-            streams: streams
+            id: id, title: title, details: details, date: date, duration: duration,
+            studio: studio, performers: performers, files: files, tags: tags,
+            galleries: galleries, groups: groups, organized: organized,
+            resumeTime: resumeTime, playCount: playCount, oCounter: newOCounter,
+            rating100: rating100, createdAt: createdAt, updatedAt: updatedAt,
+            paths: paths, sceneMarkers: sceneMarkers, interactive: interactive, streams: streams
         )
     }
     
@@ -5359,6 +5421,52 @@ struct ScenePerformer: Codable, Identifiable, Equatable {
             thumbnailURLString = "\(thumbnailURLString)?t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
         }
         return signedURL(URL(string: thumbnailURLString))
+    }
+}
+
+// MARK: - Scene Group Entry
+struct SceneGroupEntry: Codable, Identifiable, Equatable {
+    let group: SceneGroupInfo
+    let sceneIndex: Int?
+
+    var id: String { group.id }
+
+    enum CodingKeys: String, CodingKey {
+        case group
+        case sceneIndex = "scene_index"
+    }
+}
+
+struct SceneGroupInfo: Codable, Equatable {
+    let id: String
+    let name: String
+    let updatedAt: String?
+    let frontImagePath: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case updatedAt = "updated_at"
+        case frontImagePath = "front_image_path"
+    }
+
+    var thumbnailURL: URL? {
+        guard let path = frontImagePath else { return nil }
+        var urlString = path
+        let separator = urlString.contains("?") ? "&" : "?"
+        urlString += "\(separator)width=320"
+        if let updated = updatedAt {
+            urlString += "&t=\(updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? updated)"
+        }
+        if urlString.starts(with: "http"), let url = URL(string: urlString) {
+            return signedURL(url)
+        }
+        guard let config = ServerConfigManager.shared.loadConfig(),
+              let url = URL(string: config.baseURL + urlString) else { return nil }
+        return signedURL(url)
+    }
+
+    func toStashGroup() -> StashGroup {
+        StashGroup(id: id, name: name, synopsis: nil, date: nil, scene_count: nil, gallery_count: nil, rating100: nil, updatedAt: updatedAt, front_image_path: frontImagePath, back_image_path: nil, studio: nil)
     }
 }
 

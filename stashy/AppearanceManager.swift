@@ -47,6 +47,12 @@ class AppearanceManager: ObservableObject {
         }
     }
 
+    @Published var isEditModeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isEditModeEnabled, forKey: kEditModeEnabled)
+        }
+    }
+
 
     var currentTheme: AppTheme {
         if preferredTheme == .system {
@@ -65,6 +71,7 @@ class AppearanceManager: ObservableObject {
     private let kTintColorAlpha = "kTintColorAlpha"
     private let kOCounterIcon = "kOCounterIcon"
     private let kPreferredTheme = "kPreferredTheme"
+    private let kEditModeEnabled = "kEditModeEnabled"
 
 
     private init() {
@@ -74,7 +81,9 @@ class AppearanceManager: ObservableObject {
         
         let savedTheme = UserDefaults.standard.string(forKey: kPreferredTheme) ?? AppTheme.system.rawValue
         self.preferredTheme = AppTheme(rawValue: savedTheme) ?? .system
-        
+        let editKeyExists = UserDefaults.standard.object(forKey: "kEditModeEnabled") != nil
+        self.isEditModeEnabled = editKeyExists ? UserDefaults.standard.bool(forKey: "kEditModeEnabled") : true
+
         self.loadColor()
     }
     

@@ -895,7 +895,7 @@ struct GroupDetailView: View {
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: collapsedHeight, alignment: .topLeading)
         }
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
         .overlay(
             RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)

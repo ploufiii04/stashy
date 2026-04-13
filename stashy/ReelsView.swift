@@ -2222,8 +2222,19 @@ extension ReelItemView {
                 // Bottom row: Action buttons distributed across full width
                 HStack(alignment: .center, spacing: 0) {
                     Spacer()
-                    
-                    
+
+                    // Scene Link (Scenes, Markers, Previews only)
+                    if let scene = item.underlyingScene {
+                        NavigationLink(destination: SceneDetailView(scene: scene)) {
+                            Image(systemName: "film")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+
                     // Rating
                     let rating = item.rating100 ?? 0
                     BottomBarButton(icon: "star", count: rating > 0 ? (rating / 20) : 0) {
@@ -2245,13 +2256,7 @@ extension ReelItemView {
                     
                     Spacer()
                     
-                    // View Counter (not shown for Previews)
-                    if case .preview = item { } else if let playCount = item.playCount {
-                        BottomBarButton(icon: "stopwatch", count: playCount) {
-                             onInteraction()
-                        }
-                        Spacer()
-                    }
+                    // View Counter (not shown for Scenes or Previews)
                     
                     // Mute & StashSync (only for videos)
                     if !item.isAnimated {

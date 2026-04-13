@@ -16,6 +16,7 @@ struct AppearanceSettingsView: View {
             themeSection
             accentColorSection
             counterIconSection
+            editModeSection
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Appearance")
@@ -75,6 +76,14 @@ struct AppearanceSettingsView: View {
                 }
             }
             .padding(.vertical, 8)
+        }
+        .listRowBackground(Color.secondaryAppBackground)
+    }
+
+    private var editModeSection: some View {
+        Section(header: Text("Editing"), footer: Text("Show edit buttons on scene detail cards for performers, studio, tags, title and description.")) {
+            Toggle("Enable Editing", isOn: $appearanceManager.isEditModeEnabled)
+                .tint(appearanceManager.tintColor)
         }
         .listRowBackground(Color.secondaryAppBackground)
     }

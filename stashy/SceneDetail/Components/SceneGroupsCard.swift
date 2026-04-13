@@ -2,10 +2,10 @@
 #if !os(tvOS)
 import SwiftUI
 
-struct SceneStudioCard: View {
+struct SceneGroupsCard: View {
     let sceneId: String
-    let studio: SceneStudio?
-    var onStudioUpdated: ((SceneStudio?) -> Void)?
+    let groups: [SceneGroupEntry]
+    var onGroupsUpdated: (([SceneGroupEntry]) -> Void)?
     @ObservedObject var viewModel: StashDBViewModel
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @State private var showingAddSheet = false
@@ -13,7 +13,7 @@ struct SceneStudioCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Studio")
+                Text("Groups")
                     .font(.title3)
                     .fontWeight(.semibold)
                 Spacer()
@@ -30,21 +30,23 @@ struct SceneStudioCard: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            if let studio = studio {
-                VStack {
-                    NavigationLink(destination: StudioDetailView(studio: studio.toStudio())) {
-                        studioCardContent(studio: studio)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-            } else {
-                Text("No studio assigned")
+            if groups.isEmpty {
+                Text("No groups assigned")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(groups.sorted { $0.group.name < $1.group.name }) { entry in
+                        NavigationLink(destination: GroupDetailView(selectedGroup: entry.group.toStashGroup())) {
+                            groupCardContent(entry: entry)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -52,28 +54,49 @@ struct SceneStudioCard: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
         .cardShadow()
         .sheet(isPresented: $showingAddSheet) {
-            AddStudioToSceneSheet(
+            AddGroupToSceneSheet(
                 sceneId: sceneId,
-                currentStudio: studio,
+                currentGroups: groups,
                 viewModel: viewModel
             ) { updated in
-                onStudioUpdated?(updated)
+                onGroupsUpdated?(updated)
             }
         }
     }
 
-    private func studioCardContent(studio: SceneStudio) -> some View {
+    private func groupCardContent(entry: SceneGroupEntry) -> some View {
         ZStack(alignment: .bottom) {
             ZStack {
-                StudioImageView(studio: studio.toStudio())
-                    .padding(8)
+                if let url = entry.group.thumbnailURL {
+                    CustomAsyncImage(url: url) { loader in
+                        if let image = loader.image {
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 70, height: 105)
+                                .clipped()
+                        } else {
+                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                                .fill(Color.gray.opacity(DesignTokens.Opacity.placeholder))
+                                .frame(width: 70, height: 105)
+                                .skeleton()
+                        }
+                    }
+                } else {
+                    Image(systemName: "rectangle.stack.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .padding(16)
+                        .frame(width: 70, height: 105)
+                        .foregroundColor(appearanceManager.tintColor.opacity(0.4))
+                }
             }
-            .frame(width: 110, height: 105)
+            .frame(width: 70, height: 105)
             .background(appearanceManager.tintColor)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
             .overlay(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card).stroke(appearanceManager.tintColor.opacity(0.1), lineWidth: 0.2))
 
-            Text(studio.name)
+            Text(entry.group.name)
                 .font(.caption2)
                 .fontWeight(.bold)
                 .padding(.horizontal, 8)
@@ -95,49 +118,51 @@ struct SceneStudioCard: View {
     }
 }
 
-struct AddStudioToSceneSheet: View {
+struct AddGroupToSceneSheet: View {
     let sceneId: String
-    let currentStudio: SceneStudio?
+    let currentGroups: [SceneGroupEntry]
     @ObservedObject var viewModel: StashDBViewModel
-    var onComplete: (SceneStudio?) -> Void
+    var onComplete: ([SceneGroupEntry]) -> Void
 
     @Environment(\.dismiss) var dismiss
     @ObservedObject var appearanceManager = AppearanceManager.shared
-    @State private var studios: [Studio] = []
+    @State private var allGroups: [StashGroup] = []
     @State private var isLoading = false
     @State private var searchText = ""
-    @State private var selectedId: String = ""
+    @State private var selectedIds: Set<String> = []
     @State private var isSaving = false
     @State private var isCreating = false
 
-    var filtered: [Studio] {
-        if searchText.isEmpty { return studios }
-        return studios.filter { $0.name.lowercased().contains(searchText.lowercased()) }
+    var filtered: [StashGroup] {
+        if searchText.isEmpty { return allGroups }
+        return allGroups.filter { $0.name.lowercased().contains(searchText.lowercased()) }
     }
 
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Search Studio")) {
+                Section(header: Text("Search Groups")) {
                     TextField("Search...", text: $searchText)
                     if isLoading {
                         HStack { Spacer(); ProgressView("Loading..."); Spacer() }.padding()
                     } else {
-                        ForEach(filtered.prefix(30)) { studio in
+                        ForEach(filtered.prefix(30)) { group in
                             HStack {
-                                Text(studio.name)
+                                Text(group.name)
                                 Spacer()
-                                Text("\(studio.sceneCount) scenes").font(.caption).foregroundColor(.secondary)
-                                if selectedId == studio.id {
+                                if let count = group.scene_count {
+                                    Text("\(count) scenes").font(.caption).foregroundColor(.secondary)
+                                }
+                                if selectedIds.contains(group.id) {
                                     Image(systemName: "checkmark").foregroundColor(appearanceManager.tintColor)
                                 }
                             }
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                if selectedId == studio.id {
-                                    selectedId = ""
+                                if selectedIds.contains(group.id) {
+                                    selectedIds.remove(group.id)
                                 } else {
-                                    selectedId = studio.id
+                                    selectedIds.insert(group.id)
                                 }
                             }
                         }
@@ -160,7 +185,7 @@ struct AddStudioToSceneSheet: View {
                 }
                 .listRowBackground(Color.secondaryAppBackground)
             }
-            .navigationTitle("Set Studio")
+            .navigationTitle("Edit Groups")
             .navigationBarTitleDisplayMode(.inline)
             .applyAppBackground()
             .toolbar {
@@ -173,11 +198,11 @@ struct AddStudioToSceneSheet: View {
                 }
             }
             .onAppear {
-                selectedId = currentStudio?.id ?? ""
+                selectedIds = Set(currentGroups.map { $0.group.id })
                 isLoading = true
-                viewModel.fetchAllStudios { fetched in
+                viewModel.fetchAllGroupsForScene { fetched in
                     DispatchQueue.main.async {
-                        self.studios = fetched
+                        self.allGroups = fetched
                         self.isLoading = false
                     }
                 }
@@ -187,15 +212,15 @@ struct AddStudioToSceneSheet: View {
 
     private func createAndSelect() {
         isCreating = true
-        viewModel.createStudio(name: searchText) { created in
+        viewModel.createGroup(name: searchText) { created in
             DispatchQueue.main.async {
                 isCreating = false
-                if let s = created {
-                    studios.append(s)
-                    selectedId = s.id
+                if let g = created {
+                    allGroups.append(g)
+                    selectedIds.insert(g.id)
                     searchText = ""
                 } else {
-                    ToastManager.shared.show("Failed to create studio", icon: "exclamationmark.triangle", style: .error)
+                    ToastManager.shared.show("Failed to create group", icon: "exclamationmark.triangle", style: .error)
                 }
             }
         }
@@ -203,20 +228,18 @@ struct AddStudioToSceneSheet: View {
 
     private func save() {
         isSaving = true
-        let studioId: String? = (selectedId == "__none__") ? nil : (selectedId.isEmpty ? nil : selectedId)
-        viewModel.updateSceneStudio(sceneId: sceneId, studioId: studioId) { success in
+        let ids = Array(selectedIds)
+        viewModel.updateSceneGroups(sceneId: sceneId, groupIds: ids) { success in
             DispatchQueue.main.async {
                 isSaving = false
                 if success {
-                    if let sid = studioId, let matched = studios.first(where: { $0.id == sid }) {
-                        let updated = SceneStudio(id: matched.id, name: matched.name, updatedAt: matched.updatedAt)
-                        onComplete(updated)
-                    } else {
-                        onComplete(nil)
+                    let updated: [SceneGroupEntry] = allGroups.filter { selectedIds.contains($0.id) }.map { g in
+                        SceneGroupEntry(group: SceneGroupInfo(id: g.id, name: g.name, updatedAt: g.updatedAt, frontImagePath: g.front_image_path), sceneIndex: nil)
                     }
+                    onComplete(updated)
                     dismiss()
                 } else {
-                    ToastManager.shared.show("Failed to update studio", icon: "exclamationmark.triangle", style: .error)
+                    ToastManager.shared.show("Failed to update groups", icon: "exclamationmark.triangle", style: .error)
                 }
             }
         }

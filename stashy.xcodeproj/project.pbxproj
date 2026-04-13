@@ -34,6 +34,8 @@
 		42AECC4BE2264997B0333A90 /* HomeSceneCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF675E5E2F2A46A1004CA019 /* HomeSceneCardView.swift */; };
 		4641A386019F4F5F81B587A8 /* StashDBViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FB77A2FE84155DC02AAC07 /* StashDBViewModel.swift */; };
 		51487CAA64DF4CC3B986B68C /* SceneStudioCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF675E752F2A6392004CA019 /* SceneStudioCard.swift */; };
+		9BA6D13B444E433980610D36 /* SceneGroupsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA617C2A62174FFFB0912B44 /* SceneGroupsCard.swift */; };
+		BEBA9D663C334D69A68E2935 /* SceneGroupsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA617C2A62174FFFB0912B44 /* SceneGroupsCard.swift */; };
 		5B0100661A854DEDA5E55778 /* CatalogsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB142F167223007C2090 /* CatalogsView.swift */; };
 		5B3249B4152046408B964DDC /* StarRatingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF90B75D2F1A5ECE003ED852 /* StarRatingView.swift */; };
 		5BC6653D5C9D4675881F40BA /* GalleriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB182F16743C007C2090 /* GalleriesView.swift */; };
@@ -166,6 +168,7 @@
 		DF675E742F2A6392004CA019 /* ScenePerformersCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePerformersCard.swift; sourceTree = "<group>"; };
 		DF675E752F2A6392004CA019 /* SceneStudioCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneStudioCard.swift; sourceTree = "<group>"; };
 		DF675E762F2A6392004CA019 /* SceneTagsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneTagsCard.swift; sourceTree = "<group>"; };
+		FA617C2A62174FFFB0912B44 /* SceneGroupsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneGroupsCard.swift; sourceTree = "<group>"; };
 		DF675E772F2A6392004CA019 /* SceneVideoPlayerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneVideoPlayerCard.swift; sourceTree = "<group>"; };
 		DF90B75D2F1A5ECE003ED852 /* StarRatingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StarRatingView.swift; sourceTree = "<group>"; };
 		DF90B7632F1ACEA3003ED852 /* ServerSetupWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSetupWizardView.swift; sourceTree = "<group>"; };
@@ -325,6 +328,7 @@
 				DF675E742F2A6392004CA019 /* ScenePerformersCard.swift */,
 				DF675E752F2A6392004CA019 /* SceneStudioCard.swift */,
 				DF675E762F2A6392004CA019 /* SceneTagsCard.swift */,
+				FA617C2A62174FFFB0912B44 /* SceneGroupsCard.swift */,
 				DF675E772F2A6392004CA019 /* SceneVideoPlayerCard.swift */,
 				37D3E4912F3A305D00AB8FAD /* SceneHeatmapCard.swift */,
 			);
@@ -493,6 +497,7 @@
 				DF675E7C2F2A6392004CA019 /* SceneStudioCard.swift in Sources */,
 				DF675E7D2F2A6392004CA019 /* ScenePerformersCard.swift in Sources */,
 				DF675E7E2F2A6392004CA019 /* SceneTagsCard.swift in Sources */,
+				9BA6D13B444E433980610D36 /* SceneGroupsCard.swift in Sources */,
 				DFST000032F30A0000000003 /* SettingsView.swift in Sources */,
 				DFST000052F30A0000000005 /* ServerListSection.swift in Sources */,
 				37D3E4922F3A305D00AB8FAD /* SceneHeatmapCard.swift in Sources */,
@@ -592,6 +597,7 @@
 				5CAFF7AF91B64F458C104E84 /* ScenePerformersCard.swift in Sources */,
 				51487CAA64DF4CC3B986B68C /* SceneStudioCard.swift in Sources */,
 				A448F31312224C5CA0763758 /* SceneTagsCard.swift in Sources */,
+				BEBA9D663C334D69A68E2935 /* SceneGroupsCard.swift in Sources */,
 				37D3E4932F3A305D00AB8FAD /* SceneHeatmapCard.swift in Sources */,
 				372E2D6B2F633DB400603361 /* LoginAuthHelper.swift in Sources */,
 				DED26B5AB7A04A979AF74BAE /* SceneVideoPlayerCard.swift in Sources */,

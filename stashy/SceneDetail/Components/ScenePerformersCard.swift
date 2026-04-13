@@ -17,12 +17,14 @@ struct ScenePerformersCard: View {
                     .font(.title3)
                     .fontWeight(.semibold)
                 Spacer()
-                Button {
-                    showingAddSheet = true
-                } label: {
-                    Image(systemName: "pencil.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(appearanceManager.tintColor)
+                if appearanceManager.isEditModeEnabled {
+                    Button {
+                        showingAddSheet = true
+                    } label: {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -35,63 +37,64 @@ struct ScenePerformersCard: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
             } else {
-                VStack(spacing: 12) {
-                    ForEach(performers.sorted { $0.name < $1.name }) { scenePerformer in
-                        NavigationLink(destination: PerformerDetailView(performer: scenePerformer.toPerformer())) {
-                            ZStack(alignment: .bottom) {
-                                ZStack {
-                                    if let url = scenePerformer.thumbnailURL {
-                                        CustomAsyncImage(url: url) { loader in
-                                            if let image = loader.image {
-                                                image
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 80, height: 80, alignment: .top)
-                                                    .clipShape(Circle())
-                                            } else {
-                                                Circle()
-                                                    .fill(Color.gray.opacity(DesignTokens.Opacity.placeholder))
-                                                    .frame(width: 80, height: 80)
-                                                    .skeleton()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(performers.sorted { $0.name < $1.name }) { scenePerformer in
+                            NavigationLink(destination: PerformerDetailView(performer: scenePerformer.toPerformer())) {
+                                ZStack(alignment: .bottom) {
+                                    ZStack {
+                                        if let url = scenePerformer.thumbnailURL {
+                                            CustomAsyncImage(url: url) { loader in
+                                                if let image = loader.image {
+                                                    image
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 80, height: 80, alignment: .top)
+                                                        .clipShape(Circle())
+                                                } else {
+                                                    Circle()
+                                                        .fill(Color.gray.opacity(DesignTokens.Opacity.placeholder))
+                                                        .frame(width: 80, height: 80)
+                                                        .skeleton()
+                                                }
                                             }
+                                        } else {
+                                            Image(systemName: "person.circle.fill")
+                                                .resizable()
+                                                .frame(width: 80, height: 80)
+                                                .foregroundColor(appearanceManager.tintColor.opacity(0.4))
                                         }
-                                    } else {
-                                        Image(systemName: "person.circle.fill")
-                                            .resizable()
-                                            .frame(width: 80, height: 80)
-                                            .foregroundColor(appearanceManager.tintColor.opacity(0.4))
                                     }
-                                }
-                                .padding(4)
-                                .background(appearanceManager.tintColor)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(appearanceManager.tintColor.opacity(0.1), lineWidth: 0.2))
+                                    .padding(4)
+                                    .background(appearanceManager.tintColor)
+                                    .clipShape(Circle())
+                                    .overlay(Circle().stroke(appearanceManager.tintColor.opacity(0.1), lineWidth: 0.2))
 
-                                Text(scenePerformer.name)
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        ZStack {
-                                            Color.secondaryAppBackground
-                                            appearanceManager.tintColor.opacity(0.1)
-                                        }
-                                    )
-                                    .foregroundColor(Color.pillAccent)
-                                    .clipShape(Capsule())
-                                    .overlay(Capsule().stroke(appearanceManager.tintColor.opacity(0.4), lineWidth: 0.5))
-                                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                                    .offset(y: 8)
+                                    Text(scenePerformer.name)
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            ZStack {
+                                                Color.secondaryAppBackground
+                                                appearanceManager.tintColor.opacity(0.1)
+                                            }
+                                        )
+                                        .foregroundColor(Color.pillAccent)
+                                        .clipShape(Capsule())
+                                        .overlay(Capsule().stroke(appearanceManager.tintColor.opacity(0.4), lineWidth: 0.5))
+                                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                                        .offset(y: 8)
+                                }
+                                .padding(.bottom, 8)
                             }
-                            .padding(.bottom, 8)
-                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -123,6 +126,7 @@ struct AddPerformerToSceneSheet: View {
     @State private var searchText = ""
     @State private var selectedIds: Set<String> = []
     @State private var isSaving = false
+    @State private var isCreating = false
 
     var filtered: [Performer] {
         if searchText.isEmpty { return performers }
@@ -136,8 +140,6 @@ struct AddPerformerToSceneSheet: View {
                     TextField("Search...", text: $searchText)
                     if isLoading {
                         HStack { Spacer(); ProgressView("Loading..."); Spacer() }.padding()
-                    } else if performers.isEmpty {
-                        Text("No performers found").foregroundColor(.secondary).padding()
                     } else {
                         ForEach(filtered.prefix(30)) { performer in
                             HStack {
@@ -145,7 +147,6 @@ struct AddPerformerToSceneSheet: View {
                                 Spacer()
                                 Text("\(performer.sceneCount) scenes").font(.caption).foregroundColor(.secondary)
                                 if selectedIds.contains(performer.id) {
-                                    Spacer()
                                     Image(systemName: "checkmark").foregroundColor(appearanceManager.tintColor)
                                 }
                             }
@@ -161,11 +162,23 @@ struct AddPerformerToSceneSheet: View {
                         if filtered.count > 30 {
                             Text("Type more to refine...").font(.caption).foregroundColor(.secondary)
                         }
+                        if !searchText.isEmpty && filtered.isEmpty {
+                            Button {
+                                createAndSelect()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Create \"\(searchText)\"")
+                                }
+                                .foregroundColor(appearanceManager.tintColor)
+                            }
+                            .disabled(isCreating)
+                        }
                     }
                 }
                 .listRowBackground(Color.secondaryAppBackground)
             }
-            .navigationTitle("Add Performer")
+            .navigationTitle("Edit Performers")
             .navigationBarTitleDisplayMode(.inline)
             .applyAppBackground()
             .toolbar {
@@ -174,7 +187,7 @@ struct AddPerformerToSceneSheet: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") { save() }
-                        .disabled(selectedIds.isEmpty || isSaving)
+                        .disabled(isSaving)
                 }
             }
             .onAppear {
@@ -185,6 +198,22 @@ struct AddPerformerToSceneSheet: View {
                         self.performers = fetched
                         self.isLoading = false
                     }
+                }
+            }
+        }
+    }
+
+    private func createAndSelect() {
+        isCreating = true
+        viewModel.createPerformer(name: searchText) { created in
+            DispatchQueue.main.async {
+                isCreating = false
+                if let p = created {
+                    performers.append(p)
+                    selectedIds.insert(p.id)
+                    searchText = ""
+                } else {
+                    ToastManager.shared.show("Failed to create performer", icon: "exclamationmark.triangle", style: .error)
                 }
             }
         }

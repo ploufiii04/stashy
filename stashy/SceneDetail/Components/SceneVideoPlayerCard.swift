@@ -26,10 +26,12 @@ struct SceneVideoPlayerCard: View {
     @State private var previewPlayer: AVPlayer?
     @State private var isPressing = false
     @State private var showStashSyncSheet = false
-    
+    @State private var showingEditTitleSheet = false
+
     // Closure for externally handled actions like seeking and playback start
     var onSeek: (Double) -> Void
     var onStartPlayback: (Bool) -> Void
+    var onTitleUpdated: ((String?, String?) -> Void)?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +48,16 @@ struct SceneVideoPlayerCard: View {
                 .presentationDetents([PresentationDetent.medium, PresentationDetent.large])
                 .presentationDragIndicator(Visibility.visible)
             #endif
+        }
+        .sheet(isPresented: $showingEditTitleSheet) {
+            EditSceneTitleSheet(
+                sceneId: activeScene.id,
+                currentTitle: activeScene.title,
+                currentDetails: activeScene.details,
+                viewModel: viewModel
+            ) { newTitle, newDetails in
+                onTitleUpdated?(newTitle, newDetails)
+            }
         }
     }
 
@@ -225,11 +237,23 @@ struct SceneVideoPlayerCard: View {
     private var infoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(activeScene.title ?? "Unbekannter Titel")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
+                HStack(alignment: .top) {
+                    Text(activeScene.title ?? "Unbekannter Titel")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                    Spacer()
+                    if appearanceManager.isEditModeEnabled {
+                        Button {
+                            showingEditTitleSheet = true
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(appearanceManager.tintColor)
+                        }
+                    }
+                }
 
                 if activeScene.sceneDuration != nil || activeScene.date != nil {
                     HStack {
@@ -570,5 +594,69 @@ struct SceneVideoPlayerCard: View {
         previewPlayer?.seek(to: CMTime.zero)
     }
 
+}
+
+struct EditSceneTitleSheet: View {
+    let sceneId: String
+    let currentTitle: String?
+    let currentDetails: String?
+    @ObservedObject var viewModel: StashDBViewModel
+    var onComplete: (String?, String?) -> Void
+
+    @Environment(\.dismiss) var dismiss
+    @ObservedObject var appearanceManager = AppearanceManager.shared
+    @State private var title: String = ""
+    @State private var details: String = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Title")) {
+                    TextField("Title", text: $title)
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+
+                Section(header: Text("Description")) {
+                    TextEditor(text: $details)
+                        .frame(minHeight: 120)
+                }
+                .listRowBackground(Color.secondaryAppBackground)
+            }
+            .navigationTitle("Edit Scene")
+            .navigationBarTitleDisplayMode(.inline)
+            .applyAppBackground()
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") { save() }
+                        .disabled(isSaving)
+                }
+            }
+            .onAppear {
+                title = currentTitle ?? ""
+                details = currentDetails ?? ""
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        let newTitle: String? = title.isEmpty ? nil : title
+        let newDetails: String? = details.isEmpty ? nil : details
+        viewModel.updateSceneTitleAndDetails(sceneId: sceneId, title: newTitle, details: newDetails) { success in
+            DispatchQueue.main.async {
+                isSaving = false
+                if success {
+                    onComplete(newTitle, newDetails)
+                    dismiss()
+                } else {
+                    ToastManager.shared.show("Failed to update scene", icon: "exclamationmark.triangle", style: .error)
+                }
+            }
+        }
+    }
 }
 #endif

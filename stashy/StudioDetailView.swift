@@ -254,7 +254,7 @@ struct StudioDetailView: View {
                      Link(destination: URL(string: studio.url!) ?? URL(string: "https://google.com")!) {
                          Text(studio.url!)
                              .font(.system(size: 11, weight: .bold))
-                             .foregroundColor(.appAccent)
+                             .foregroundColor(appearanceManager.tintColor)
                              .lineLimit(1)
                      }
                  }

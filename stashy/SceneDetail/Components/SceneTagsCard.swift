@@ -21,12 +21,14 @@ struct SceneTagsCard: View {
                     .font(.title3)
                     .fontWeight(.semibold)
                 Spacer()
-                Button {
-                    showingAddSheet = true
-                } label: {
-                    Image(systemName: "pencil.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(appearanceManager.tintColor)
+                if appearanceManager.isEditModeEnabled {
+                    Button {
+                        showingAddSheet = true
+                    } label: {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -119,6 +121,7 @@ struct AddTagToSceneSheet: View {
     @State private var searchText = ""
     @State private var selectedIds: Set<String> = []
     @State private var isSaving = false
+    @State private var isCreating = false
 
     var filtered: [Tag] {
         if searchText.isEmpty { return allTags }
@@ -132,8 +135,6 @@ struct AddTagToSceneSheet: View {
                     TextField("Search...", text: $searchText)
                     if isLoading {
                         HStack { Spacer(); ProgressView("Loading..."); Spacer() }.padding()
-                    } else if allTags.isEmpty {
-                        Text("No tags found").foregroundColor(.secondary).padding()
                     } else {
                         ForEach(filtered.prefix(30)) { tag in
                             HStack {
@@ -159,6 +160,18 @@ struct AddTagToSceneSheet: View {
                         if filtered.count > 30 {
                             Text("Type more to refine...").font(.caption).foregroundColor(.secondary)
                         }
+                        if !searchText.isEmpty && filtered.isEmpty {
+                            Button {
+                                createAndSelect()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Create \"\(searchText)\"")
+                                }
+                                .foregroundColor(appearanceManager.tintColor)
+                            }
+                            .disabled(isCreating)
+                        }
                     }
                 }
                 .listRowBackground(Color.secondaryAppBackground)
@@ -183,6 +196,22 @@ struct AddTagToSceneSheet: View {
                         self.allTags = fetched
                         self.isLoading = false
                     }
+                }
+            }
+        }
+    }
+
+    private func createAndSelect() {
+        isCreating = true
+        viewModel.createTag(name: searchText) { created in
+            DispatchQueue.main.async {
+                isCreating = false
+                if let t = created {
+                    allTags.append(t)
+                    selectedIds.insert(t.id)
+                    searchText = ""
+                } else {
+                    ToastManager.shared.show("Failed to create tag", icon: "exclamationmark.triangle", style: .error)
                 }
             }
         }
