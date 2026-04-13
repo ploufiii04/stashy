@@ -149,6 +149,7 @@ struct SceneDetailView: View {
                         // Item 1: Performers (full scroll row, spans both columns)
                         ScenePerformersCard(
                             sceneId: activeScene.id,
+                            sceneDate: activeScene.date,
                             performers: activeScene.performers,
                             onPerformersUpdated: { updated in
                                 activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: activeScene.studio, performers: updated, files: activeScene.files, tags: activeScene.tags, galleries: activeScene.galleries, groups: activeScene.groups, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
@@ -214,6 +215,7 @@ struct SceneDetailView: View {
                     // Row 1: Performers (full width, horizontal scroll)
                     ScenePerformersCard(
                         sceneId: activeScene.id,
+                        sceneDate: activeScene.date,
                         performers: activeScene.performers,
                         onPerformersUpdated: { updated in
                             activeScene = Scene(id: activeScene.id, title: activeScene.title, details: activeScene.details, date: activeScene.date, duration: activeScene.duration, studio: activeScene.studio, performers: updated, files: activeScene.files, tags: activeScene.tags, galleries: activeScene.galleries, groups: activeScene.groups, organized: activeScene.organized, resumeTime: activeScene.resumeTime, playCount: activeScene.playCount, oCounter: activeScene.oCounter, rating100: activeScene.rating100, createdAt: activeScene.createdAt, updatedAt: activeScene.updatedAt, paths: activeScene.paths, sceneMarkers: activeScene.sceneMarkers, interactive: activeScene.interactive, streams: activeScene.streams)
@@ -689,7 +691,7 @@ extension ScenePerformer {
             id: self.id,
             name: self.name,
             disambiguation: nil,
-            birthdate: nil,
+            birthdate: self.birthdate,
             country: nil,
             imagePath: nil,
             sceneCount: self.sceneCount ?? 0,

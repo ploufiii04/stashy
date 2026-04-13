@@ -107,7 +107,7 @@ struct ReelsView: View {
             switch self {
             case .scene(let s): return s.performers
             case .marker(let m): return m.scene?.performers ?? []
-            case .clip(let c): return c.performers?.map { ScenePerformer(id: $0.id, name: $0.name, sceneCount: nil, galleryCount: nil, oCounter: nil, updatedAt: nil) } ?? []
+            case .clip(let c): return c.performers?.map { ScenePerformer(id: $0.id, name: $0.name, birthdate: nil, sceneCount: nil, galleryCount: nil, oCounter: nil, updatedAt: nil) } ?? []
             case .preview(let s): return s.performers
             }
         }

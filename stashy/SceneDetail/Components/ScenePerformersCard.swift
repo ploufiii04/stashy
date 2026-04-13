@@ -4,11 +4,22 @@ import SwiftUI
 
 struct ScenePerformersCard: View {
     let sceneId: String
+    let sceneDate: String?
     let performers: [ScenePerformer]
     var onPerformersUpdated: (([ScenePerformer]) -> Void)?
     @ObservedObject var viewModel: StashDBViewModel
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @State private var showingAddSheet = false
+
+    private func age(for performer: ScenePerformer) -> Int? {
+        guard let birthdate = performer.birthdate, !birthdate.isEmpty,
+              let releaseDate = sceneDate, !releaseDate.isEmpty else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        guard let dob = fmt.date(from: birthdate),
+              let release = fmt.date(from: String(releaseDate.prefix(10))) else { return nil }
+        return Calendar.current.dateComponents([.year], from: dob, to: release).year
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -69,6 +80,17 @@ struct ScenePerformersCard: View {
                                     .background(appearanceManager.tintColor)
                                     .clipShape(Circle())
                                     .overlay(Circle().stroke(appearanceManager.tintColor.opacity(0.1), lineWidth: 0.2))
+                                    .overlay(alignment: .topTrailing) {
+                                        if let a = age(for: scenePerformer) {
+                                            Text("\(a)")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .frame(width: 22, height: 22)
+                                                .background(appearanceManager.tintColor)
+                                                .clipShape(Circle())
+                                                .overlay(Circle().stroke(Color.secondaryAppBackground, lineWidth: 1.5))
+                                        }
+                                    }
 
                                     Text(scenePerformer.name)
                                         .font(.caption2)
@@ -227,7 +249,7 @@ struct AddPerformerToSceneSheet: View {
                 isSaving = false
                 if success {
                     let updated = performers.filter { selectedIds.contains($0.id) }.map {
-                        ScenePerformer(id: $0.id, name: $0.name, sceneCount: $0.sceneCount, galleryCount: $0.galleryCount, oCounter: nil, updatedAt: $0.updatedAt)
+                        ScenePerformer(id: $0.id, name: $0.name, birthdate: $0.birthdate, sceneCount: $0.sceneCount, galleryCount: $0.galleryCount, oCounter: nil, updatedAt: $0.updatedAt)
                     }
                     onComplete(updated)
                     dismiss()

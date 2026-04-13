@@ -5401,13 +5401,14 @@ struct SceneStudio: Codable, Equatable {
 struct ScenePerformer: Codable, Identifiable, Equatable {
     let id: String
     let name: String
+    let birthdate: String?
     let sceneCount: Int?
     let galleryCount: Int?
     let oCounter: Int?
     let updatedAt: String?
-    
+
     enum CodingKeys: String, CodingKey {
-        case id, name
+        case id, name, birthdate
         case sceneCount = "scene_count"
         case galleryCount = "gallery_count"
         case oCounter = "o_counter"

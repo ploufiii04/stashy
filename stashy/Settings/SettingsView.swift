@@ -59,6 +59,9 @@ struct SettingsView: View {
                 NavigationLink(destination: AppearanceSettingsView()) {
                     Label("Appearance", systemImage: "paintbrush")
                 }
+                NavigationLink(destination: EditModeSettingsView()) {
+                    Label("Editing", systemImage: "pencil.circle")
+                }
             }
             .listRowBackground(Color.secondaryAppBackground)
 

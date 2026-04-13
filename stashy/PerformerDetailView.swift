@@ -426,7 +426,7 @@ struct PerformerDetailView: View {
                     HStack(spacing: 4) {
                         // StashTok Button
                         Button(action: {
-                            let sp = ScenePerformer(id: displayPerformer.id, name: displayPerformer.name, sceneCount: displayPerformer.sceneCount, galleryCount: displayPerformer.galleryCount, oCounter: displayPerformer.oCounter, updatedAt: nil)
+                            let sp = ScenePerformer(id: displayPerformer.id, name: displayPerformer.name, birthdate: displayPerformer.birthdate, sceneCount: displayPerformer.sceneCount, galleryCount: displayPerformer.galleryCount, oCounter: displayPerformer.oCounter, updatedAt: nil)
                             coordinator.navigateToReels(performer: sp)
                         }) {
                             HStack(spacing: 4) {
