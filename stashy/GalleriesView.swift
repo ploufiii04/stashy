@@ -928,7 +928,8 @@ struct FullScreenImageView: View {
     @State private var isMuted: Bool = !isHeadphonesConnected()
     @State private var currentVisibleId: String?
     @State private var showUI = true
-
+    @State private var shareItems: [Any] = []
+    @State private var showingShare = false
 
     var body: some View {
         ZStack {
@@ -985,13 +986,24 @@ struct FullScreenImageView: View {
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(role: .destructive) {
-                    showingDeleteConfirmation = true
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundColor(appearanceManager.tintColor)
+                HStack(spacing: 16) {
+                    Button {
+                        shareCurrentImage()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
                 }
             }
+        }
+        .sheet(isPresented: $showingShare) {
+            ShareSheet(items: shareItems)
         }
         .alert("Really delete image?", isPresented: $showingDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -1003,6 +1015,43 @@ struct FullScreenImageView: View {
         }
         .onAppear {
             currentVisibleId = selectedImageId
+        }
+    }
+
+    private func shareCurrentImage() {
+        let targetId = currentVisibleId ?? selectedImageId
+        guard let currentImage = images.first(where: { $0.id == targetId }),
+              let url = currentImage.imageURL else { return }
+
+        Task {
+            let sessionConfig = URLSessionConfiguration.default
+            sessionConfig.timeoutIntervalForRequest = 60
+            let session = URLSession(configuration: sessionConfig, delegate: ImageLoaderSessionDelegate(), delegateQueue: nil)
+            var request = URLRequest(url: url)
+            if let apiKey = ServerConfigManager.shared.activeConfig?.secureApiKey, !apiKey.isEmpty {
+                request.addValue(apiKey, forHTTPHeaderField: "ApiKey")
+            }
+
+            guard let (data, response) = try? await session.data(for: request) else { return }
+
+            let mimeType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""
+            let isVideo = mimeType.contains("video") || url.absoluteString.lowercased().contains(".mp4")
+
+            await MainActor.run {
+                if isVideo {
+                    // Videos: temp file URL — iOS offers "Save to Photos" and "Save to Files"
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension("mp4")
+                    guard (try? data.write(to: tempURL)) != nil else { return }
+                    shareItems = [tempURL]
+                } else {
+                    // Images: UIImage — iOS offers "Save Image" to Photos
+                    guard let uiImage = UIImage(data: data) else { return }
+                    shareItems = [uiImage]
+                }
+                showingShare = true
+            }
         }
     }
 
@@ -1022,5 +1071,13 @@ struct FullScreenImageView: View {
             }
         }
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 #endif

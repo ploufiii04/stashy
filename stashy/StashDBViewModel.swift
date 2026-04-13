@@ -3604,7 +3604,7 @@ class StashDBViewModel: ObservableObject {
           "query": "mutation { metadataScan(input: {}) }"
         }
         """
-        
+
         performGraphQLQuery(query: scanMutation) { (response: GenericMutationResponse?) in
             if response != nil {
                 completion(true, "Library scan started successfully!")
@@ -3613,10 +3613,154 @@ class StashDBViewModel: ObservableObject {
             }
         }
     }
-    
+
+    private static func identifyOptionsDict(_ opts: StashIdentifyOptions) -> [String: Any] {
+        var dict: [String: Any] = [:]
+        if let fieldOptions = opts.fieldOptions {
+            dict["fieldOptions"] = fieldOptions.map { f -> [String: Any] in
+                var entry: [String: Any] = ["field": f.field, "strategy": f.strategy]
+                if let c = f.createMissing { entry["createMissing"] = c }
+                return entry
+            }
+        }
+        if let v = opts.setCoverImage { dict["setCoverImage"] = v }
+        if let v = opts.setOrganized { dict["setOrganized"] = v }
+        // performerGenders (newer API) takes precedence over includeMalePerformers (legacy)
+        if let genders = opts.performerGenders, !genders.isEmpty {
+            dict["performerGenders"] = genders
+        } else {
+            dict["includeMalePerformers"] = opts.includeMalePerformers ?? false
+        }
+        if let v = opts.skipMultipleMatches { dict["skipMultipleMatches"] = v }
+        if let v = opts.skipMultipleMatchTag { dict["skipMultipleMatchTag"] = v }
+        if let v = opts.skipSingleNamePerformers { dict["skipSingleNamePerformers"] = v }
+        if let v = opts.skipSingleNamePerformerTag { dict["skipSingleNamePerformerTag"] = v }
+        return dict
+    }
+
+    func triggerIdentify(completion: @escaping (Bool, String) -> Void) {
+        // Step 1: fetch configured stash-box endpoints from server
+        let configQuery = GraphQLQueries.loadQuery(named: "configuration")
+        let configBody: [String: Any] = ["query": configQuery]
+        guard let configData = try? JSONSerialization.data(withJSONObject: configBody),
+              let configString = String(data: configData, encoding: .utf8) else {
+            completion(false, "Failed to build configuration request.")
+            return
+        }
+
+        performGraphQLQuery(query: configString) { (response: StashConfigurationResponse?) in
+            let config = response?.data?.configuration
+            let boxes = config?.general?.stashBoxes ?? []
+            if boxes.isEmpty {
+                completion(false, "No Stash-Box endpoints configured on this server.")
+                return
+            }
+
+            // Step 2: build sources — use server defaults if present, otherwise all boxes with no per-source options
+            let identifyDefaults = config?.defaults?.identify
+            let sources: [[String: Any]]
+            if let defaultSources = identifyDefaults?.sources, !defaultSources.isEmpty {
+                sources = defaultSources.compactMap { src -> [String: Any]? in
+                    guard let endpoint = src.source?.stash_box_endpoint else { return nil }
+                    var entry: [String: Any] = ["source": ["stash_box_endpoint": endpoint]]
+                    if let opts = src.options {
+                        entry["options"] = Self.identifyOptionsDict(opts)
+                    }
+                    return entry
+                }
+            } else {
+                sources = boxes.map { ["source": ["stash_box_endpoint": $0.endpoint]] }
+            }
+
+            // Step 3: build global options — use server defaults if present, otherwise sensible fallback
+            let options: [String: Any]
+            if let defaultOptions = identifyDefaults?.options {
+                options = Self.identifyOptionsDict(defaultOptions)
+            } else {
+                options = [
+                    "fieldOptions": [
+                        ["field": "title", "strategy": "OVERWRITE"],
+                        ["field": "studio", "strategy": "MERGE", "createMissing": true],
+                        ["field": "performers", "strategy": "MERGE", "createMissing": true],
+                        ["field": "tags", "strategy": "MERGE", "createMissing": true]
+                    ],
+                    "setCoverImage": true,
+                    "setOrganized": false,
+                    "includeMalePerformers": false,
+                    "skipMultipleMatches": true,
+                    "skipSingleNamePerformers": true
+                ]
+            }
+
+            let input: [String: Any] = ["sources": sources, "options": options, "paths": []]
+
+            let identifyQuery = GraphQLQueries.loadQuery(named: "metadataIdentify")
+            let body: [String: Any] = ["query": identifyQuery, "variables": ["input": input]]
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: body),
+                  let bodyString = String(data: bodyData, encoding: .utf8) else {
+                completion(false, "Failed to build identify request.")
+                return
+            }
+
+            self.performGraphQLQuery(query: bodyString) { (response: GenericMutationResponse?) in
+                if response != nil {
+                    let names = boxes.map { $0.name ?? $0.endpoint }.joined(separator: ", ")
+                    completion(true, "Identify started using: \(names)")
+                } else {
+                    completion(false, "Failed to start identify. Please check your server configuration.")
+                }
+            }
+        }
+    }
+
+    func triggerGenerate(
+        covers: Bool = false,
+        previews: Bool = false,
+        imagePreviews: Bool = false,
+        sprites: Bool = false,
+        markers: Bool = false,
+        markerImagePreviews: Bool = false,
+        markerScreenshots: Bool = false,
+        transcodes: Bool = false,
+        phashes: Bool = false,
+        interactiveHeatmapsSpeeds: Bool = false,
+        clipPreviews: Bool = false,
+        imageThumbnails: Bool = false,
+        imagePhashes: Bool = false,
+        completion: @escaping (Bool, String) -> Void
+    ) {
+        let input: [String: Any] = [
+            "covers": covers,
+            "previews": previews,
+            "imagePreviews": imagePreviews,
+            "sprites": sprites,
+            "markers": markers,
+            "markerImagePreviews": markerImagePreviews,
+            "markerScreenshots": markerScreenshots,
+            "transcodes": transcodes,
+            "phashes": phashes,
+            "interactiveHeatmapsSpeeds": interactiveHeatmapsSpeeds,
+            "clipPreviews": clipPreviews,
+            "imageThumbnails": imageThumbnails,
+            "imagePhashes": imagePhashes
+        ]
+        let query = GraphQLQueries.loadQuery(named: "metadataGenerate")
+        let body: [String: Any] = ["query": query, "variables": ["input": input]]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion(false, "Failed to build generate request.")
+            return
+        }
+        performGraphQLQuery(query: bodyString) { (response: GenericMutationResponse?) in
+            if response != nil {
+                completion(true, "Generate started successfully!")
+            } else {
+                completion(false, "Failed to start generate. Please check your server configuration.")
+            }
+        }
+    }
 
 
-// ... (In GenerateResponse struct)
 
 struct GenerateData: Codable {
     let metadataGenerate: Int?
@@ -4057,6 +4201,55 @@ extension StashDBViewModel {
 // Generic mutation response for simple mutations
 struct GenericMutationResponse: Codable {
     let data: [String: String]?
+}
+
+struct StashConfigurationResponse: Codable {
+    let data: StashConfigurationData?
+}
+struct StashConfigurationData: Codable {
+    let configuration: StashConfigurationResult?
+}
+struct StashConfigurationResult: Codable {
+    let general: StashGeneralConfig?
+    let defaults: StashDefaultsConfig?
+}
+struct StashGeneralConfig: Codable {
+    let stashBoxes: [StashBoxConfig]?
+}
+struct StashBoxConfig: Codable {
+    let endpoint: String
+    let name: String?
+}
+struct StashDefaultsConfig: Codable {
+    let identify: StashIdentifyDefaults?
+}
+struct StashIdentifyDefaults: Codable {
+    let sources: [StashIdentifySource]?
+    let options: StashIdentifyOptions?
+}
+struct StashIdentifySource: Codable {
+    let source: StashIdentifySourceRef?
+    let options: StashIdentifyOptions?
+}
+struct StashIdentifySourceRef: Codable {
+    let stash_box_endpoint: String?
+    let stash_box_index: Int?
+}
+struct StashIdentifyOptions: Codable {
+    let fieldOptions: [StashIdentifyFieldOption]?
+    let setCoverImage: Bool?
+    let setOrganized: Bool?
+    let includeMalePerformers: Bool?
+    let performerGenders: [String]?
+    let skipMultipleMatches: Bool?
+    let skipMultipleMatchTag: String?
+    let skipSingleNamePerformers: Bool?
+    let skipSingleNamePerformerTag: String?
+}
+struct StashIdentifyFieldOption: Codable {
+    let field: String
+    let strategy: String
+    let createMissing: Bool?
 }
 
 

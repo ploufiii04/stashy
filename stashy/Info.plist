@@ -35,6 +35,8 @@
 	<string>Stashy uses FaceID to secure your library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Stashy uses the local network to connect to your Stash server.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Stashy needs access to save images and videos to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

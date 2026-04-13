@@ -106,6 +106,11 @@ class ImageCache {
         return (URL(string: keyString) ?? url as URL) as NSURL
     }
     
+    /// Memory-only lookup — synchronous, no disk I/O
+    func memoryObject(forKey key: NSURL) -> UIImage? {
+        return memoryCache.object(forKey: stableMemoryCacheKey(for: key))
+    }
+
     func object(forKey key: NSURL) -> UIImage? {
         let stableKey = stableMemoryCacheKey(for: key)
         
@@ -160,14 +165,14 @@ class ImageCache {
     
     nonisolated private static func performCleanup(at serverDir: URL) {
         let fileManager = FileManager.default
-        let thirtyDays: TimeInterval = 60 * 60 * 24 * 30
-        
+        let sevenDays: TimeInterval = 60 * 60 * 24 * 7
+
         guard let files = try? fileManager.contentsOfDirectory(at: serverDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        
+
         for file in files {
             if let attrs = try? file.resourceValues(forKeys: [.contentModificationDateKey]),
                let date = attrs.contentModificationDate,
-               Date().timeIntervalSince(date) > thirtyDays {
+               Date().timeIntervalSince(date) > sevenDays {
                 try? fileManager.removeItem(at: file)
             }
         }
@@ -248,14 +253,21 @@ class ImageLoader: ObservableObject {
 
     init(url: URL?) {
         self.url = url
-        
+
         // Create custom session for SSL support
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
         self.session = URLSession(configuration: config, delegate: ImageLoaderSessionDelegate(), delegateQueue: nil)
-        
-        loadImage()
+
+        // Synchronous memory cache check — avoids any loading flash for warm-cache hits
+        if let url, let cachedUIImage = ImageCache.shared.memoryObject(forKey: url as NSURL) {
+            self.image = Image(uiImage: cachedUIImage)
+            self.imageData = ImageCache.shared.data(forKey: url as NSURL)
+            self.isLoading = false
+        } else {
+            loadImage()
+        }
     }
 
     func updateURL(_ newURL: URL?, force: Bool = false) {

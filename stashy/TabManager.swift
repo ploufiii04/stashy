@@ -163,22 +163,22 @@ enum HomeRowType: String, Codable {
     
     var defaultTitle: String {
         switch self {
-        case .lastPlayed: return "Scenes > Last Played"
-        case .lastAdded3Min: return "Scenes > Recently Added"
-        case .newest3Min: return "Scenes > New"
-        case .mostViewed3Min: return "Scenes > Most Viewed"
-        case .topCounter3Min: return "Scenes > Top Counter"
-        case .topRating3Min: return "Scenes > Top Rated"
-        case .random: return "Scenes > Random"
+        case .lastPlayed: return "Scenes - Last Played"
+        case .lastAdded3Min: return "Scenes - Recently Added"
+        case .newest3Min: return "Scenes - New"
+        case .mostViewed3Min: return "Scenes - Most Viewed"
+        case .topCounter3Min: return "Scenes - Top Counter"
+        case .topRating3Min: return "Scenes - Top Rated"
+        case .random: return "Scenes - Random"
         case .statistics: return "Statistics"
-        case .newPerformers: return "Performers > New"
-        case .performersHighestSceneCount: return "Performers > Top"
-        case .newStudios: return "Studios > New"
-        case .studiosHighestSceneCount: return "Studios > Top"
-        case .newGalleries: return "Galleries > New"
-        case .recentlyUpdatedGalleries: return "Galleries > Recently Updated"
-        case .performersHighestOCount: return "Performers > Counter"
-        case .galleriesHighestImageCount: return "Galleries > Image Count"
+        case .newPerformers: return "Performers - New"
+        case .performersHighestSceneCount: return "Performers - Top"
+        case .newStudios: return "Studios - New"
+        case .studiosHighestSceneCount: return "Studios - Top"
+        case .newGalleries: return "Galleries - New"
+        case .recentlyUpdatedGalleries: return "Galleries - Recently Updated"
+        case .performersHighestOCount: return "Performers - Counter"
+        case .galleriesHighestImageCount: return "Galleries - Image Count"
         }
     }
 }
