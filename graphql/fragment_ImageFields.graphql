@@ -3,7 +3,7 @@ fragment ImageFields on Image {
   paths { thumbnail preview image }
   visual_files { ... on BaseFile { path } ... on ImageFile { height width } ... on VideoFile { height width duration } }
   galleries { id title }
-  performers { id name }
+  performers { id name image_path }
   studio { id name }
   tags { id name }
 }

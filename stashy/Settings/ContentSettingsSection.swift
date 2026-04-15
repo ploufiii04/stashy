@@ -22,6 +22,10 @@ struct ContentSettingsSection: View {
                 Label("StashTok", systemImage: "play.rectangle.on.rectangle")
             }
 
+            NavigationLink(destination: StashLineSettingsView()) {
+                Label("StashLine", systemImage: "camera.fill")
+            }
+
             NavigationLink(destination: TabSettingsView()) {
                 Label("Tabs", systemImage: "square.grid.2x2")
             }

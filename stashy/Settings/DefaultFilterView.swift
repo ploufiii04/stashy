@@ -19,6 +19,7 @@ struct DefaultFilterView: View {
                 filterPicker(for: .scenes, title: "Scenes", icon: "film")
                 filterPicker(for: .galleries, title: "Galleries", icon: "photo.stack")
                 filterPicker(for: .images, title: "Images", icon: "photo")
+                filterPicker(for: .stashline, title: "StashLine", icon: "camera.fill")
                 filterPicker(for: .performers, title: "Performers", icon: "person.3")
                 filterPicker(for: .studios, title: "Studios", icon: "building.2")
                 filterPicker(for: .groups, title: "Groups", icon: "rectangle.stack.fill")
@@ -57,7 +58,7 @@ struct DefaultFilterView: View {
             case .performers: return .performers
             case .studios: return .studios
             case .galleries: return .galleries
-            case .images: return .images
+            case .images, .stashline: return .images
             case .tags: return .tags
             case .groups: return .groups
             default: return nil

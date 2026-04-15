@@ -6,6 +6,7 @@ struct HomeView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var tabManager = TabManager.shared
     @ObservedObject var configManager = ServerConfigManager.shared
+    @ObservedObject var appearanceManager = AppearanceManager.shared
     @EnvironmentObject var coordinator: NavigationCoordinator
 
     var body: some View {
@@ -77,6 +78,14 @@ struct HomeView: View {
         .scrollContentBackground(.hidden)
         .navigationTitle("Dashboard")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink(destination: DownloadsView()) {
+                    Image(systemName: "square.and.arrow.down")
+                        .foregroundColor(appearanceManager.tintColor)
+                }
+            }
+        }
         .refreshable {
             viewModel.homeRowScenes.removeAll()
             viewModel.initializeServerConnection()

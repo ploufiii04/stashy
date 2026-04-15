@@ -43,6 +43,7 @@ struct DefaultSortView: View {
         case .galleries: galleriesSortRow(tab: tab)
         case .tags:     tagsSortRow(tab: tab)
         case .images:   imagesSortRow(tab: tab)
+        case .stashline: imagesSortRow(tab: tab)
         case .groups:   groupsSortRow(tab: tab)
         case .markers:  markersSortRow(tab: tab)
         default:        EmptyView()

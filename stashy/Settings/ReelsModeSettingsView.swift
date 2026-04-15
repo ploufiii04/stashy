@@ -13,8 +13,23 @@ struct ReelsModeSettingsView: View {
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @StateObject private var viewModel = StashDBViewModel()
 
+    private var isEnabled: Bool {
+        tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true
+    }
+
     var body: some View {
         List {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { isEnabled },
+                    set: { _ in tabManager.toggle(.reels) }
+                )) {
+                    Label("Show StashTok Tab", systemImage: "play.rectangle.on.rectangle")
+                }
+                .tint(appearanceManager.tintColor)
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+
             Section {
                 Toggle("Immersive Video Scaling", isOn: $tabManager.reelsFillHeight)
                     .tint(appearanceManager.tintColor)

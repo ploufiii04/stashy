@@ -177,7 +177,18 @@ extension MainTabView {
                 ReelsView()
             }
             .id(coordinator.reelsTabID)
-            
+
+        case .stashline:
+            NavigationStack(path: $coordinator.stashlinePath) {
+                StashLineView()
+                    .applyAppBackground()
+                    .navigationDestination(for: GalleryPerformer.self) { performer in
+                        StashLineView(performerFilter: performer)
+                            .applyAppBackground()
+                    }
+            }
+            .id(coordinator.stashlineTabID)
+
         case .settings:
             NavigationStack {
                 SettingsView()

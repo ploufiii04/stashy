@@ -403,6 +403,8 @@ class StashDBViewModel: ObservableObject {
     @Published var currentImagePage: Int = 1
     @Published var currentImageFilter: SavedFilter? = nil
     var currentImageSortOption: ImageSortOption = .dateDesc
+    var imageStaticPathFilter: Bool = false
+    var imagePerformerIdFilter: String? = nil
 
     // Image Sort Options
     enum ImageSortOption: String, CaseIterable {
@@ -3124,49 +3126,73 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchImages(sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchImages(sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, staticPathFilter: Bool = false, performerId: String? = nil) {
         print("🖼️ fetchImages called, sortBy: \(sortBy.rawValue), isInitialLoad: \(isInitialLoad)")
-        
+
         if isInitialLoad {
             currentImagePage = 1
             allImages = []
             totalImages = 0
             isLoadingImages = true
             currentImageFilter = filter
+            imageStaticPathFilter = staticPathFilter
+            imagePerformerIdFilter = performerId
         } else {
             isLoadingImages = true
         }
-        
+
         currentImageSortOption = sortBy
         let page = isInitialLoad ? 1 : currentImagePage + 1
-        
+
         let query = GraphQLQueries.queryWithFragments("findImages")
-        
+
         let filterDict: [String: Any] = [
             "page": page,
             "per_page": 40,
             "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
             "direction": sortBy.direction
         ]
-        
+
         var variables: [String: Any] = [
             "filter": filterDict
         ]
-        
+
+        // Static path filter: exclude animated/video types (for StashLine mode)
+        let staticFilter: [String: Any] = [
+            "path": [
+                "value": "(?i)\\.(jpg|jpeg|png|webp)$",
+                "modifier": "MATCHES_REGEX"
+            ]
+        ]
+
+        // Performer filter (StashLine performer tap)
+        var performerFilter: [String: Any] = [:]
+        if let pid = imagePerformerIdFilter {
+            performerFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+        }
+
         if let savedFilter = currentImageFilter {
             if let dict = savedFilter.filterDict {
-                let sanitized = sanitizeFilter(dict)
+                var sanitized = sanitizeFilter(dict)
+                if imageStaticPathFilter { sanitized.merge(staticFilter) { _, new in new } }
+                sanitized.merge(performerFilter) { _, new in new }
                 print("🔍 Image Filter sanitized: \(sanitized)")
                 variables["image_filter"] = sanitized
             } else if let obj = savedFilter.object_filter {
                 if let objDict = obj.value as? [String: Any] {
-                    let sanitized = sanitizeFilter(objDict)
+                    var sanitized = sanitizeFilter(objDict)
+                    if imageStaticPathFilter { sanitized.merge(staticFilter) { _, new in new } }
+                    sanitized.merge(performerFilter) { _, new in new }
                     print("🔍 Image Object Filter sanitized: \(sanitized)")
                     variables["image_filter"] = sanitized
                 } else {
                     variables["image_filter"] = obj.value
                 }
             }
+        } else {
+            var combined: [String: Any] = performerFilter
+            if imageStaticPathFilter { combined.merge(staticFilter) { _, new in new } }
+            if !combined.isEmpty { variables["image_filter"] = combined }
         }
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -3198,7 +3224,7 @@ class StashDBViewModel: ObservableObject {
     
     func loadMoreImages() {
         if !isLoadingImages && hasMoreImages {
-            fetchImages(sortBy: currentImageSortOption, isInitialLoad: false, filter: currentImageFilter)
+            fetchImages(sortBy: currentImageSortOption, isInitialLoad: false, filter: currentImageFilter, staticPathFilter: imageStaticPathFilter, performerId: imagePerformerIdFilter)
         }
     }
     
@@ -5870,9 +5896,21 @@ struct GalleryStudio: Codable, Equatable {
     let name: String
 }
 
-struct GalleryPerformer: Codable, Identifiable, Equatable {
+struct GalleryPerformer: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
+    let image_path: String?
+
+    var thumbnailURL: URL? {
+        guard let path = image_path, !path.isEmpty,
+              let config = ServerConfigManager.shared.loadConfig() else { return nil }
+        let separator = path.contains("?") ? "&" : "?"
+        let sized = "\(path)\(separator)width=200"
+        if sized.starts(with: "http://") || sized.starts(with: "https://") {
+            return signedURL(URL(string: sized))
+        }
+        return signedURL(URL(string: config.baseURL + sized))
+    }
 }
 
 // struct GalleryFile: Codable {

@@ -22,6 +22,9 @@ class NavigationCoordinator: ObservableObject {
     // Reels Selection
     @Published var reelsPerformer: ScenePerformer?
     @Published var reelsTags: [Tag] = []
+
+    // StashLine Navigation
+    @Published var stashlinePath = NavigationPath()
     
     // IDs to force reset of navigation stacks
     @Published var homeTabID = UUID()
@@ -30,6 +33,7 @@ class NavigationCoordinator: ObservableObject {
     @Published var catalogueTabID = UUID()
     @Published var downloadsTabID = UUID()
     @Published var reelsTabID = UUID()
+    @Published var stashlineTabID = UUID()
     @Published var settingsTabID = UUID()
     @Published var serverSwitchID = UUID()
     
@@ -153,9 +157,15 @@ class NavigationCoordinator: ObservableObject {
     func navigateToReels(performer: ScenePerformer? = nil, tags: [Tag] = []) {
         self.reelsPerformer = performer
         self.reelsTags = tags
-        
+
         self.reelsTabID = UUID() // Force reset stack if needed
         self.selectedTab = .reels
+    }
+
+    func navigateToStashLine(performer: GalleryPerformer) {
+        self.stashlinePath.removeLast(self.stashlinePath.count)
+        self.stashlinePath.append(performer)
+        self.selectedTab = .stashline
     }
     
     func resetAllStacks() {
@@ -165,6 +175,8 @@ class NavigationCoordinator: ObservableObject {
         catalogueTabID = UUID()
         downloadsTabID = UUID()
         reelsTabID = UUID()
+        stashlineTabID = UUID()
+        stashlinePath = NavigationPath()
         settingsTabID = UUID()
         serverSwitchID = UUID()
         

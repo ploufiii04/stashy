@@ -21,9 +21,10 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
     case images
     case groups
     case markers
-    
+    case stashline
+
     var id: String { rawValue }
-    
+
     var title: String {
         switch self {
         case .dashboard: return "Dashboard"
@@ -41,9 +42,10 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .settings: return "Settings"
         case .groups: return "Groups"
         case .markers: return "Markers"
+        case .stashline: return "StashLine"
         }
     }
-    
+
     var icon: String {
         switch self {
         case .dashboard: return "chart.bar.fill"
@@ -61,6 +63,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .settings: return "gear"
         case .groups: return "rectangle.stack.fill"
         case .markers: return "bookmark.fill"
+        case .stashline: return "camera.fill"
         }
     }
 }
@@ -329,9 +332,15 @@ class TabManager: ObservableObject {
     }
     
     var visibleTabs: [AppTab] {
-        // Fixed order: Home, StashTok, Downloads, Settings
+        // Fixed order: Home, StashTok (optional), StashLine (optional), Settings
         // Dashboard, Studios, Tags, Performers, Scenes, Galleries are now sub-tabs of Home
-        return [.catalogue, .reels, .downloads, .settings]
+        let reelsVisible = tabs.first(where: { $0.id == .reels })?.isVisible ?? true
+        let stashlineVisible = tabs.first(where: { $0.id == .stashline })?.isVisible ?? true
+        var result: [AppTab] = [.catalogue]
+        if reelsVisible { result.append(.reels) }
+        if stashlineVisible { result.append(.stashline) }
+        result.append(.settings)
+        return result
     }
 
     
@@ -420,9 +429,10 @@ class TabManager: ObservableObject {
                 TabConfig(id: .reels, isVisible: true, sortOrder: 10, defaultSortOption: "random"),
                 TabConfig(id: .settings, isVisible: true, sortOrder: 9, defaultSortOption: nil),
                 TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil),
-                TabConfig(id: .markers, isVisible: true, sortOrder: 12, defaultSortOption: "createdAtDesc", defaultFilterId: nil, defaultFilterName: nil)
+                TabConfig(id: .markers, isVisible: true, sortOrder: 12, defaultSortOption: "createdAtDesc", defaultFilterId: nil, defaultFilterName: nil),
+                TabConfig(id: .stashline, isVisible: true, sortOrder: 13, defaultSortOption: "dateDesc", defaultFilterId: nil, defaultFilterName: nil)
             ]
-            
+
             var hasChanges = false
             for tab in allTabs {
                 if !decodedTabs.contains(where: { $0.id == tab.id }) {
@@ -452,7 +462,8 @@ class TabManager: ObservableObject {
                 TabConfig(id: .reels, isVisible: true, sortOrder: 10, defaultSortOption: "random"),
                 TabConfig(id: .settings, isVisible: true, sortOrder: 9, defaultSortOption: nil),
                 TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil),
-                TabConfig(id: .markers, isVisible: true, sortOrder: 12, defaultSortOption: "createdAtDesc", defaultFilterId: nil, defaultFilterName: nil)
+                TabConfig(id: .markers, isVisible: true, sortOrder: 12, defaultSortOption: "createdAtDesc", defaultFilterId: nil, defaultFilterName: nil),
+                TabConfig(id: .stashline, isVisible: true, sortOrder: 13, defaultSortOption: "dateDesc", defaultFilterId: nil, defaultFilterName: nil)
             ]
             saveConfig()
         }

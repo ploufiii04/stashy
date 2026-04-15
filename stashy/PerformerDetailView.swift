@@ -12,6 +12,7 @@ import SwiftUI
 struct PerformerDetailView: View {
     let performer: Performer
     @ObservedObject var appearanceManager = AppearanceManager.shared
+    @ObservedObject var tabManager = TabManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var refreshTrigger = UUID()
@@ -425,21 +426,35 @@ struct PerformerDetailView: View {
                     // Stats Badges (Top Right)
                     HStack(spacing: 4) {
                         // StashTok Button
-                        Button(action: {
-                            let sp = ScenePerformer(id: displayPerformer.id, name: displayPerformer.name, birthdate: displayPerformer.birthdate, sceneCount: displayPerformer.sceneCount, galleryCount: displayPerformer.galleryCount, oCounter: displayPerformer.oCounter, updatedAt: nil)
-                            coordinator.navigateToReels(performer: sp)
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "play.square.stack")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("StashTok")
-                                    .font(.system(size: 8, weight: .bold))
+                        if tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true {
+                            Button(action: {
+                                let sp = ScenePerformer(id: displayPerformer.id, name: displayPerformer.name, birthdate: displayPerformer.birthdate, sceneCount: displayPerformer.sceneCount, galleryCount: displayPerformer.galleryCount, oCounter: displayPerformer.oCounter, updatedAt: nil)
+                                coordinator.navigateToReels(performer: sp)
+                            }) {
+                                Image(systemName: "play.rectangle.on.rectangle")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color.pillAccent)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(appearanceManager.tintColor.opacity(0.15))
+                                    .clipShape(Capsule())
                             }
-                            .foregroundColor(Color.pillAccent)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(appearanceManager.tintColor.opacity(0.15))
-                            .clipShape(Capsule())
+                        }
+
+                        // StashLine Button
+                        if tabManager.tabs.first(where: { $0.id == .stashline })?.isVisible ?? true {
+                            Button(action: {
+                                let gp = GalleryPerformer(id: displayPerformer.id, name: displayPerformer.name, image_path: displayPerformer.imagePath)
+                                coordinator.navigateToStashLine(performer: gp)
+                            }) {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color.pillAccent)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(appearanceManager.tintColor.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
                         }
                     }
                 }

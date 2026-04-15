@@ -156,6 +156,29 @@ struct PerformersView: View {
                             }
                         }
                         
+                        // Scene Count
+                        Menu {
+                            Button(action: { changeSortOption(to: .sceneCountDesc) }) {
+                                HStack {
+                                    Text("High → Low")
+                                    if selectedSortOption == .sceneCountDesc { Image(systemName: "checkmark") }
+                                }
+                            }
+                            Button(action: { changeSortOption(to: .sceneCountAsc) }) {
+                                HStack {
+                                    Text("Low → High")
+                                    if selectedSortOption == .sceneCountAsc { Image(systemName: "checkmark") }
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text("Scene Count")
+                                if selectedSortOption == .sceneCountAsc || selectedSortOption == .sceneCountDesc {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+
                         // Counter
                         Menu {
                             Button(action: { changeSortOption(to: .oCountDesc) }) {

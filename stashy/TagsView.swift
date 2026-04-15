@@ -448,6 +448,7 @@ struct TagDetailView: View {
     let selectedTag: Tag
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var configManager = ServerConfigManager.shared
+    @ObservedObject var tabManager = TabManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.verticalSizeClass) var verticalSizeClass
@@ -565,20 +566,18 @@ struct TagDetailView: View {
                                         Spacer()
                                         
                                         // StashTok Button (Top Right)
-                                        Button(action: {
-                                            coordinator.navigateToReels(tags: [selectedTag])
-                                        }) {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "play.square.stack")
-                                                    .font(.system(size: 10, weight: .bold))
-                                                Text("StashTok")
-                                                    .font(.system(size: 8, weight: .bold))
+                                        if tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true {
+                                            Button(action: {
+                                                coordinator.navigateToReels(tags: [selectedTag])
+                                            }) {
+                                                Image(systemName: "play.rectangle.on.rectangle")
+                                                    .font(.system(size: 12, weight: .bold))
+                                                    .foregroundColor(configManager.activeConfig != nil ? appearanceManager.tintColor : .white)
+                                                    .padding(.horizontal, 10)
+                                                    .padding(.vertical, 5)
+                                                    .background(appearanceManager.tintColor.opacity(0.1))
+                                                    .clipShape(Capsule())
                                             }
-                                            .foregroundColor(configManager.activeConfig != nil ? appearanceManager.tintColor : .white)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(appearanceManager.tintColor.opacity(0.1))
-                                            .clipShape(Capsule())
                                         }
                                     }
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
