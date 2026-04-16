@@ -3146,9 +3146,10 @@ class StashDBViewModel: ObservableObject {
 
         let query = GraphQLQueries.queryWithFragments("findImages")
 
+        let perPage = 200
         let filterDict: [String: Any] = [
             "page": page,
-            "per_page": 40,
+            "per_page": perPage,
             "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
             "direction": sortBy.direction
         ]
@@ -3210,7 +3211,7 @@ class StashDBViewModel: ObservableObject {
                         self.allImages.append(contentsOf: result.images)
                     }
                     
-                    self.hasMoreImages = result.images.count == 40
+                    self.hasMoreImages = result.images.count == perPage
                     self.currentImagePage = page
                     self.isLoadingImages = false
                 }

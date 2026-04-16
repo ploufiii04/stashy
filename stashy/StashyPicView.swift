@@ -240,30 +240,51 @@ struct StashLineView: View {
         performSearch()
     }
 
-    // Group images by (firstPerformerId, date) — last group is tentative while more pages may load
+    // Group images by stable key (basename + performerIds + date).
+    // Non-consecutive grouping: all images sharing a key are merged regardless of position.
+    // Order of first appearance determines post order in feed.
     private var groupedPosts: [StashLinePost] {
-        var posts: [StashLinePost] = []
-        var current: [StashImage] = []
-        var currentKey: String? = nil
+        var keyOrder: [String] = []
+        var groups: [String: [StashImage]] = [:]
 
         for image in viewModel.allImages {
-            let key = StashLinePost.groupKey(for: image)
-            if key != nil && key == currentKey {
-                current.append(image)
-            } else {
-                if !current.isEmpty {
-                    posts.append(StashLinePost(images: current))
+            if let key = StashLinePost.groupKey(for: image) {
+                if groups[key] == nil {
+                    keyOrder.append(key)
+                    groups[key] = []
                 }
-                current = [image]
-                currentKey = key
+                groups[key]!.append(image)
+            } else {
+                // No groupable key → single post, use image id as unique key
+                let fallback = "solo-\(image.id)"
+                keyOrder.append(fallback)
+                groups[fallback] = [image]
             }
         }
 
-        // Only add last group if loading is done or it has a unique key
-        // (prevents incomplete sets at page boundary from rendering prematurely)
-        if !current.isEmpty {
-            if !viewModel.hasMoreImages || current.count > 1 {
-                posts.append(StashLinePost(images: current))
+        // Hold back last group while more pages may load — it could grow
+        let lastKey = keyOrder.last
+        let posts = keyOrder.compactMap { key -> StashLinePost? in
+            guard let images = groups[key] else { return nil }
+            // If last group is incomplete (still loading), skip unless multi-image
+            if key == lastKey && viewModel.hasMoreImages && images.count == 1
+                && StashLinePost.groupKey(for: images[0]) != nil {
+                return nil
+            }
+            return StashLinePost(images: images)
+        }
+
+        // Debug log
+        let context = performerFilter != nil ? "PROFILE[\(performerFilter!.name)]" : "TIMELINE"
+        print("=== StashLine groupedPosts [\(context)] total images: \(viewModel.allImages.count) → \(posts.count) posts ===")
+        for (i, post) in posts.enumerated() {
+            let key = StashLinePost.groupKey(for: post.primaryImage) ?? "solo-\(post.primaryImage.id)"
+            print("  [\(i)] \(post.images.count)x | key=\(key)")
+            for img in post.images {
+                let filename = (img.visual_files?.first?.path ?? img.paths?.image).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+                let imgDate = img.date ?? "nil"
+                let performers = img.performers?.map(\.id).sorted().joined(separator: ",") ?? "nil"
+                print("    - id=\(img.id) file=\(filename) image.date=\(imgDate) performers=[\(performers)]")
             }
         }
 
@@ -306,43 +327,48 @@ struct StashLinePost: Identifiable {
     let images: [StashImage]
 
     init(images: [StashImage]) {
-        // Sort by numeric suffix ascending so image 1 appears first in carousel
-        self.images = images.sorted {
-            StashLinePost.sequenceNumber(for: $0) < StashLinePost.sequenceNumber(for: $1)
-        }
+        self.images = images
         self.id = images.map(\.id).sorted().joined(separator: "-")
-    }
-
-    static func sequenceNumber(for image: StashImage) -> Int {
-        guard let path = image.visual_files?.first?.path ?? image.paths?.image else { return 0 }
-        let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-        if let range = filename.range(of: #"_-_(\d+)$"#, options: .regularExpression),
-           let numStr = filename[range].split(separator: "_").last,
-           let n = Int(numStr) { return n }
-        if let range = filename.range(of: #"_(\d+)$"#, options: .regularExpression),
-           let numStr = filename[range].dropFirst().isEmpty ? nil : String(filename[range].dropFirst()),
-           let n = Int(numStr) { return n }
-        return 0
     }
 
     var primaryImage: StashImage { images[0] }
     var isSet: Bool { images.count > 1 }
 
+    // Group key: performerIds | date | galleryIds | sessionTimestamp
+    // - performers + date must be present
+    // - gallery IDs separate images from different galleries on same date
+    // - sessionTimestamp: extracted from filename between _-_ and last _<digits>
+    //   e.g. "042_-_2026-01-12_12-39-43_0.jpg" → "2026-01-12_12-39-43"
+    //   if not present (no _-_ pattern), falls back to empty string
     static func groupKey(for image: StashImage) -> String? {
-        // Use filename prefix stripped of trailing _-_N.ext
-        // e.g. "his_and_hers_-_2026-03-08_-_3.jpg" → "his_and_hers_-_2026-03-08"
-        guard let path = image.visual_files?.first?.path ?? image.paths?.image else { return nil }
-        let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-        // Strip trailing _-_<digits> or _<digits>
-        let base: String
-        if let range = filename.range(of: #"_-_\d+$"#, options: .regularExpression) {
-            base = String(filename[..<range.lowerBound])
-        } else if let range = filename.range(of: #"_\d+$"#, options: .regularExpression) {
-            base = String(filename[..<range.lowerBound])
+        guard let performers = image.performers, !performers.isEmpty,
+              let date = image.date, !date.isEmpty else { return nil }
+
+        let performerKey = performers.map(\.id).sorted().joined(separator: ",")
+        let galleryKey = image.galleries?.map(\.id).sorted().joined(separator: ",") ?? ""
+
+        // Extract session timestamp from filename: part between _-_ and trailing _<digits>
+        let sessionKey: String
+        if let path = image.visual_files?.first?.path ?? image.paths?.image {
+            let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            if let match = filename.range(of: #"(?<=_-_).+(?=_\d+$)"#, options: .regularExpression) {
+                sessionKey = String(filename[match])
+            } else {
+                sessionKey = ""
+            }
         } else {
-            return nil  // no numbering pattern → not part of a set
+            sessionKey = ""
         }
-        return base
+
+        // Orientation: portrait vs landscape — mixed orientations get separate groups
+        let orientation: String
+        if let w = image.visual_files?.first?.width, let h = image.visual_files?.first?.height {
+            orientation = w >= h ? "L" : "P"
+        } else {
+            orientation = ""
+        }
+
+        return "\(performerKey)|\(date)|\(galleryKey)|\(sessionKey)|\(orientation)"
     }
 }
 
@@ -356,17 +382,21 @@ struct StashLinePostView: View {
     @State private var showHeartAnimation = false
     @State private var heartScale: CGFloat = 0
     @State private var heartOpacity: Double = 0
-    @State private var localOCounter: Int
-    @State private var localRating: Int
+    @State private var oCounters: [String: Int]
+    @State private var ratings: [String: Int]
     @State private var carouselIndex = 0
+    @State private var isExpanded = false
+    @AppStorage("stashline_crop_enabled") private var cropEnabled = true
 
     var image: StashImage { post.images[carouselIndex] }
+    var localOCounter: Int { oCounters[image.id] ?? image.o_counter ?? 0 }
+    var localRating: Int { ratings[image.id] ?? image.rating100 ?? 0 }
 
     init(post: StashLinePost, viewModel: StashDBViewModel) {
         self.post = post
         self.viewModel = viewModel
-        self._localOCounter = State(initialValue: post.primaryImage.o_counter ?? 0)
-        self._localRating = State(initialValue: post.primaryImage.rating100 ?? 0)
+        self._oCounters = State(initialValue: [:])
+        self._ratings = State(initialValue: [:])
     }
 
     var body: some View {
@@ -513,11 +543,11 @@ struct StashLinePostView: View {
                 ZStack(alignment: .topTrailing) {
                     TabView(selection: $carouselIndex) {
                         ForEach(Array(post.images.enumerated()), id: \.offset) { index, img in
-                            singleImageView(img).tag(index)
+                            singleImageView(img, ratio: imageAspectRatio(for: img)).tag(index)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
-                    .aspectRatio(imageAspectRatio(for: post.images[0]), contentMode: .fit)
+                    .aspectRatio(imageAspectRatio(for: image), contentMode: .fit)
 
                     // Page indicator pill — top right
                     Text("\(carouselIndex + 1)/\(post.images.count)")
@@ -530,8 +560,12 @@ struct StashLinePostView: View {
                         .padding(8)
                 }
             } else {
-                singleImageView(image)
-                    .aspectRatio(imageAspectRatio(for: image), contentMode: .fit)
+                GeometryReader { geo in
+                    singleImageView(image, ratio: imageAspectRatio(for: image))
+                        .frame(width: geo.size.width, height: geo.size.width / imageAspectRatio(for: image))
+                        .clipped()
+                }
+                .aspectRatio(imageAspectRatio(for: image), contentMode: .fit)
             }
 
             // Counter burst animation
@@ -549,13 +583,15 @@ struct StashLinePostView: View {
 
     private func imageAspectRatio(for img: StashImage) -> CGFloat {
         if let w = img.visual_files?.first?.width, let h = img.visual_files?.first?.height, h > 0 {
-            return CGFloat(w) / CGFloat(h)
+            let native = CGFloat(w) / CGFloat(h)
+            if isExpanded || !cropEnabled { return native }
+            return w >= h ? 16.0 / 9.0 : 4.0 / 5.0
         }
-        return 1.0
+        return cropEnabled ? 4.0 / 5.0 : 1.0
     }
 
     @ViewBuilder
-    private func singleImageView(_ img: StashImage) -> some View {
+    private func singleImageView(_ img: StashImage, ratio: CGFloat) -> some View {
         ZStack {
             Color.studioHeaderGray
             if let url = img.thumbnailURL {
@@ -563,7 +599,11 @@ struct StashLinePostView: View {
                     if loader.isLoading {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let loaded = loader.image {
-                        loaded.resizable().scaledToFit().frame(maxWidth: .infinity)
+                        if isExpanded || !cropEnabled {
+                            loaded.resizable().scaledToFit().frame(maxWidth: .infinity)
+                        } else {
+                            loaded.resizable().scaledToFill().frame(maxWidth: .infinity)
+                        }
                     } else {
                         Image(systemName: "photo").font(.system(size: 40)).foregroundColor(.secondary)
                             .frame(maxWidth: .infinity)
@@ -573,6 +613,11 @@ struct StashLinePostView: View {
                 Image(systemName: "photo").font(.system(size: 40)).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity)
             }
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() }
         }
     }
 
@@ -607,11 +652,12 @@ struct StashLinePostView: View {
                 spacing: 4,
                 isVertical: false
             ) { newRating in
+                let imageId = image.id
                 let originalRating = localRating
-                localRating = newRating ?? 0
-                viewModel.updateImageRating(imageId: image.id, rating100: newRating) { success in
+                ratings[imageId] = newRating ?? 0
+                viewModel.updateImageRating(imageId: imageId, rating100: newRating) { success in
                     if !success {
-                        DispatchQueue.main.async { localRating = originalRating }
+                        DispatchQueue.main.async { self.ratings[imageId] = originalRating }
                         ToastManager.shared.show("Failed to save rating", icon: "exclamationmark.triangle", style: .error)
                     }
                 }
@@ -663,8 +709,9 @@ struct StashLinePostView: View {
     // MARK: - O-Counter Logic
 
     private func incrementOCounter() {
+        let imageId = image.id
         let originalCount = localOCounter
-        localOCounter += 1
+        oCounters[imageId] = originalCount + 1
 
         // Burst animation
         showHeartAnimation = true
@@ -683,12 +730,12 @@ struct StashLinePostView: View {
         }
 
         // Persist via increment mutation (same as ReelsView clips)
-        viewModel.incrementImageOCounter(imageId: image.id) { returnedCount in
+        viewModel.incrementImageOCounter(imageId: imageId) { returnedCount in
             if let count = returnedCount {
-                DispatchQueue.main.async { localOCounter = count }
+                DispatchQueue.main.async { self.oCounters[imageId] = count }
             } else {
                 DispatchQueue.main.async {
-                    localOCounter = originalCount
+                    self.oCounters[imageId] = originalCount
                     ToastManager.shared.show("Counter update failed", icon: "exclamationmark.triangle", style: .error)
                 }
             }

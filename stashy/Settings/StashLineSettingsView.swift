@@ -35,6 +35,19 @@ struct StashLineSettingsView: View {
             .listRowBackground(Color.secondaryAppBackground)
 
             Section {
+                Toggle(isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "stashline_crop_enabled") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "stashline_crop_enabled") }
+                )) {
+                    Label("Crop to 4:5 / 16:9", systemImage: "crop")
+                }
+                .tint(appearanceManager.tintColor)
+            } header: {
+                Text("Display")
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+
+            Section {
                 HStack {
                     Label("Sorting", systemImage: "arrow.up.arrow.down")
                     Spacer()

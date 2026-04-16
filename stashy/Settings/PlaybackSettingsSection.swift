@@ -15,7 +15,7 @@ struct PlaybackSettingsSection: View {
     var body: some View {
         Section(header: Text("Playback")) {
             if let config = configManager.activeConfig {
-                Picker("Library Quality", selection: Binding(
+                Picker(selection: Binding(
                     get: { config.defaultQuality },
                     set: { newValue in
                         var updated = config
@@ -27,9 +27,11 @@ struct PlaybackSettingsSection: View {
                     ForEach(StreamingQuality.allCases, id: \.self) { quality in
                         Text(quality.displayName).tag(quality)
                     }
+                } label: {
+                    Label("Library Quality", systemImage: "film")
                 }
 
-                Picker("StashTok Quality", selection: Binding(
+                Picker(selection: Binding(
                     get: { config.reelsQuality },
                     set: { newValue in
                         var updated = config
@@ -41,6 +43,8 @@ struct PlaybackSettingsSection: View {
                     ForEach(StreamingQuality.allCases, id: \.self) { quality in
                         Text(quality.displayName).tag(quality)
                     }
+                } label: {
+                    Label("StashTok Quality", systemImage: "play.rectangle.on.rectangle")
                 }
             } else {
                 Text("Connect to a server to configure quality settings.")
@@ -49,8 +53,10 @@ struct PlaybackSettingsSection: View {
             }
             
             #if !os(tvOS)
-            Toggle("Picture-in-Picture", isOn: $tabManager.isPiPEnabled)
-                .tint(appearanceManager.tintColor)
+            Toggle(isOn: $tabManager.isPiPEnabled) {
+                Label("Picture-in-Picture", systemImage: "pip")
+            }
+            .tint(appearanceManager.tintColor)
             #endif
         }
         .listRowBackground(Color.secondaryAppBackground)
