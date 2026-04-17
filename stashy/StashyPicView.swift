@@ -55,32 +55,33 @@ struct StashLineView: View {
         }
         .navigationBarHidden(true)
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 0) {
-                if performerFilter != nil {
-                    Button(action: { dismiss() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 17, weight: .semibold))
-                            Text("Back")
-                                .font(.system(size: 17))
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    if performerFilter != nil {
+                        Button(action: { dismiss() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                            .foregroundColor(appearanceManager.tintColor)
                         }
-                        .foregroundColor(appearanceManager.tintColor)
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 8)
+                    Text(performerFilter?.name ?? "StashLine")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text(performerFilter?.name ?? "StashLine")
-                    .font(.system(size: 18, weight: .semibold))
-                    .lineLimit(1)
-                    .padding(.leading, performerFilter != nil ? 8 : 16)
-                Spacer()
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 32)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+
+                Divider().overlay(Color.white.opacity(0.15))
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
             .background(.bar)
-            .overlay(alignment: .bottom) {
-                Divider()
-            }
+            .colorScheme(.dark)
         }
         .floatingActionBar {
             HStack(spacing: 0) {
@@ -124,6 +125,8 @@ struct StashLineView: View {
                         .foregroundColor(.primary)
                 }
                 .frame(maxWidth: .infinity)
+
+                Divider().frame(height: 20)
 
                 Menu {
                     Button(action: {

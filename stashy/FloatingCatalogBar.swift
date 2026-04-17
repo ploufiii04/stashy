@@ -8,9 +8,8 @@ struct FloatingActionBar<Content: View>: View {
 
     var body: some View {
         content()
-            .font(.system(size: 20))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
+            .font(.system(size: 17))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 16)
             .background(
                 Capsule()
@@ -21,6 +20,7 @@ struct FloatingActionBar<Content: View>: View {
                 Capsule()
                     .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
             )
+            .frame(height: 36)
             .padding(.horizontal, 80)
             .padding(.bottom, 6)
     }
@@ -50,7 +50,7 @@ struct CatalogCategoryRow: View {
     private var overflowIsActive: Bool { overflowTabs.contains(selection) }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             // Fixed-width title label for active tab
             Text(selection.rawValue)
                 .font(.system(size: 18, weight: .semibold))

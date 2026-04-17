@@ -32,7 +32,14 @@ struct ReelsView: View {
     @State private var isMediaZoomed = false
     @State private var isRotating = false
     @State private var isUIVisible = true
-    @State private var lastMainListPosition: String? // Remember position before filtering
+    @State private var lastMainListPosition: String?
+    @State private var currentItemIsPlaying = true
+    @State private var currentItemShowRatingOverlay = false
+    @State private var showStashSyncSheet = false
+    @State private var currentItemTime: Double = 0.0
+    @State private var currentItemDuration: Double = 1.0
+    @State private var currentItemSeeking = false
+    @State private var currentItemSeekTarget: Double? = nil
 
     // Extracted binding to help the Swift compiler with type-checking
     // Native scroll binding
@@ -739,23 +746,33 @@ struct ReelsView: View {
             }
         }
         .ignoresSafeArea(.all)
-        .navigationTitle(viewModel.scenes.isEmpty && viewModel.errorMessage != nil ? "StashTok" : "")
-        .navigationBarTitleDisplayMode(.inline)
-        // Toolbar Background Logic
-        .toolbarBackground(
-            viewModel.scenes.isEmpty && viewModel.errorMessage != nil ? .visible : .hidden,
-            for: .navigationBar
-        )
-        .toolbar(.hidden, for: .tabBar)
-        .toolbarBackground(
-            viewModel.scenes.isEmpty && viewModel.errorMessage != nil ? Color.black : Color.clear,
-            for: .navigationBar
-        )
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            reelsToolbar
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            reelsNavBar
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                reelsInfoOverlay
+                reelsCapsulesBar
+            }
+        }
+        .toolbar(isUIVisible ? .visible : .hidden, for: .tabBar)
+        .sheet(isPresented: $showStashSyncSheet) {
+            #if !os(tvOS)
+            StashSyncSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            #endif
         }
         .onChange(of: reelsMode) { _, newValue in handleModeChange(newValue) }
+        .onChange(of: currentVisibleSceneId) { _, _ in
+            currentItemIsPlaying = true
+            currentItemShowRatingOverlay = false
+            currentItemTime = 0.0
+            currentItemDuration = 1.0
+            currentItemSeeking = false
+            currentItemSeekTarget = nil
+        }
         .onChange(of: viewModel.scenes.first?.id) { _, _ in autoSelectFirstItem() }
         .onChange(of: viewModel.sceneMarkers.first?.id) { _, _ in autoSelectFirstItem() }
         .onChange(of: viewModel.clips.first?.id) { _, _ in autoSelectFirstItem() }
@@ -1069,6 +1086,12 @@ struct ReelsView: View {
             isActive: item.id == currentVisibleSceneId,
             isMuted: $isMuted,
             isUIVisible: $isUIVisible,
+            isPlaying: item.id == currentVisibleSceneId ? $currentItemIsPlaying : .constant(true),
+            showRatingOverlay: item.id == currentVisibleSceneId ? $currentItemShowRatingOverlay : .constant(false),
+            currentTime: item.id == currentVisibleSceneId ? $currentItemTime : .constant(0.0),
+            duration: item.id == currentVisibleSceneId ? $currentItemDuration : .constant(1.0),
+            isSeeking: item.id == currentVisibleSceneId ? $currentItemSeeking : .constant(false),
+            seekTarget: item.id == currentVisibleSceneId ? $currentItemSeekTarget : .constant(nil),
             onPerformerTap: { performer in
                 applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
             },
@@ -1134,7 +1157,6 @@ struct ReelsView: View {
         .focusEffectDisabled()
         .scrollTargetBehavior(.paging)
         .scrollPosition(id: scrollPositionBinding)
-        .toolbar(isUIVisible ? .visible : .hidden, for: .navigationBar)
         .scrollContentBackground(.hidden)
         .background(Color.black)
         .onScrollPhaseChange { _, _ in }
@@ -1152,6 +1174,263 @@ struct ReelsView: View {
                 }
             }
         }
+    }
+
+
+    @ViewBuilder
+    private var reelsNavBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(reelsMode.rawValue)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(width: 120, alignment: .leading)
+
+                let enabledModes = tabManager.enabledReelsModes.map { ReelsMode(from: $0) }
+                ForEach(enabledModes, id: \.self) { mode in
+                    let isActive = mode == reelsMode
+                    Button(action: { reelsMode = mode }) {
+                        Image(systemName: mode.icon)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(isActive ? .white : .white.opacity(0.5))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 32)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9)
+                                    .fill(isActive ? appearanceManager.tintColor : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+
+            // Active performer / tag pills
+            let hasFilters = selectedPerformer != nil || !selectedTags.isEmpty
+            if hasFilters {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if let performer = selectedPerformer {
+                            Button(action: {
+                                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: nil, tags: selectedTags)
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                                    Text(performer.name).font(.system(size: 12, weight: .bold)).lineLimit(1)
+                                }
+                                .foregroundColor(.white.opacity(0.9))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color.white.opacity(0.15))
+                                .clipShape(Capsule())
+                            }
+                        }
+                        ForEach(selectedTags) { tag in
+                            Button(action: {
+                                var newTags = selectedTags
+                                newTags.removeAll { $0.id == tag.id }
+                                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                                    Text("#\(tag.name)").font(.system(size: 12, weight: .bold)).lineLimit(1)
+                                }
+                                .foregroundColor(.white.opacity(0.9))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Color.white.opacity(0.15))
+                                .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .padding(.bottom, 6)
+            }
+
+            Divider().overlay(Color.white.opacity(0.15))
+        }
+        .background(.bar)
+        .colorScheme(.dark)
+        .opacity(isUIVisible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.2), value: isUIVisible)
+    }
+
+    /// Only the two capsule rows — lives in safeAreaInset so it sits at the same level as other views
+    @ViewBuilder
+    private var reelsCapsulesBar: some View {
+        let currentItem = currentReelItems.first(where: { $0.id == currentVisibleSceneId })
+        let isVideo = currentItem?.videoURL != nil && !(currentItem?.isAnimated ?? true)
+
+        HStack(spacing: 8) {
+            // Left capsule (fixed): sort + filter
+            HStack(spacing: 16) {
+                sortMenu.simultaneousGesture(TapGesture().onEnded { isMenuOpen = true })
+                filterMenu.simultaneousGesture(TapGesture().onEnded { isMenuOpen = true })
+            }
+            .font(.system(size: 17))
+            .frame(width: 88, height: 36)
+            .background(Capsule().fill(.ultraThinMaterial).shadow(color: .black.opacity(0.3), radius: 6, y: 2))
+            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+
+            // Middle capsule: o-counter left, stars + scene link right
+            HStack(spacing: 8) {
+                let oCounter = currentItem?.oCounter ?? 0
+                Button {
+                    if let item = currentItem { handleOCounterChange(item: item, newCount: oCounter + 1) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: oCounter > 0 ? AppearanceManager.shared.oCounterIconFilled : AppearanceManager.shared.oCounterIcon)
+                            .foregroundColor(oCounter > 0 ? appearanceManager.tintColor : .white)
+                        Text("\(oCounter)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+
+                Spacer()
+
+                let rating = currentItem?.rating100 ?? 0
+                if let item = currentItem {
+                    StarRatingView(rating100: rating, isInteractive: true, size: 14, spacing: 3, isVertical: false) { newRating in
+                        handleRatingChange(item: item, newRating: newRating)
+                    }
+                    .fixedSize()
+                }
+
+                if let scene = currentItem?.underlyingScene {
+                    NavigationLink(destination: SceneDetailView(scene: scene)) {
+                        Image(systemName: "film").foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                }
+            }
+            .font(.system(size: 17))
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .padding(.horizontal, 16)
+            .background(Capsule().fill(.ultraThinMaterial).shadow(color: .black.opacity(0.3), radius: 6, y: 2))
+            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+
+            // Right capsule (fixed): mute + play/pause (videos only)
+            if isVideo {
+                HStack(spacing: 16) {
+                    Button { isMuted.toggle() } label: {
+                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .foregroundColor(.white)
+                    }
+                    Button { currentItemIsPlaying.toggle() } label: {
+                        Image(systemName: currentItemIsPlaying ? "pause.fill" : "play.fill")
+                            .foregroundColor(.white)
+                    }
+                }
+                .font(.system(size: 17))
+                .frame(width: 88, height: 36)
+                .background(Capsule().fill(.ultraThinMaterial).shadow(color: .black.opacity(0.3), radius: 6, y: 2))
+                .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
+        .colorScheme(.dark)
+        .opacity(isUIVisible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.2), value: isUIVisible)
+    }
+
+    /// Info + scrubber overlay, positioned just above the capsule bar
+    @ViewBuilder
+    private var reelsInfoOverlay: some View {
+        let currentItem = currentReelItems.first(where: { $0.id == currentVisibleSceneId })
+        VStack(alignment: .leading, spacing: 0) {
+            if let item = currentItem {
+                VStack(alignment: .leading, spacing: 4) {
+                    // Performer - Title
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if let performer = item.performers.first {
+                            Button(action: {
+                                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
+                            }) {
+                                Text(performer.name)
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            .buttonStyle(.plain)
+                            .layoutPriority(1)
+                            Text("-")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        if let title = item.title, !title.isEmpty {
+                            Text(title)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white.opacity(0.85))
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+
+                    // Hashtags
+                    let tags = item.tags
+                    if !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(tags) { tag in
+                                    Button(action: {
+                                        var newTags = selectedTags
+                                        if newTags.contains(where: { $0.id == tag.id }) {
+                                            newTags.removeAll { $0.id == tag.id }
+                                        } else {
+                                            newTags.append(tag)
+                                        }
+                                        applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+                                    }) {
+                                        Text("#\(tag.name)")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.8))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(Color.black.opacity(0.3))
+                                            .clipShape(Capsule())
+                                            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                        .frame(height: 20)
+                    }
+                }
+
+                // Scrubber — no horizontal padding
+                if !item.isAnimated {
+                    CustomVideoScrubber(
+                        value: Binding(
+                            get: { currentItemTime },
+                            set: { val in
+                                currentItemTime = val
+                                currentItemSeekTarget = val
+                            }
+                        ),
+                        total: currentItemDuration,
+                        onEditingChanged: { editing in
+                            currentItemSeeking = editing
+                        }
+                    )
+                    .padding(.top, 0)
+                    .padding(.bottom, 6)
+                }
+            }
+        }
+        // Sit directly above the capsule bar
+        .colorScheme(.dark)
+        .opacity(isUIVisible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.2), value: isUIVisible)
     }
 
     @ToolbarContentBuilder
@@ -1865,6 +2144,12 @@ struct ReelItemView: View {
     // Playback State
     @Binding var isMuted: Bool
     @Binding var isUIVisible: Bool
+    @Binding var isPlaying: Bool
+    @Binding var showRatingOverlay: Bool
+    @Binding var currentTime: Double
+    @Binding var duration: Double
+    @Binding var isSeeking: Bool
+    @Binding var seekTarget: Double?
     var onPerformerTap: (ScenePerformer) -> Void
     var onTagTap: (Tag) -> Void
     var onRatingChanged: (Int?) -> Void
@@ -1873,12 +2158,7 @@ struct ReelItemView: View {
     var onVideoEnded: () -> Void = {}
     @ObservedObject var viewModel: StashDBViewModel
     @Environment(\.verticalSizeClass) var verticalSizeClass
-    @State private var isPlaying = true
-    @State private var currentTime: Double = 0.0
-    @State private var duration: Double = 1.0
-    @State private var isSeeking = false
     @State private var timeObserver: Any?
-    @State private var showRatingOverlay = false
     @State private var showTagsOverlay = false
     @Binding var isMenuOpen: Bool
     @Binding var isZoomed: Bool
@@ -1989,6 +2269,28 @@ extension ReelItemView {
             }
             .onChange(of: showTagsOverlay) { _, newValue in
                 isMenuOpen = newValue || showRatingOverlay
+            }
+            .onChange(of: isPlaying) { _, playing in
+                guard isActive else { return }
+                if playing {
+                    if !isRotating { player?.play() }
+                } else {
+                    player?.pause()
+                }
+            }
+            .onChange(of: seekTarget) { _, target in
+                guard let t = target else { return }
+                seek(to: t)
+                seekTarget = nil
+            }
+            .onChange(of: isSeeking) { _, seeking in
+                guard isActive else { return }
+                if seeking {
+                    player?.pause()
+                } else if isPlaying {
+                    player?.play()
+                    onInteraction()
+                }
             }
     }
 
@@ -2150,166 +2452,8 @@ extension ReelItemView {
                 }
                 
 
-                // Combined Info & Control Stack
-                VStack(alignment: .leading, spacing: 0) {
-                    // 1. Performer - Title (Single Line)
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if !item.performers.isEmpty {
-                            performerLabel(for: item)
-                                .layoutPriority(1)
-                            Text("-")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                        titleLabel(for: item)
-                    }
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-
-                    // 2. Permanent Tags
-                    let tags = item.tags
-                    if !tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(tags) { tag in
-                                    Button(action: {
-                                        let fullTag = Tag(id: tag.id, name: tag.name, description: nil, imagePath: nil, sceneCount: nil, galleryCount: nil, sceneMarkerCount: nil, performerCount: nil, favorite: nil, createdAt: nil, updatedAt: nil)
-                                        onTagTap(fullTag)
-                                        onInteraction()
-                                    }) {
-                                        Text("#\(tag.name)")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundColor(.white.opacity(0.8))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.black.opacity(0.3))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                        }
-                        .frame(height: 20)
-                        .padding(.top, 6)
-                    }
-
-                    // 3. Full-width progress bar — edge to edge, no horizontal padding
-                    if !item.isAnimated {
-                        CustomVideoScrubber(
-                            value: Binding(get: { currentTime }, set: { val in
-                                currentTime = val
-                                seek(to: val)
-                            }),
-                            total: duration,
-                            onEditingChanged: { editing in
-                                isSeeking = editing
-                                if editing {
-                                    player?.pause()
-                                } else {
-                                    if isPlaying { player?.play() }
-                                    onInteraction()
-                                }
-                            }
-                        )
-                        .padding(.top, 8)
-                    }
-                }
-                .padding(.bottom, 4)
-                
-                // Bottom row: Action buttons distributed across full width
-                HStack(alignment: .center, spacing: 0) {
-                    Spacer()
-
-                    // Scene Link (Scenes, Markers, Previews only)
-                    if let scene = item.underlyingScene {
-                        NavigationLink(destination: SceneDetailView(scene: scene)) {
-                            Image(systemName: "film")
-                                .font(.system(size: 20))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        Spacer()
-                    }
-
-                    // Rating
-                    let rating = item.rating100 ?? 0
-                    BottomBarButton(icon: "star", count: rating > 0 ? (rating / 20) : 0) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            showRatingOverlay.toggle()
-                            showTagsOverlay = false
-                        }
-                        onInteraction()
-                    }
-                    
-                    Spacer()
-                    
-                    // O-Counter
-                    let oCounter = item.oCounter ?? 0
-                    BottomBarButton(icon: AppearanceManager.shared.oCounterIcon, count: oCounter) {
-                        onOCounterChanged(oCounter + 1)
-                        onInteraction()
-                    }
-                    
-                    Spacer()
-                    
-                    // View Counter (not shown for Scenes or Previews)
-                    
-                    // Mute & StashSync (only for videos)
-                    if !item.isAnimated {
-                        if StashVideoSyncManager.shared.isVideoSyncEnabled {
-                            // StashSync Button — always visible, tap opens sheet
-                            let isStashSyncActive = HandyManager.shared.isStashSyncMode || ButtplugManager.shared.isStashSyncMode || LoveSpouseManager.shared.isStashSyncMode
-                            BottomBarButton(
-                                icon: isStashSyncActive ? "bolt.horizontal.fill" : "bolt.horizontal",
-                                count: 0,
-                                hideCount: true
-                            ) {
-                                HapticManager.medium()
-                                showStashSyncSheet = true
-                                onInteraction()
-                            }
-                            .foregroundColor(isStashSyncActive ? .orange : .white)
-
-                            Spacer()
-                        }
-                        
-                        // Mute Button
-                        BottomBarButton(
-                            icon: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                            count: 0,
-                            hideCount: true
-                        ) {
-                            isMuted.toggle()
-                            onInteraction()
-                        }
-
-                        Spacer()
-
-                        // Play/Pause Button
-                        BottomBarButton(
-                            icon: isPlaying ? "pause.fill" : "play.fill",
-                            count: 0,
-                            hideCount: true
-                        ) {
-                            isPlaying.toggle()
-                            if isPlaying && !isRotating {
-                                player?.play()
-                            } else {
-                                player?.pause()
-                            }
-                            onInteraction()
-                        }
-                        Spacer()
-                    }
-                }
-                .padding(Edge.Set.horizontal, 16)
-            .frame(height: 50)
-        }
-        .padding(Edge.Set.bottom, 30) // Safe area spacing
+                // 3. Full-width progress bar moved to reelsFloatingBar
+            }
         .sheet(isPresented: $showStashSyncSheet) {
             #if !os(tvOS)
             StashSyncSheet()

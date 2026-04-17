@@ -124,7 +124,7 @@ struct CatalogsView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if showTabSwitcher {
                 CatalogCategoryRow(tabs: sortedVisibleTabs, selection: selectedTabBinding)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 6)
                     .background(.bar)
                     .overlay(alignment: .bottom) {
