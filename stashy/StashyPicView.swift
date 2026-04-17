@@ -11,6 +11,7 @@ struct StashLineView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var configManager = ServerConfigManager.shared
+    @Environment(\.dismiss) private var dismiss
 
     @State private var selectedSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
@@ -52,77 +53,104 @@ struct StashLineView: View {
                 feedContent
             }
         }
-        .navigationTitle(performerFilter?.name ?? "StashLine")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 0) {
+                if performerFilter != nil {
+                    Button(action: { dismiss() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 17))
+                        }
+                        .foregroundColor(appearanceManager.tintColor)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 8)
+                }
+                Text(performerFilter?.name ?? "StashLine")
+                    .font(.system(size: 18, weight: .semibold))
+                    .lineLimit(1)
+                    .padding(.leading, performerFilter != nil ? 8 : 16)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(.bar)
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                Menu {
+                    Button(action: { changeSortOption(to: .random) }) {
+                        HStack { Text("Random"); if selectedSortOption == .random { Image(systemName: "checkmark") } }
+                    }
+                    Divider()
                     Menu {
-                        Button(action: { changeSortOption(to: .random) }) {
-                            HStack { Text("Random"); if selectedSortOption == .random { Image(systemName: "checkmark") } }
+                        Button(action: { changeSortOption(to: .dateDesc) }) {
+                            HStack { Text("Newest First"); if selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
                         }
-                        Divider()
-                        Menu {
-                            Button(action: { changeSortOption(to: .dateDesc) }) {
-                                HStack { Text("Newest First"); if selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
-                            }
-                            Button(action: { changeSortOption(to: .dateAsc) }) {
-                                HStack { Text("Oldest First"); if selectedSortOption == .dateAsc { Image(systemName: "checkmark") } }
-                            }
-                        } label: {
-                            HStack { Text("Date"); if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
-                        }
-                        Menu {
-                            Button(action: { changeSortOption(to: .ratingDesc) }) {
-                                HStack { Text("High → Low"); if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
-                            }
-                            Button(action: { changeSortOption(to: .ratingAsc) }) {
-                                HStack { Text("Low → High"); if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") } }
-                            }
-                        } label: {
-                            HStack { Text("Rating"); if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
-                        }
-                        Menu {
-                            Button(action: { changeSortOption(to: .createdAtDesc) }) {
-                                HStack { Text("Newest First"); if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
-                            }
-                            Button(action: { changeSortOption(to: .createdAtAsc) }) {
-                                HStack { Text("Oldest First"); if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") } }
-                            }
-                        } label: {
-                            HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
+                        Button(action: { changeSortOption(to: .dateAsc) }) {
+                            HStack { Text("Oldest First"); if selectedSortOption == .dateAsc { Image(systemName: "checkmark") } }
                         }
                     } label: {
-                        Image(systemName: "arrow.up.arrow.down.circle")
-                            .foregroundColor(appearanceManager.tintColor)
+                        HStack { Text("Date"); if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
                     }
-
                     Menu {
+                        Button(action: { changeSortOption(to: .ratingDesc) }) {
+                            HStack { Text("High → Low"); if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
+                        }
+                        Button(action: { changeSortOption(to: .ratingAsc) }) {
+                            HStack { Text("Low → High"); if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") } }
+                        }
+                    } label: {
+                        HStack { Text("Rating"); if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
+                    }
+                    Menu {
+                        Button(action: { changeSortOption(to: .createdAtDesc) }) {
+                            HStack { Text("Newest First"); if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
+                        }
+                        Button(action: { changeSortOption(to: .createdAtAsc) }) {
+                            HStack { Text("Oldest First"); if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") } }
+                        }
+                    } label: {
+                        HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down.circle")
+                        .foregroundColor(.primary)
+                }
+                .frame(maxWidth: .infinity)
+
+                Menu {
+                    Button(action: {
+                        selectedFilter = nil
+                        performSearch()
+                    }) {
+                        HStack { Text("No Filter"); if selectedFilter == nil { Image(systemName: "checkmark") } }
+                    }
+                    let imageFilters = viewModel.savedFilters.values
+                        .filter { $0.mode == .images }
+                        .sorted { $0.name < $1.name }
+                    ForEach(imageFilters) { filter in
                         Button(action: {
-                            selectedFilter = nil
+                            selectedFilter = filter
                             performSearch()
                         }) {
-                            HStack { Text("No Filter"); if selectedFilter == nil { Image(systemName: "checkmark") } }
-                        }
-                        let imageFilters = viewModel.savedFilters.values
-                            .filter { $0.mode == .images }
-                            .sorted { $0.name < $1.name }
-                        ForEach(imageFilters) { filter in
-                            Button(action: {
-                                selectedFilter = filter
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text(filter.name)
-                                    if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
-                                }
+                            HStack {
+                                Text(filter.name)
+                                if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
                             }
                         }
-                    } label: {
-                        Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                            .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
                     }
+                } label: {
+                    Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
                 }
+                .frame(maxWidth: .infinity)
             }
         }
         .onAppear {
