@@ -830,6 +830,14 @@ class StashDBViewModel: ObservableObject {
     private var currentTagScenePage = 1
     private var currentTagSceneSortOption: SceneSortOption = .dateDesc
     private var currentTagDetailFilter: SavedFilter? = nil
+    
+    @Published var tagGalleries: [Gallery] = []
+    @Published var totalTagGalleries: Int = 0
+    @Published var isLoadingTagGalleries = false
+    @Published var isLoadingMoreTagGalleries = false
+    @Published var hasMoreTagGalleries = true
+    private var currentTagGalleryPage = 1
+    private var currentTagGallerySortOption: GallerySortOption = .dateDesc
 
 
     private var cancellables = Set<AnyCancellable>()
@@ -2949,6 +2957,75 @@ class StashDBViewModel: ObservableObject {
                     self.errorMessage = "Could not load tag scenes"
                 }
             }
+        }
+    }
+    
+    func fetchTagGalleries(tagId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true) {
+        if isInitialLoad {
+            currentTagGalleryPage = 1
+            currentTagGallerySortOption = sortBy
+            // tagGalleries = []
+            totalTagGalleries = 0
+            isLoadingTagGalleries = true
+            hasMoreTagGalleries = true
+            errorMessage = nil
+        } else {
+            isLoadingMoreTagGalleries = true
+        }
+        
+        let page = isInitialLoad ? 1 : currentTagGalleryPage + 1
+        let sortField = sortBy.sortField
+        let sortDirection = sortBy.direction
+        let query = GraphQLQueries.queryWithFragments("findGalleries")
+        
+        let variables: [String: Any] = [
+            "filter": [
+                "page": page,
+                "per_page": 20,
+                "sort": sortField,
+                "direction": sortDirection
+            ],
+            "gallery_filter": [
+                "tags": [
+                    "value": [tagId],
+                    "modifier": "INCLUDES"
+                ]
+            ]
+        ]
+        
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            return
+        }
+        
+        performGraphQLQuery(query: bodyString) { (response: GalleriesResponse?) in
+            if let result = response?.data?.findGalleries {
+                DispatchQueue.main.async {
+                    if isInitialLoad {
+                        self.tagGalleries = result.galleries
+                        self.totalTagGalleries = result.count
+                        self.errorMessage = nil // Clear error on success
+                    } else {
+                        self.tagGalleries.append(contentsOf: result.galleries)
+                    }
+                    
+                    self.hasMoreTagGalleries = result.galleries.count == 20
+                    self.currentTagGalleryPage = page
+                    self.isLoadingTagGalleries = false
+                    self.isLoadingMoreTagGalleries = false
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.isLoadingTagGalleries = false
+                    self.isLoadingMoreTagGalleries = false
+                }
+            }
+        }
+    }
+    
+    func loadMoreTagGalleries(tagId: String) {
+        if !isLoadingTagGalleries && !isLoadingMoreTagGalleries && hasMoreTagGalleries {
+            fetchTagGalleries(tagId: tagId, sortBy: currentTagGallerySortOption, isInitialLoad: false)
         }
     }
     
@@ -5562,7 +5639,7 @@ struct Performer: Codable, Identifiable, Equatable {
     let disambiguation: String?
     let birthdate: String?
     let country: String?
-    let imagePath: String?
+    var imagePath: String?
     let sceneCount: Int
     let galleryCount: Int?
     let gender: String?
@@ -5597,6 +5674,11 @@ struct Performer: Codable, Identifiable, Equatable {
     
     // Computed property for thumbnail URL
     var thumbnailURL: URL? {
+        // If imagePath is already an absolute string (like our manually busted URL), use it
+        if let path = imagePath, (path.starts(with: "http://") || path.starts(with: "https://")) {
+            return signedURL(URL(string: path))
+        }
+        
         // ... (existing implementation)
         print("🖼️ PERFORMER THUMBNAIL DEBUG for performer \(id):")
         
@@ -5730,22 +5812,27 @@ struct FindTagsResult: Codable {
 
 struct Tag: Codable, Identifiable, Equatable {
     var sceneCountDisplay: Int { sceneCount ?? 0 }
-    var details: String? { nil }
+    var details: String? { description }
     var rating100: Int? { nil }
     let id: String
     let name: String
+    let description: String?
     let imagePath: String?
     let sceneCount: Int?
     let galleryCount: Int?
+    let sceneMarkerCount: Int?
+    let performerCount: Int?
     let favorite: Bool?
     let createdAt: String?
     let updatedAt: String?
     
     enum CodingKeys: String, CodingKey {
-        case id, name, favorite
+        case id, name, favorite, description
         case imagePath = "image_path"
         case sceneCount = "scene_count"
         case galleryCount = "gallery_count"
+        case sceneMarkerCount = "scene_marker_count"
+        case performerCount = "performer_count"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -5922,7 +6009,7 @@ struct GalleryStudio: Codable, Equatable {
 struct GalleryPerformer: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
-    let image_path: String?
+    var image_path: String?
 
     func toPerformer() -> Performer {
         Performer(id: id, name: name, disambiguation: nil, birthdate: nil, country: nil,
@@ -5995,7 +6082,7 @@ struct StashImage: Codable, Identifiable, Equatable {
     let paths: ImagePaths?
     // let files: [ImageFile]?
     let visual_files: [ImageFile]?
-    let performers: [GalleryPerformer]?
+    var performers: [GalleryPerformer]?
     let studio: GalleryStudio?
     let galleries: [ImageGallery]?
     let tags: [Tag]?

@@ -2174,7 +2174,7 @@ extension ReelItemView {
                             HStack(spacing: 6) {
                                 ForEach(tags) { tag in
                                     Button(action: {
-                                        let fullTag = Tag(id: tag.id, name: tag.name, imagePath: nil, sceneCount: nil, galleryCount: nil, favorite: nil, createdAt: nil, updatedAt: nil)
+                                        let fullTag = Tag(id: tag.id, name: tag.name, description: nil, imagePath: nil, sceneCount: nil, galleryCount: nil, sceneMarkerCount: nil, performerCount: nil, favorite: nil, createdAt: nil, updatedAt: nil)
                                         onTagTap(fullTag)
                                         onInteraction()
                                     }) {

@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct StashLineView: View {
-    let performerFilter: GalleryPerformer?
+    @State var performerFilter: GalleryPerformer?
 
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var appearanceManager = AppearanceManager.shared
@@ -16,7 +16,7 @@ struct StashLineView: View {
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
 
     init(performerFilter: GalleryPerformer? = nil) {
-        self.performerFilter = performerFilter
+        _performerFilter = State(initialValue: performerFilter)
     }
 
     private func performSearch() {
@@ -160,6 +160,23 @@ struct StashLineView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
             selectedFilter = nil
             performSearch()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
+            if let targetId = notification.userInfo?["performerId"] as? String,
+               let newPath = notification.userInfo?["newImagePath"] as? String {
+                if performerFilter?.id == targetId {
+                    performerFilter?.image_path = newPath
+                }
+                
+                // Update avatars in this specific view model's list
+                for i in 0..<viewModel.allImages.count {
+                    if var mutablePerformers = viewModel.allImages[i].performers, 
+                       let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId }) {
+                        mutablePerformers[pIndex].image_path = newPath
+                        viewModel.allImages[i].performers = mutablePerformers
+                    }
+                }
+            }
         }
     }
 
@@ -377,6 +394,11 @@ struct StashLinePost: Identifiable {
 
 // MARK: - Post View
 
+struct ShareWrapper: Identifiable {
+    let id = UUID()
+    let items: [Any]
+}
+
 struct StashLinePostView: View {
     let post: StashLinePost
     @ObservedObject var viewModel: StashDBViewModel
@@ -389,6 +411,11 @@ struct StashLinePostView: View {
     @State private var ratings: [String: Int]
     @State private var carouselIndex = 0
     @State private var isExpanded = false
+    @State private var showDeleteConfirmation = false
+    @State private var showShareConfirmation = false
+    @State private var activeShareWrapper: ShareWrapper?
+    @State private var showSetPerformerImagePicker = false
+    @State private var performerImageTargetPerformers: [GalleryPerformer] = []
     @AppStorage("stashline_crop_enabled") private var cropEnabled = true
 
     var image: StashImage { post.images[carouselIndex] }
@@ -411,18 +438,46 @@ struct StashLinePostView: View {
             imageArea
                 .overlay(alignment: .bottom) { actionBar }
 
-            if let title = image.title, !title.isEmpty {
-                Text(title)
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                    .padding(.bottom, 4)
-                Spacer().frame(height: 8)
-            } else {
-                Spacer().frame(height: 10)
+            HStack(alignment: .top) {
+                if let title = image.title, !title.isEmpty {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                
+                HStack(spacing: 16) {
+                    Button {
+                        if post.isSet {
+                            showShareConfirmation = true
+                        } else {
+                            shareImage(shareWholeSet: false)
+                        }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                    if let performers = image.performers, !performers.isEmpty {
+                        Button {
+                            performerImageTargetPerformers = performers
+                            showSetPerformerImagePicker = true
+                        } label: {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .foregroundColor(appearanceManager.tintColor)
+                        }
+                    }
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
 
             if let tags = image.tags, !tags.isEmpty {
                 tagLine(tags: tags)
@@ -430,6 +485,47 @@ struct StashLinePostView: View {
 
             Spacer().frame(height: 12)
             Divider()
+        }
+        .alert("Set as Performer Image?", isPresented: $showSetPerformerImagePicker) {
+            ForEach(performerImageTargetPerformers) { performer in
+                Button("Okay") {
+                    setPerformerImage(performer: performer)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Update the profile picture for the selected performer.")
+        }
+        .alert("Delete", isPresented: $showDeleteConfirmation) {
+            if post.isSet {
+                Button("Delete Single Image", role: .destructive) {
+                    deleteImage(deleteWholeSet: false)
+                }
+                Button("Delete Entire Set (\(post.images.count) images)", role: .destructive) {
+                    deleteImage(deleteWholeSet: true)
+                }
+            } else {
+                Button("Delete Image", role: .destructive) {
+                    deleteImage(deleteWholeSet: false)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text(post.isSet ? "Do you want to delete only this image or the entire set?" : "This image will be permanently deleted. This action cannot be undone.")
+        }
+        .alert("Share", isPresented: $showShareConfirmation) {
+            Button("Share Single Image") {
+                shareImage(shareWholeSet: false)
+            }
+            Button("Share Entire Set (\(post.images.count) images)") {
+                shareImage(shareWholeSet: true)
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Do you want to share only this image or the entire set?")
+        }
+        .sheet(item: $activeShareWrapper) { wrapper in
+            ShareSheet(items: wrapper.items)
         }
     }
 
@@ -743,6 +839,110 @@ struct StashLinePostView: View {
                 DispatchQueue.main.async {
                     self.oCounters[imageId] = originalCount
                     ToastManager.shared.show("Counter update failed", icon: "exclamationmark.triangle", style: .error)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Local Actions
+
+    private func deleteImage(deleteWholeSet: Bool) {
+        let targets = deleteWholeSet ? post.images : [image]
+        
+        for target in targets {
+            viewModel.deleteImage(imageId: target.id) { success in
+                DispatchQueue.main.async {
+                    if success {
+                        withAnimation {
+                            if let index = self.viewModel.allImages.firstIndex(where: { $0.id == target.id }) {
+                                self.viewModel.allImages.remove(at: index)
+                            }
+                        }
+                    } else {
+                        ToastManager.shared.show("Failed to delete image \(target.id)", icon: "exclamationmark.triangle", style: .error)
+                    }
+                }
+            }
+        }
+        ToastManager.shared.show(deleteWholeSet ? "Deleting set..." : "Deleting image...", icon: "trash", style: .success)
+    }
+
+    private func shareImage(shareWholeSet: Bool) {
+        let targets = shareWholeSet ? post.images : [image]
+        
+        Task {
+            var items: [Any] = []
+            let sessionConfig = URLSessionConfiguration.default
+            sessionConfig.timeoutIntervalForRequest = 60
+            let session = URLSession(configuration: sessionConfig, delegate: ImageLoaderSessionDelegate(), delegateQueue: nil)
+            let apiKey = ServerConfigManager.shared.activeConfig?.secureApiKey ?? ""
+            
+            for target in targets {
+                guard let url = target.imageURL else { continue }
+                var request = URLRequest(url: url)
+                if !apiKey.isEmpty {
+                    request.addValue(apiKey, forHTTPHeaderField: "ApiKey")
+                }
+                guard let (data, response) = try? await session.data(for: request) else { continue }
+                
+                let mimeType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""
+                let isVideo = mimeType.contains("video") || url.absoluteString.lowercased().contains(".mp4")
+                
+                if isVideo {
+                    let tempURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension("mp4")
+                    guard (try? data.write(to: tempURL)) != nil else { continue }
+                    items.append(tempURL)
+                } else {
+                    guard let uiImage = UIImage(data: data) else { continue }
+                    items.append(uiImage)
+                }
+            }
+            
+            await MainActor.run {
+                if !items.isEmpty {
+                    self.activeShareWrapper = ShareWrapper(items: items)
+                }
+            }
+        }
+    }
+
+    private func setPerformerImage(performer: GalleryPerformer) {
+        let urlObj: URL?
+        if let ext = image.fileExtension, ["JPG", "JPEG", "PNG", "WEBP"].contains(ext.uppercased()) {
+            urlObj = image.imageURL
+        } else {
+            urlObj = image.thumbnailURL
+        }
+        
+        guard let url = urlObj?.absoluteString else { return }
+
+        viewModel.setPerformerImage(performerId: performer.id, imageURL: url) { success in
+            DispatchQueue.main.async {
+                if success {
+                    ToastManager.shared.show("Performer image updated", icon: "person.crop.circle.badge.checkmark", style: .success)
+                    
+                    // Visually update the avatar everywhere in allImages by overriding image_path
+                    let bustedUrl = "\(url)?bust=\(UUID().uuidString)"
+                    for i in 0..<self.viewModel.allImages.count {
+                        if var mutablePerformers = self.viewModel.allImages[i].performers, 
+                           let pIndex = mutablePerformers.firstIndex(where: { $0.id == performer.id }) {
+                            mutablePerformers[pIndex].image_path = bustedUrl
+                            self.viewModel.allImages[i].performers = mutablePerformers
+                        }
+                    }
+                    
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("PerformerImageUpdated"),
+                        object: nil,
+                        userInfo: [
+                            "performerId": performer.id,
+                            "newImagePath": bustedUrl
+                        ]
+                    )
+                } else {
+                    ToastManager.shared.show("Failed to update performer image", icon: "exclamationmark.triangle", style: .error)
                 }
             }
         }

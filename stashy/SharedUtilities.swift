@@ -874,8 +874,7 @@ public struct FilterMapper {
             subDict.removeValue(forKey: uiKey)
         }
         
-        // Unwrap nested value structures (Stash UI quirk: {"value": {"value": X}} or {"value": {"id": X}})
-        // For hierarchical fields (studios, tags) the value is {"items": [...], "depth": N} — preserve depth at top level.
+        // Unwrap nested value structures
         if let valueDict = subDict["value"] as? [String: Any] {
             if let inner = valueDict["value"] { subDict["value"] = inner }
             else if let inner = valueDict["id"] { subDict["value"] = inner }
@@ -890,7 +889,22 @@ public struct FilterMapper {
         if let excludesDict = subDict["excludes"] as? [String: Any] {
             if let inner = excludesDict["value"] { subDict["excludes"] = inner }
             else if let inner = excludesDict["id"] { subDict["excludes"] = inner }
-            else if let items = excludesDict["items"] as? [Any] { subDict["excludes"] = items }
+            else if let items = excludesDict["items"] as? [Any] {
+                subDict["excludes"] = items
+                if subDict["depth"] == nil, let depth = excludesDict["depth"] {
+                    subDict["depth"] = depth
+                }
+            }
+        }
+        
+        // String extraction fields (Stash API expects simple String for these, not a criterion object)
+        let stringExtractionFields: Set<String> = ["is_missing", "has_markers", "has_image"]
+        if stringExtractionFields.contains(key) {
+            if let vd = subDict["value"] as? [String: Any], let inner = vd["value"] as? String { return inner }
+            if let valArray = subDict["value"] as? [Any], let first = valArray.first as? String { return first }
+            if let s = subDict["value"] as? String { return s }
+            if let s = subDict["id"] as? String { return s }
+            return ""
         }
         
         // Orientation mapping (must be Uppercased array, no modifier)

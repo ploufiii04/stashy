@@ -10,7 +10,7 @@ import SwiftUI
 
 
 struct PerformerDetailView: View {
-    let performer: Performer
+    @State var performer: Performer
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var tabManager = TabManager.shared
     @StateObject private var viewModel = StashDBViewModel()
@@ -29,6 +29,10 @@ struct PerformerDetailView: View {
         case galleries = "Galleries"
     }
     @State private var selectedDetailTab: DetailTab = .scenes
+
+    init(performer: Performer) {
+        _performer = State(initialValue: performer)
+    }
 
     // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
@@ -144,6 +148,17 @@ struct PerformerDetailView: View {
             print("🔄 SceneDeleted - Re-loading performer data")
             viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: selectedSortOption, isInitialLoad: true)
             loadPerformerMetadata()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
+            if let targetId = notification.userInfo?["performerId"] as? String,
+               let newPath = notification.userInfo?["newImagePath"] as? String {
+                if performer.id == targetId {
+                    performer.imagePath = newPath
+                }
+                if fullPerformer?.id == targetId {
+                    fullPerformer?.imagePath = newPath
+                }
+            }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)

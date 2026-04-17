@@ -997,7 +997,6 @@ struct FullScreenImageView: View {
                     }
                     let targetId = currentVisibleId ?? selectedImageId
                     if let currentImage = images.first(where: { $0.id == targetId }),
-                       let ext = currentImage.fileExtension, ext == "JPG",
                        let performers = currentImage.performers, !performers.isEmpty {
                         Button {
                             performerImageTargetPerformers = performers
@@ -1098,13 +1097,30 @@ struct FullScreenImageView: View {
 
     private func setPerformerImage(performer: GalleryPerformer) {
         let targetId = currentVisibleId ?? selectedImageId
-        guard let currentImage = images.first(where: { $0.id == targetId }),
-              let imageURL = currentImage.imageURL?.absoluteString else { return }
+        guard let currentImage = images.first(where: { $0.id == targetId }) else { return }
+        
+        let url: URL?
+        if let ext = currentImage.fileExtension, ["JPG", "JPEG", "PNG", "WEBP"].contains(ext.uppercased()) {
+            url = currentImage.imageURL
+        } else {
+            url = currentImage.thumbnailURL
+        }
+        
+        guard let imageURL = url?.absoluteString else { return }
 
         viewModel.setPerformerImage(performerId: performer.id, imageURL: imageURL) { success in
             DispatchQueue.main.async {
                 if success {
                     ToastManager.shared.show("Performer image updated", icon: "person.crop.circle.badge.checkmark", style: .success)
+                    let bustedUrl = "\(imageURL)?bust=\(UUID().uuidString)"
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("PerformerImageUpdated"),
+                        object: nil,
+                        userInfo: [
+                            "performerId": performer.id,
+                            "newImagePath": bustedUrl
+                        ]
+                    )
                 } else {
                     ToastManager.shared.show("Failed to update performer image", icon: "exclamationmark.triangle", style: .error)
                 }
