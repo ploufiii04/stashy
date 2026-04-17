@@ -43,6 +43,14 @@ struct SettingsView: View {
                 onScan: { startLibraryScan() }
             )
 
+            // MARK: - Downloads
+            Section(header: Text("Downloads")) {
+                NavigationLink(destination: DownloadsView()) {
+                    Label("Downloads", systemImage: "square.and.arrow.down")
+                }
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+
             // MARK: - Playback
             if configManager.activeConfig != nil {
                 PlaybackSettingsSection()

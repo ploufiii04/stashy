@@ -40,13 +40,14 @@ struct CatalogsView: View {
     
     private var sortedVisibleTabs: [CatalogsTab] {
         tabManager.tabs
-            .filter { ($0.id == .dashboard || $0.id == .performers || $0.id == .studios || $0.id == .tags || $0.id == .scenes || $0.id == .galleries || $0.id == .groups || $0.id == .markers) && $0.isVisible }
+            .filter { ($0.id == .dashboard || $0.id == .performers || $0.id == .studios || $0.id == .tags || $0.id == .scenes || $0.id == .galleries || $0.id == .images || $0.id == .groups || $0.id == .markers) && $0.isVisible }
             .sorted { $0.sortOrder < $1.sortOrder }
             .compactMap { (config: TabConfig) -> CatalogsTab? in
                 switch config.id {
                 case .dashboard: return .dashboard
                 case .scenes: return .scenes
                 case .galleries: return .galleries
+                case .images: return .images
                 case .performers: return .performers
                 case .studios: return .studios
                 case .tags: return .tags
@@ -54,12 +55,6 @@ struct CatalogsView: View {
                 case .markers: return .markers
                 default: return nil
                 }
-            }
-            .flatMap { (tab: CatalogsTab) -> [CatalogsTab] in
-                if tab == .galleries {
-                    return [.galleries, .images]
-                }
-                return [tab]
             }
     }
     
@@ -125,29 +120,16 @@ struct CatalogsView: View {
                 }
             }
         }
-        .toolbar {
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top, spacing: 0) {
             if showTabSwitcher {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Menu {
-                        Picker("Dashboard", selection: selectedTabBinding) {
-                            ForEach(sortedVisibleTabs, id: \.self) { tab in
-                                Label(tab.rawValue, systemImage: tab.icon).tag(tab)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: effectiveTab?.icon ?? "square.grid.2x2")
-                                .fontWeight(.semibold)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundColor(.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(Capsule())
+                CatalogCategoryRow(tabs: sortedVisibleTabs, selection: selectedTabBinding)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.bar)
+                    .overlay(alignment: .bottom) {
+                        Divider()
                     }
-                }
             }
         }
     }
@@ -195,15 +177,14 @@ struct GroupsView: View {
         }
         .navigationTitle("Groups")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Search Pill (if active)
-                    if !searchText.isEmpty {
-                        Button(action: {
-                            searchText = ""
-                            performSearch()
-                        }) {
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                // Search Pill (if active)
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                        performSearch()
+                    }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 10, weight: .bold))
@@ -216,6 +197,7 @@ struct GroupsView: View {
                             .background(Color.black.opacity(DesignTokens.Opacity.badge))
                             .clipShape(Capsule())
                         }
+                        .frame(maxWidth: .infinity)
                     }
 
                     // Sort Menu
@@ -323,6 +305,7 @@ struct GroupsView: View {
                         Image(systemName: "arrow.up.arrow.down.circle")
                             .foregroundColor(appearanceManager.tintColor)
                     }
+                    .frame(maxWidth: .infinity)
 
                     // Filter Menu
                     Menu {
@@ -355,7 +338,7 @@ struct GroupsView: View {
                         Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .foregroundColor(appearanceManager.tintColor)
                     }
-                }
+                    .frame(maxWidth: .infinity)
             }
         }
         .onAppear {
@@ -666,9 +649,12 @@ struct GroupDetailView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
                 if selectedDetailTab == .scenes {
                     sceneSortMenu
+                        .frame(maxWidth: .infinity)
                 }
             }
         }

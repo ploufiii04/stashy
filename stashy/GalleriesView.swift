@@ -13,6 +13,7 @@ import AVFoundation
 struct GalleriesView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var configManager = ServerConfigManager.shared
+    @ObservedObject private var appearance = AppearanceManager.shared
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var selectedSortOption: StashDBViewModel.GallerySortOption = StashDBViewModel.GallerySortOption(rawValue: TabManager.shared.getSortOption(for: .galleries) ?? "") ?? .dateDesc
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
@@ -148,10 +149,11 @@ struct GalleriesView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Sort Menu with grouped options
-                    Menu {
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                // Sort Menu with grouped options
+                Menu {
                         // Title/Name
                         Menu {
                             Button(action: { changeSortOption(to: .titleAsc) }) {
@@ -287,8 +289,9 @@ struct GalleriesView: View {
                         }
                     } label: {
                         Image(systemName: "arrow.up.arrow.down.circle")
-                            .foregroundColor(.appAccent)
+                            .foregroundColor(.primary)
                     }
+                    .frame(maxWidth: .infinity)
 
                     // Filter Menu
                     Menu {
@@ -323,11 +326,11 @@ struct GalleriesView: View {
                         }
                     } label: {
                         Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                            .foregroundColor(selectedFilter != nil ? .appAccent : .primary)
+                            .foregroundColor(selectedFilter != nil ? appearance.tintColor : .primary)
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
-        }
         .onAppear {
             // Apply default sort option
             let defaultSortStr = TabManager.shared.getSortOption(for: .galleries) ?? "dateDesc"

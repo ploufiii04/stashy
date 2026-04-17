@@ -22,7 +22,47 @@ struct ScenesView: View {
     @State private var scrollPosition: String? = nil
     @State private var shouldRestoreScroll = false
     @State private var hasInjectedSort = false  // Flag to preserve coordinator sort
+    @State private var showLiveFilterSheet = false
+    @State private var liveFilterMinRating: Int = 0      // 0 = any, 1–5 stars
+    @State private var liveFilterOrganized: Bool? = nil  // nil = any
+    @State private var liveFilterHasMarkers: Bool = false
+    @State private var liveFilterInteractive: Bool? = nil // nil = any
+    @State private var liveFilterOrientation: String? = nil // nil = any, "LANDSCAPE"/"PORTRAIT"/"SQUARE"
+    @State private var liveFilterPerformerCount: Int? = nil // nil = any, 1/2/3 (3 = 3+)
     var hideTitle: Bool = false
+
+    private var isLiveFilterActive: Bool {
+        liveFilterMinRating > 0 || liveFilterOrganized != nil || liveFilterHasMarkers
+        || liveFilterInteractive != nil || liveFilterOrientation != nil || liveFilterPerformerCount != nil
+    }
+
+    private var activeLiveFilterDict: [String: Any] {
+        var dict: [String: Any] = [:]
+        if liveFilterMinRating > 0 {
+            // Use GREATER_THAN with one star below so ">= N stars" works (Stash has no GREATER_THAN_EQUALS)
+            dict["rating100"] = ["value": (liveFilterMinRating * 20) - 1, "modifier": "GREATER_THAN"]
+        }
+        if let org = liveFilterOrganized {
+            dict["organized"] = org
+        }
+        if liveFilterHasMarkers {
+            dict["has_markers"] = "true"
+        }
+        if let interactive = liveFilterInteractive {
+            dict["interactive"] = interactive
+        }
+        if let orientation = liveFilterOrientation {
+            dict["orientation"] = ["value": [orientation]]
+        }
+        if let count = liveFilterPerformerCount {
+            if count == 3 {
+                dict["performer_count"] = ["value": 2, "modifier": "GREATER_THAN"]
+            } else {
+                dict["performer_count"] = ["value": count, "modifier": "EQUALS"]
+            }
+        }
+        return dict
+    }
     
     // Optional init for direct sort/filter passing (cleaner than coordinator timing)
     init(sort: StashDBViewModel.SceneSortOption? = nil, filter: StashDBViewModel.SavedFilter? = nil, hideTitle: Bool = false) {
@@ -61,12 +101,17 @@ struct ScenesView: View {
         TabManager.shared.setSortOption(for: .scenes, option: newOption.rawValue)
 
         // Fetch new data immediately
-        viewModel.fetchScenes(sortBy: newOption, searchQuery: searchText, filter: selectedFilter)
+        viewModel.fetchScenes(sortBy: newOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
     }
     
     // Search function with debouncing
     private func performSearch() {
-        viewModel.fetchScenes(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter)
+        viewModel.fetchScenes(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
+    }
+
+    private func applyLiveFilter() {
+        viewModel.currentSceneLiveFilter = activeLiveFilterDict
+        viewModel.fetchScenes(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
     }
 
     var body: some View {
@@ -129,10 +174,11 @@ struct ScenesView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Sort Menu with grouped options
-                    Menu {
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                // Sort Menu with grouped options
+                Menu {
                         // Random
                         Button(action: { changeSortOption(to: .random) }) {
                             HStack {
@@ -314,6 +360,7 @@ struct ScenesView: View {
                         Image(systemName: "arrow.up.arrow.down.circle")
                             .foregroundColor(appearanceManager.tintColor)
                     }
+                    .frame(maxWidth: .infinity)
 
                     // Filter Menu
                     Menu {
@@ -346,8 +393,46 @@ struct ScenesView: View {
                         Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .foregroundColor(appearanceManager.tintColor)
                     }
+                    .frame(maxWidth: .infinity)
+
+                    // Live Filter Button
+                    Button(action: { showLiveFilterSheet = true }) {
+                        Image(systemName: isLiveFilterActive ? "slider.horizontal.3" : "slider.horizontal.3")
+                            .foregroundColor(isLiveFilterActive ? appearanceManager.tintColor : .primary)
+                            .overlay(alignment: .topTrailing) {
+                                if isLiveFilterActive {
+                                    Circle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 3, y: -3)
+                                }
+                            }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
+        .sheet(isPresented: $showLiveFilterSheet) {
+            SceneLiveFilterSheet(
+                minRating: $liveFilterMinRating,
+                organized: $liveFilterOrganized,
+                hasMarkers: $liveFilterHasMarkers,
+                interactive: $liveFilterInteractive,
+                orientation: $liveFilterOrientation,
+                performerCount: $liveFilterPerformerCount,
+                onApply: { applyLiveFilter() },
+                onReset: {
+                    liveFilterMinRating = 0
+                    liveFilterOrganized = nil
+                    liveFilterHasMarkers = false
+                    liveFilterInteractive = nil
+                    liveFilterOrientation = nil
+                    liveFilterPerformerCount = nil
+                    applyLiveFilter()
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
         }
         .onAppear {
             // Check for injected sort from coordinator FIRST (before filters load)
@@ -548,5 +633,116 @@ struct ScenesView: View {
 // Card-based view for grid layout
 #Preview {
     ScenesView()
+}
+
+// MARK: - Live Filter Sheet
+
+struct SceneLiveFilterSheet: View {
+    @Binding var minRating: Int
+    @Binding var organized: Bool?
+    @Binding var hasMarkers: Bool
+    @Binding var interactive: Bool?
+    @Binding var orientation: String?
+    @Binding var performerCount: Int?
+    var onApply: () -> Void
+    var onReset: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    filterRow(label: "Rating") {
+                        filterChip("Any", isActive: minRating == 0) { minRating = 0; onApply() }
+                        ForEach(1...5, id: \.self) { star in
+                            filterChip("\(star)★", isActive: minRating == star) { minRating = star; onApply() }
+                        }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Organized") {
+                        filterChip("Any", isActive: organized == nil)   { organized = nil;   onApply() }
+                        filterChip("Yes", isActive: organized == true)  { organized = true;  onApply() }
+                        filterChip("No",  isActive: organized == false) { organized = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Markers") {
+                        filterChip("Any",         isActive: !hasMarkers)  { hasMarkers = false; onApply() }
+                        filterChip("Has markers", isActive: hasMarkers)   { hasMarkers = true;  onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Interactive") {
+                        filterChip("Any",  isActive: interactive == nil)   { interactive = nil;   onApply() }
+                        filterChip("Yes",  isActive: interactive == true)  { interactive = true;  onApply() }
+                        filterChip("No",   isActive: interactive == false) { interactive = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Orientation") {
+                        filterChip("Any",       isActive: orientation == nil)          { orientation = nil;         onApply() }
+                        filterChip("Landscape", isActive: orientation == "LANDSCAPE") { orientation = "LANDSCAPE"; onApply() }
+                        filterChip("Portrait",  isActive: orientation == "PORTRAIT")  { orientation = "PORTRAIT";  onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Performers") {
+                        filterChip("Any", isActive: performerCount == nil) { performerCount = nil; onApply() }
+                        filterChip("1",   isActive: performerCount == 1)   { performerCount = 1;   onApply() }
+                        filterChip("2",   isActive: performerCount == 2)   { performerCount = 2;   onApply() }
+                        filterChip("3+",  isActive: performerCount == 3)   { performerCount = 3;   onApply() }
+                    }
+                }
+                .background(Color.secondaryAppBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                Spacer()
+            }
+            .background(Color.appBackground)
+            .navigationTitle("Live Filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Reset", role: .destructive) { onReset() }
+                        .foregroundColor(.red)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterRow<Chips: View>(label: String, @ViewBuilder chips: () -> Chips) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 15))
+                .frame(width: 80, alignment: .leading)
+                .foregroundColor(.primary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    chips()
+                }
+                .padding(.vertical, 12)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isActive ? appearance.tintColor : Color.secondary.opacity(0.15))
+                .foregroundColor(isActive ? .white : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
 }
 #endif

@@ -305,6 +305,7 @@ class StashDBViewModel: ObservableObject {
     @Published var isLoadingMorePerformers = false
     @Published var hasMorePerformers = true
     @Published var currentPerformerFilter: SavedFilter? = nil
+    var currentPerformerLiveFilter: [String: Any] = [:]
     private var currentPerformerPage = 1
     private let performersPerPage = 500
     private var currentPerformerSortOption: PerformerSortOption = .nameAsc
@@ -1244,8 +1245,9 @@ class StashDBViewModel: ObservableObject {
     
     // Search query state for scenes
     private var currentSceneSearchQuery: String = ""
+    var currentSceneLiveFilter: [String: Any] = [:]
     
-    func fetchScenes(sortBy: SceneSortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchScenes(sortBy: SceneSortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             // Reset pagination
             currentScenePage = 1
@@ -1256,6 +1258,7 @@ class StashDBViewModel: ObservableObject {
             currentSceneSortOption = sortBy
             currentSceneFilter = filter
             currentSceneSearchQuery = searchQuery
+            if let lf = liveFilter { currentSceneLiveFilter = lf }
         } else {
             isLoadingScenes = true
         }
@@ -1427,6 +1430,15 @@ class StashDBViewModel: ObservableObject {
                     variables["scene_filter"] = obj.value
                 }
             }
+        }
+
+        // Merge live filter on top of saved filter (already in correct API format, no sanitize needed)
+        if !previewOnly && !currentSceneLiveFilter.isEmpty {
+            var merged = (variables["scene_filter"] as? [String: Any]) ?? [:]
+            for (key, value) in currentSceneLiveFilter {
+                merged[key] = value
+            }
+            variables["scene_filter"] = merged
         }
         
         let body: [String: Any] = [
@@ -2286,7 +2298,7 @@ class StashDBViewModel: ObservableObject {
     // Search query state for performers
     private var currentPerformerSearchQuery: String = ""
     
-    func fetchPerformers(sortBy: PerformerSortOption = .nameAsc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchPerformers(sortBy: PerformerSortOption = .nameAsc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentPerformerPage = 1
             performers = []
@@ -2296,6 +2308,7 @@ class StashDBViewModel: ObservableObject {
             currentPerformerSortOption = sortBy
             currentPerformerFilter = filter
             currentPerformerSearchQuery = searchQuery
+            if let lf = liveFilter { currentPerformerLiveFilter = lf }
         } else {
             isLoadingPerformers = true
         }
@@ -2346,6 +2359,12 @@ class StashDBViewModel: ObservableObject {
                 print("🔍 PERFORMER object_filter sanitized: \(sanitized)")
                 variables["performer_filter"] = sanitized
             }
+        }
+        
+        if !currentPerformerLiveFilter.isEmpty {
+            var merged = (variables["performer_filter"] as? [String: Any]) ?? [:]
+            for (key, value) in currentPerformerLiveFilter { merged[key] = value }
+            variables["performer_filter"] = merged
         }
         
         let body: [String: Any] = [

@@ -148,8 +148,179 @@ struct ImagesView: View {
                 }
             }
         }
-        .toolbar {
-            navigationToolbar
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                if isSelectionMode {
+                    Button {
+                         withAnimation(DesignTokens.Animation.quick) { isSelectionMode = false }
+                         selectedImageIds.removeAll()
+                    } label: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Button {
+                        withAnimation(DesignTokens.Animation.quick) { isSelectionMode = true }
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .foregroundColor(.primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    Menu {
+                        // Title
+                        Menu {
+                    Button(action: { changeSortOption(to: .titleAsc) }) {
+                        HStack {
+                            Text("A → Z")
+                            if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button(action: { changeSortOption(to: .titleDesc) }) {
+                        HStack {
+                            Text("Z → A")
+                            if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Title")
+                        if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                
+                // Date
+                Menu {
+                    Button(action: { changeSortOption(to: .dateDesc) }) {
+                        HStack {
+                            Text("Newest First")
+                            if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button(action: { changeSortOption(to: .dateAsc) }) {
+                        HStack {
+                            Text("Oldest First")
+                            if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Date")
+                        if selectedSortOption == .dateDesc || selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                
+                // Rating
+                Menu {
+                    Button(action: { changeSortOption(to: .ratingDesc) }) {
+                        HStack {
+                            Text("High → Low")
+                            if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button(action: { changeSortOption(to: .ratingAsc) }) {
+                        HStack {
+                            Text("Low → High")
+                            if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Rating")
+                        if selectedSortOption == .ratingDesc || selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                
+                // Created
+                Menu {
+                    Button(action: { changeSortOption(to: .createdAtDesc) }) {
+                        HStack {
+                            Text("Newest First")
+                            if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button(action: { changeSortOption(to: .createdAtAsc) }) {
+                        HStack {
+                            Text("Oldest First")
+                            if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Created")
+                        if selectedSortOption == .createdAtDesc || selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                
+                // Updated
+                Menu {
+                    Button(action: { changeSortOption(to: .updatedAtDesc) }) {
+                        HStack {
+                            Text("Newest First")
+                            if selectedSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Button(action: { changeSortOption(to: .updatedAtAsc) }) {
+                        HStack {
+                            Text("Oldest First")
+                            if selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text("Updated")
+                        if selectedSortOption == .updatedAtDesc || selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                
+                // Random
+                Button(action: { changeSortOption(to: .random) }) {
+                    HStack {
+                        Text("Random")
+                        if selectedSortOption == .random { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down.circle")
+                    .foregroundColor(.primary)
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Filter Menu
+            Menu {
+                Button(action: {
+                    selectedFilter = nil
+                    viewModel.fetchImages(sortBy: selectedSortOption, filter: nil)
+                }) {
+                    HStack {
+                        Text("No Filter")
+                        if selectedFilter == nil { Image(systemName: "checkmark") }
+                    }
+                }
+
+                let activeImageFilters = viewModel.savedFilters.values
+                    .filter { $0.mode == .images }
+                    .sorted { $0.name < $1.name }
+                
+                ForEach(activeImageFilters) { filter in
+                    Button(action: {
+                        selectedFilter = filter
+                        viewModel.fetchImages(sortBy: selectedSortOption, filter: filter)
+                    }) {
+                        HStack {
+                            Text(filter.name)
+                            if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
+            }
+            .frame(maxWidth: .infinity)
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ImageDeleted"))) { notification in
             if let imageId = notification.userInfo?["imageId"] as? String {
@@ -302,182 +473,7 @@ struct ImagesView: View {
         .floatingShadow()
         .padding(.bottom, 20)
     }
-    
-    @ToolbarContentBuilder
-    private var navigationToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarTrailing) {
-            HStack {
-                if isSelectionMode {
-                    Button {
-                         withAnimation(DesignTokens.Animation.quick) { isSelectionMode = false }
-                         selectedImageIds.removeAll()
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(appearanceManager.tintColor)
-                    }
-                } else {
-                    Button {
-                        withAnimation(DesignTokens.Animation.quick) { isSelectionMode = true }
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                            .foregroundColor(appearanceManager.tintColor)
-                    }
-                    
-                    Menu {
-                        // Title
-                        Menu {
-                    Button(action: { changeSortOption(to: .titleAsc) }) {
-                        HStack {
-                            Text("A → Z")
-                            if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .titleDesc) }) {
-                        HStack {
-                            Text("Z → A")
-                            if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Title")
-                        if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Date
-                Menu {
-                    Button(action: { changeSortOption(to: .dateDesc) }) {
-                        HStack {
-                            Text("Newest First")
-                            if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .dateAsc) }) {
-                        HStack {
-                            Text("Oldest First")
-                            if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Date")
-                        if selectedSortOption == .dateDesc || selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Rating
-                Menu {
-                    Button(action: { changeSortOption(to: .ratingDesc) }) {
-                        HStack {
-                            Text("High → Low")
-                            if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .ratingAsc) }) {
-                        HStack {
-                            Text("Low → High")
-                            if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Rating")
-                        if selectedSortOption == .ratingDesc || selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Created
-                Menu {
-                    Button(action: { changeSortOption(to: .createdAtDesc) }) {
-                        HStack {
-                            Text("Newest First")
-                            if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .createdAtAsc) }) {
-                        HStack {
-                            Text("Oldest First")
-                            if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Created")
-                        if selectedSortOption == .createdAtDesc || selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Updated
-                Menu {
-                    Button(action: { changeSortOption(to: .updatedAtDesc) }) {
-                        HStack {
-                            Text("Newest First")
-                            if selectedSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .updatedAtAsc) }) {
-                        HStack {
-                            Text("Oldest First")
-                            if selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Updated")
-                        if selectedSortOption == .updatedAtDesc || selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Random
-                Button(action: { changeSortOption(to: .random) }) {
-                    HStack {
-                        Text("Random")
-                        if selectedSortOption == .random { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down.circle")
-                    .foregroundColor(.appAccent)
-            }
-            
-            // Filter Menu
-            Menu {
-                Button(action: {
-                    selectedFilter = nil
-                    viewModel.fetchImages(sortBy: selectedSortOption, filter: nil)
-                }) {
-                    HStack {
-                        Text("No Filter")
-                        if selectedFilter == nil { Image(systemName: "checkmark") }
-                    }
-                }
-
-                let activeImageFilters = viewModel.savedFilters.values
-                    .filter { $0.mode == .images }
-                    .sorted { $0.name < $1.name }
-                
-                ForEach(activeImageFilters) { filter in
-                    Button(action: {
-                        selectedFilter = filter
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: filter)
-                    }) {
-                        HStack {
-                            Text(filter.name)
-                            if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            } label: {
-                Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                    .foregroundColor(appearanceManager.tintColor)
-            }
-            }
-        }
-    }
 }
-}
-
 struct ImageThumbnailCard: View {
     let image: StashImage
     @ObservedObject var appearanceManager = AppearanceManager.shared

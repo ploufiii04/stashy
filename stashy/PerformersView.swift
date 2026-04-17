@@ -12,6 +12,7 @@ import SwiftUI
 struct PerformersView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var configManager = ServerConfigManager.shared
+    @ObservedObject private var appearance = AppearanceManager.shared
     @State private var scrollPosition: String? = nil
     @State private var shouldRestoreScroll = false
     @State private var selectedSortOption: StashDBViewModel.PerformerSortOption
@@ -22,7 +23,70 @@ struct PerformersView: View {
     @State private var isSearchVisible = false
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    
+
+    // Live filter state
+    @State private var showLiveFilterSheet = false
+    @State private var liveFilterAgeRange: String? = nil   // "18-21" / "22-26" / "26-30" / "30+"
+    @State private var liveFilterHairColor: String? = nil  // "BLONDE" / "BRUNETTE" / "RED" / "BLACK"
+    @State private var liveFilterGender: String? = nil     // "FEMALE" / "MALE" / "TRANSGENDER_FEMALE" / "TRANSGENDER_MALE" / "NON_BINARY"
+    @State private var liveFilterCountry: String? = nil    // "US" / "NOT_US"
+    @State private var liveFilterImplants: Bool? = nil     // nil=any, true=has, false=none
+
+    private var isLiveFilterActive: Bool {
+        liveFilterAgeRange != nil || liveFilterHairColor != nil || liveFilterGender != nil
+        || liveFilterCountry != nil || liveFilterImplants != nil
+    }
+
+    private var activeLiveFilterDict: [String: Any] {
+        var dict: [String: Any] = [:]
+        if let age = liveFilterAgeRange {
+            let cal = Calendar.current
+            let now = Date()
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd"
+            switch age {
+            case "18-21":
+                let lo = fmt.string(from: cal.date(byAdding: .year, value: -21, to: now)!)
+                let hi = fmt.string(from: cal.date(byAdding: .year, value: -18, to: now)!)
+                dict["birthdate"] = ["value": lo, "value2": hi, "modifier": "BETWEEN"]
+            case "22-26":
+                let lo = fmt.string(from: cal.date(byAdding: .year, value: -26, to: now)!)
+                let hi = fmt.string(from: cal.date(byAdding: .year, value: -22, to: now)!)
+                dict["birthdate"] = ["value": lo, "value2": hi, "modifier": "BETWEEN"]
+            case "26-30":
+                let lo = fmt.string(from: cal.date(byAdding: .year, value: -30, to: now)!)
+                let hi = fmt.string(from: cal.date(byAdding: .year, value: -26, to: now)!)
+                dict["birthdate"] = ["value": lo, "value2": hi, "modifier": "BETWEEN"]
+            case "30+":
+                let lo = fmt.string(from: cal.date(byAdding: .year, value: -30, to: now)!)
+                dict["birthdate"] = ["value": lo, "modifier": "LESS_THAN"]
+            default: break
+            }
+        }
+        if let hair = liveFilterHairColor {
+            dict["hair_color"] = ["value": hair, "modifier": "EQUALS"]
+        }
+        if let gender = liveFilterGender {
+            dict["gender"] = ["value": gender, "modifier": "EQUALS"]
+        }
+        if let country = liveFilterCountry {
+            if country == "NOT_US" {
+                dict["country"] = ["value": "US", "modifier": "NOT_EQUALS"]
+            } else {
+                dict["country"] = ["value": country, "modifier": "EQUALS"]
+            }
+        }
+        if let implants = liveFilterImplants {
+            dict["fake_tits"] = ["value": implants ? "FAKE" : "NATURAL", "modifier": "EQUALS"]
+        }
+        return dict
+    }
+
+    private func applyLiveFilter() {
+        viewModel.currentPerformerLiveFilter = activeLiveFilterDict
+        viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
+    }
+
     init(initialSort: StashDBViewModel.PerformerSortOption? = nil) {
         let savedSort = StashDBViewModel.PerformerSortOption(rawValue: TabManager.shared.getSortOption(for: .performers) ?? "")
         _selectedSortOption = State(initialValue: initialSort ?? savedSort ?? .sceneCountDesc)
@@ -54,14 +118,14 @@ struct PerformersView: View {
         TabManager.shared.setSortOption(for: .performers, option: newOption.rawValue)
 
         // Fetch new data immediately
-        viewModel.fetchPerformers(sortBy: newOption, searchQuery: searchText, filter: selectedFilter)
+        viewModel.fetchPerformers(sortBy: newOption, searchQuery: searchText, filter: selectedFilter, liveFilter: isLiveFilterActive ? activeLiveFilterDict : nil)
     }
     
     // Search function with debouncing
     private func performSearch() {
         scrollPosition = nil
         shouldRestoreScroll = false
-        viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter)
+        viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: isLiveFilterActive ? activeLiveFilterDict : nil)
     }
 
     var body: some View {
@@ -119,10 +183,11 @@ struct PerformersView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Sort Menu with grouped options
-                    Menu {
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                // Sort Menu with grouped options
+                Menu {
                         // Random (standalone)
                         Button(action: { changeSortOption(to: .random) }) {
                             HStack {
@@ -272,8 +337,9 @@ struct PerformersView: View {
                         }
                     } label: {
                         Image(systemName: "arrow.up.arrow.down.circle")
-                            .foregroundColor(.appAccent)
+                            .foregroundColor(.primary)
                     }
+                    .frame(maxWidth: .infinity)
 
                     // Filter Menu
                     Menu {
@@ -308,10 +374,47 @@ struct PerformersView: View {
                         }
                     } label: {
                         Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                            .foregroundColor(selectedFilter != nil ? .appAccent : .primary)
+                            .foregroundColor(selectedFilter != nil ? appearance.tintColor : .primary)
                     }
+                    .frame(maxWidth: .infinity)
+
+                // Live Filter button
+                Button(action: { showLiveFilterSheet = true }) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 20))
+                        .foregroundColor(isLiveFilterActive ? appearance.tintColor : .primary)
+                        .overlay(alignment: .topTrailing) {
+                            if isLiveFilterActive {
+                                Circle()
+                                    .fill(appearance.tintColor)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: 3, y: -3)
+                            }
+                        }
+                }
+                .frame(maxWidth: .infinity)
                 }
             }
+        .sheet(isPresented: $showLiveFilterSheet) {
+            PerformerLiveFilterSheet(
+                ageRange: $liveFilterAgeRange,
+                hairColor: $liveFilterHairColor,
+                gender: $liveFilterGender,
+                country: $liveFilterCountry,
+                implants: $liveFilterImplants,
+                onApply: { applyLiveFilter() },
+                onReset: {
+                    liveFilterAgeRange = nil
+                    liveFilterHairColor = nil
+                    liveFilterGender = nil
+                    liveFilterCountry = nil
+                    liveFilterImplants = nil
+                    applyLiveFilter()
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
         }
         .onAppear {
             // Check for search text from navigation
@@ -573,5 +676,110 @@ struct PerformerRowView: View {
 
 #Preview {
     PerformersView()
+}
+
+// MARK: - Performer Live Filter Sheet
+
+struct PerformerLiveFilterSheet: View {
+    @Binding var ageRange: String?
+    @Binding var hairColor: String?
+    @Binding var gender: String?
+    @Binding var country: String?
+    @Binding var implants: Bool?
+    var onApply: () -> Void
+    var onReset: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    filterRow(label: "Age") {
+                        filterChip("Any",   isActive: ageRange == nil)    { ageRange = nil;    onApply() }
+                        filterChip("18–21", isActive: ageRange == "18-21") { ageRange = "18-21"; onApply() }
+                        filterChip("22–26", isActive: ageRange == "22-26") { ageRange = "22-26"; onApply() }
+                        filterChip("26–30", isActive: ageRange == "26-30") { ageRange = "26-30"; onApply() }
+                        filterChip("30+",   isActive: ageRange == "30+")  { ageRange = "30+";  onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Hair") {
+                        filterChip("Any",      isActive: hairColor == nil)         { hairColor = nil;         onApply() }
+                        filterChip("Blonde",   isActive: hairColor == "BLONDE")    { hairColor = "BLONDE";    onApply() }
+                        filterChip("Brunette", isActive: hairColor == "BRUNETTE")  { hairColor = "BRUNETTE";  onApply() }
+                        filterChip("Red",      isActive: hairColor == "RED")       { hairColor = "RED";       onApply() }
+                        filterChip("Black",    isActive: hairColor == "BLACK")     { hairColor = "BLACK";     onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Gender") {
+                        filterChip("Any",    isActive: gender == nil)      { gender = nil;      onApply() }
+                        filterChip("Female", isActive: gender == "FEMALE") { gender = "FEMALE"; onApply() }
+                        filterChip("Male",   isActive: gender == "MALE")   { gender = "MALE";   onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Country") {
+                        filterChip("Any",    isActive: country == nil)       { country = nil;      onApply() }
+                        filterChip("US",     isActive: country == "US")      { country = "US";     onApply() }
+                        filterChip("Non-US", isActive: country == "NOT_US")  { country = "NOT_US"; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Implants") {
+                        filterChip("Any",     isActive: implants == nil)   { implants = nil;   onApply() }
+                        filterChip("Fake",    isActive: implants == true)  { implants = true;  onApply() }
+                        filterChip("Natural", isActive: implants == false) { implants = false; onApply() }
+                    }
+                }
+                .background(Color.secondaryAppBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                Spacer()
+            }
+            .background(Color.appBackground)
+            .navigationTitle("Live Filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Reset", role: .destructive) { onReset() }
+                        .foregroundColor(.red)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterRow<Chips: View>(label: String, @ViewBuilder chips: () -> Chips) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 15))
+                .frame(width: 80, alignment: .leading)
+                .foregroundColor(.primary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { chips() }
+                    .padding(.vertical, 12)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isActive ? appearance.tintColor : Color.secondary.opacity(0.15))
+                .foregroundColor(isActive ? .white : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
 }
 #endif

@@ -20,6 +20,8 @@
 		1998A3883F7C4601AC6BFE39 /* UniversalSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF90B7652F1B72E5003ED852 /* UniversalSearchView.swift */; };
 		2589B7DB551E457BA8800634 /* PerformerDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE5045D2E8A8C2000323FF2 /* PerformerDetailView.swift */; };
 		2F2314B3093A480F864AFEEC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB192F16743C007C2090 /* HomeView.swift */; };
+		FC10AB0012345678901234AB /* FloatingCatalogBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC10AB0112345678901234AB /* FloatingCatalogBar.swift */; };
+		FC10AB0212345678901234AB /* FloatingCatalogBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC10AB0112345678901234AB /* FloatingCatalogBar.swift */; };
 		372E2D6A2F6339EE00603361 /* LoginAuthHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D692F6339EE00603361 /* LoginAuthHelper.swift */; };
 		372E2D6B2F633DB400603361 /* LoginAuthHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D692F6339EE00603361 /* LoginAuthHelper.swift */; };
 		372E2D992F64272300603361 /* VideoAnalysisManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372E2D982F64272300603361 /* VideoAnalysisManager.swift */; };
@@ -151,6 +153,7 @@
 		DF22BB172F16743C007C2090 /* DownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsView.swift; sourceTree = "<group>"; };
 		DF22BB182F16743C007C2090 /* GalleriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleriesView.swift; sourceTree = "<group>"; };
 		DF22BB192F16743C007C2090 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		FC10AB0112345678901234AB /* FloatingCatalogBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingCatalogBar.swift; sourceTree = "<group>"; };
 		DF22BB1B2F16743C007C2090 /* ReelsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelsView.swift; sourceTree = "<group>"; };
 		DF22BB1C2F16743C007C2090 /* SharedUtilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedUtilities.swift; sourceTree = "<group>"; };
 		DF22BB1D2F16743C007C2090 /* TagsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagsView.swift; sourceTree = "<group>"; };
@@ -265,6 +268,7 @@
 				DFSEC0072F2A000100000007 /* Components */,
 				DFGQ000042F28A0000000004 /* GraphQLQueries.swift */,
 				DF22BB192F16743C007C2090 /* HomeView.swift */,
+				FC10AB0112345678901234AB /* FloatingCatalogBar.swift */,
 				372E2D692F6339EE00603361 /* LoginAuthHelper.swift */,
 				DF22BB262F167CDC007C2090 /* ImageCacheManager.swift */,
 				37BE5B4D2F51718500107960 /* Managers */,
@@ -558,6 +562,7 @@
 				DF22BB232F16743C007C2090 /* SharedUtilities.swift in Sources */,
 				DF06EF262F18EC1300299105 /* SceneCardView.swift in Sources */,
 				DF22BB242F16743C007C2090 /* HomeView.swift in Sources */,
+				FC10AB0012345678901234AB /* FloatingCatalogBar.swift in Sources */,
 				DFF7EE412F0D3D2800344A8B /* TabManager.swift in Sources */,
 				DFE504622E8A8C4000323FF0 /* StudiosView.swift in Sources */,
 				DF22BB342F1831C7007C2090 /* AppearanceSettingsView.swift in Sources */,
@@ -589,6 +594,7 @@
 				02B19A59AAFE4A16B45A861F /* DownloadsView.swift in Sources */,
 				5BC6653D5C9D4675881F40BA /* GalleriesView.swift in Sources */,
 				2F2314B3093A480F864AFEEC /* HomeView.swift in Sources */,
+				FC10AB0212345678901234AB /* FloatingCatalogBar.swift in Sources */,
 				6B7F79949CEB4E2CB62F2650 /* ReelsView.swift in Sources */,
 				9AA0A05BF61443C2B087A163 /* SharedUtilities.swift in Sources */,
 				8D7ECC24161D4D9EBF4C3A57 /* TagsView.swift in Sources */,

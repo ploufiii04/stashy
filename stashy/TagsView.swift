@@ -90,10 +90,11 @@ struct TagsView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Sort Menu with grouped options
-                    Menu {
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                // Sort Menu with grouped options
+                Menu {
                         // Random
                         Button(action: {
                             if selectedSortOption == .random {
@@ -230,6 +231,7 @@ struct TagsView: View {
                         Image(systemName: "arrow.up.arrow.down.circle")
                             .foregroundColor(appearanceManager.tintColor)
                     }
+                    .frame(maxWidth: .infinity)
 
                     // Filter Menu
                     Menu {
@@ -266,9 +268,9 @@ struct TagsView: View {
                         Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
-        }
         .onAppear {
             // Check for search text from navigation
             if !coordinator.activeSearchText.isEmpty {
@@ -600,32 +602,34 @@ struct TagDetailView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
-                    Button {
-                        guard !isUpdatingFavorite else { return }
-                        HapticManager.light()
-                        isUpdatingFavorite = true
-                        let newState = !isFavorite
-                        withAnimation(DesignTokens.Animation.quick) { isFavorite = newState }
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                Button {
+                    guard !isUpdatingFavorite else { return }
+                    HapticManager.light()
+                    isUpdatingFavorite = true
+                    let newState = !isFavorite
+                    withAnimation(DesignTokens.Animation.quick) { isFavorite = newState }
 
-                        viewModel.toggleTagFavorite(tagId: selectedTag.id, favorite: newState) { success in
-                            DispatchQueue.main.async {
-                                if !success {
-                                    isFavorite = !newState
-                                    ToastManager.shared.show("Failed to update favorite", icon: "exclamationmark.triangle", style: .error)
-                                }
-                                isUpdatingFavorite = false
+                    viewModel.toggleTagFavorite(tagId: selectedTag.id, favorite: newState) { success in
+                        DispatchQueue.main.async {
+                            if !success {
+                                isFavorite = !newState
+                                ToastManager.shared.show("Failed to update favorite", icon: "exclamationmark.triangle", style: .error)
                             }
+                            isUpdatingFavorite = false
                         }
-                    } label: {
-                        Image(systemName: isFavorite ? "heart.fill" : "heart")
-                            .foregroundColor(isFavorite ? .red : appearanceManager.tintColor)
                     }
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .foregroundColor(isFavorite ? .red : appearanceManager.tintColor)
+                }
+                .frame(maxWidth: .infinity)
 
-                    if selectedDetailTab == .scenes {
-                        sceneSortMenu
-                    }
+                if selectedDetailTab == .scenes {
+                    sceneSortMenu
+                        .frame(maxWidth: .infinity)
                 }
             }
         }

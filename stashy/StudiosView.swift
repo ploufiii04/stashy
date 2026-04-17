@@ -12,6 +12,7 @@ import WebKit
 struct StudiosView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var configManager = ServerConfigManager.shared
+    @ObservedObject private var appearance = AppearanceManager.shared
     @State private var selectedSortOption: StashDBViewModel.StudioSortOption
     @State private var isChangingSort = false
     @State private var searchText = ""
@@ -72,79 +73,8 @@ struct StudiosView: View {
         .toolbar {
             toolbarContent
         }
-        .onAppear {
-            onAppearAction()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.studios.rawValue {
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .studios),
-                   let newFilter = viewModel.savedFilters[defaultId] {
-                    selectedFilter = newFilter
-                } else {
-                    selectedFilter = nil
-                }
-                performSearch()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.studios.rawValue {
-                let newSort = StashDBViewModel.StudioSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .studios) ?? "") ?? .nameAsc
-                changeSortOption(to: newSort)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
-            selectedFilter = nil
-            performSearch()
-        }
-        .onChange(of: searchText) { oldValue, newValue in
-            onSearchTextChange(newValue)
-        }
-        .onChange(of: viewModel.savedFilters) { oldValue, newValue in
-            onSavedFiltersChange(newValue)
-        }
-        .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
-            if oldValue == true && isLoading == false {
-                if viewModel.studios.isEmpty && !viewModel.isLoadingStudios && selectedFilter == nil {
-                    viewModel.fetchStudios(sortBy: selectedSortOption, searchQuery: searchText, filter: nil)
-                }
-            }
-        }
-        .navigationDestination(isPresented: Binding(
-            get: { coordinator.studioToOpen != nil },
-            set: { if !$0 { coordinator.studioToOpen = nil } }
-        )) {
-            if let studio = coordinator.studioToOpen {
-                StudioDetailView(studio: studio)
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        if !searchText.isEmpty {
-            ToolbarItem(placement: .principal) {
-                Button(action: {
-                    searchText = ""
-                    performSearch()
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
-                        Text(searchText)
-                            .font(.system(size: 12, weight: .bold))
-                            .lineLimit(1)
-                    }
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(DesignTokens.Opacity.badge))
-                    .clipShape(Capsule())
-                }
-            }
-        }
-        
-        ToolbarItem(placement: .navigationBarTrailing) {
-            HStack(spacing: 12) {
+        .floatingActionBar {
+            HStack(spacing: 0) {
                 // Sort Menu with grouped options
                 Menu {
                     // Random
@@ -242,8 +172,9 @@ struct StudiosView: View {
                     }
                 } label: {
                     Image(systemName: "arrow.up.arrow.down.circle")
-                        .foregroundColor(.appAccent)
+                        .foregroundColor(.primary)
                 }
+                .frame(maxWidth: .infinity)
 
                 // Filter Menu
                 Menu {
@@ -278,7 +209,78 @@ struct StudiosView: View {
                     }
                 } label: {
                     Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                        .foregroundColor(selectedFilter != nil ? .appAccent : .primary)
+                        .foregroundColor(selectedFilter != nil ? appearance.tintColor : .primary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .onAppear {
+            onAppearAction()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.studios.rawValue {
+                if let defaultId = TabManager.shared.getDefaultFilterId(for: .studios),
+                   let newFilter = viewModel.savedFilters[defaultId] {
+                    selectedFilter = newFilter
+                } else {
+                    selectedFilter = nil
+                }
+                performSearch()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.studios.rawValue {
+                let newSort = StashDBViewModel.StudioSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .studios) ?? "") ?? .nameAsc
+                changeSortOption(to: newSort)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+            selectedFilter = nil
+            performSearch()
+        }
+        .onChange(of: searchText) { oldValue, newValue in
+            onSearchTextChange(newValue)
+        }
+        .onChange(of: viewModel.savedFilters) { oldValue, newValue in
+            onSavedFiltersChange(newValue)
+        }
+        .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
+            if oldValue == true && isLoading == false {
+                if viewModel.studios.isEmpty && !viewModel.isLoadingStudios && selectedFilter == nil {
+                    viewModel.fetchStudios(sortBy: selectedSortOption, searchQuery: searchText, filter: nil)
+                }
+            }
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { coordinator.studioToOpen != nil },
+            set: { if !$0 { coordinator.studioToOpen = nil } }
+        )) {
+            if let studio = coordinator.studioToOpen {
+                StudioDetailView(studio: studio)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if !searchText.isEmpty {
+            ToolbarItem(placement: .principal) {
+                Button(action: {
+                    searchText = ""
+                    performSearch()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(searchText)
+                            .font(.system(size: 12, weight: .bold))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                    .clipShape(Capsule())
                 }
             }
         }

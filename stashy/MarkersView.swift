@@ -87,10 +87,11 @@ struct MarkersView: View {
                 }
             }
             
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Sort Menu
-                    Menu {
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                // Sort Menu
+                Menu {
                         // Random
                         Button(action: { changeSortOption(to: .random) }) {
                             HStack {
@@ -166,6 +167,7 @@ struct MarkersView: View {
                         Image(systemName: "arrow.up.arrow.down.circle")
                             .foregroundColor(appearanceManager.tintColor)
                     }
+                    .frame(maxWidth: .infinity)
 
                     // Filter Menu
                     Menu {
@@ -198,9 +200,9 @@ struct MarkersView: View {
                         Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
-        }
         .onAppear {
             if !coordinator.activeSearchText.isEmpty {
                 searchText = coordinator.activeSearchText

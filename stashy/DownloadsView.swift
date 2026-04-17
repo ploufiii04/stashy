@@ -24,8 +24,8 @@ struct DownloadsView: View {
     
     var body: some View {
         ZStack {
+            Color.appBackground.ignoresSafeArea()
 
-            
             if downloadManager.downloads.isEmpty && downloadManager.activeDownloads.isEmpty {
                 VStack(spacing: 20) {
                     Spacer()
