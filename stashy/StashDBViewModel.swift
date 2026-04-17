@@ -4264,6 +4264,28 @@ struct GenerateData: Codable {
         }
     }
     
+    func setPerformerImage(performerId: String, imageURL: String, completion: @escaping (Bool) -> Void) {
+        let mutation = """
+        mutation PerformerUpdate($input: PerformerUpdateInput!) {
+            performerUpdate(input: $input) { id image_path }
+        }
+        """
+        let variables: [String: Any] = [
+            "input": [
+                "id": performerId,
+                "image": imageURL
+            ]
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": mutation, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            completion(false)
+            return
+        }
+        performGraphQLQuery(query: bodyString) { (response: PerformerUpdateResponse?) in
+            completion(response?.data?.performerUpdate != nil)
+        }
+    }
+
     func toggleStudioFavorite(studioId: String, favorite: Bool, completion: @escaping (Bool) -> Void) {
         let mutation = """
         mutation StudioUpdate($input: StudioUpdateInput!) {
@@ -5901,6 +5923,14 @@ struct GalleryPerformer: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let name: String
     let image_path: String?
+
+    func toPerformer() -> Performer {
+        Performer(id: id, name: name, disambiguation: nil, birthdate: nil, country: nil,
+                  imagePath: image_path, sceneCount: 0, galleryCount: nil, gender: nil,
+                  ethnicity: nil, height: nil, weight: nil, measurements: nil, fakeTits: nil,
+                  careerLength: nil, tattoos: nil, piercings: nil, aliasList: nil, favorite: nil,
+                  rating100: nil, createdAt: nil, updatedAt: nil, oCounter: nil)
+    }
 
     var thumbnailURL: URL? {
         guard let path = image_path, !path.isEmpty,

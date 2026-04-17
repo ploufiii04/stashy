@@ -930,6 +930,8 @@ struct FullScreenImageView: View {
     @State private var showUI = true
     @State private var shareItems: [Any] = []
     @State private var showingShare = false
+    @State private var showingSetPerformerImagePicker = false
+    @State private var performerImageTargetPerformers: [GalleryPerformer] = []
 
     var body: some View {
         ZStack {
@@ -993,6 +995,18 @@ struct FullScreenImageView: View {
                         Image(systemName: "square.and.arrow.up")
                             .foregroundColor(appearanceManager.tintColor)
                     }
+                    let targetId = currentVisibleId ?? selectedImageId
+                    if let currentImage = images.first(where: { $0.id == targetId }),
+                       let ext = currentImage.fileExtension, ext == "JPG",
+                       let performers = currentImage.performers, !performers.isEmpty {
+                        Button {
+                            performerImageTargetPerformers = performers
+                            showingSetPerformerImagePicker = true
+                        } label: {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .foregroundColor(appearanceManager.tintColor)
+                        }
+                    }
                     Button(role: .destructive) {
                         showingDeleteConfirmation = true
                     } label: {
@@ -1004,6 +1018,16 @@ struct FullScreenImageView: View {
         }
         .sheet(isPresented: $showingShare) {
             ShareSheet(items: shareItems)
+        }
+        .alert("Set as Performer Image?", isPresented: $showingSetPerformerImagePicker) {
+            ForEach(performerImageTargetPerformers) { performer in
+                Button("Okay") {
+                    setPerformerImage(performer: performer)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Update the profile picture for the selected performer.")
         }
         .alert("Really delete image?", isPresented: $showingDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -1067,6 +1091,22 @@ struct FullScreenImageView: View {
                     dismiss()
                 } else {
                     ToastManager.shared.show("Failed to delete image", icon: "exclamationmark.triangle", style: .error)
+                }
+            }
+        }
+    }
+
+    private func setPerformerImage(performer: GalleryPerformer) {
+        let targetId = currentVisibleId ?? selectedImageId
+        guard let currentImage = images.first(where: { $0.id == targetId }),
+              let imageURL = currentImage.imageURL?.absoluteString else { return }
+
+        viewModel.setPerformerImage(performerId: performer.id, imageURL: imageURL) { success in
+            DispatchQueue.main.async {
+                if success {
+                    ToastManager.shared.show("Performer image updated", icon: "person.crop.circle.badge.checkmark", style: .success)
+                } else {
+                    ToastManager.shared.show("Failed to update performer image", icon: "exclamationmark.triangle", style: .error)
                 }
             }
         }

@@ -168,26 +168,29 @@ struct StashLineView: View {
         VStack(spacing: 16) {
             HStack(spacing: 20) {
                 // Avatar
-                Group {
-                    if let url = performer.thumbnailURL {
-                        CustomAsyncImage(url: url) { loader in
-                            if loader.isLoading {
-                                Circle().fill(Color.gray.opacity(0.3))
-                            } else if let img = loader.image {
-                                img.resizable().scaledToFill()
-                            } else {
-                                Circle().fill(Color.gray.opacity(0.3))
-                                    .overlay(Text(performer.name.prefix(1)).font(.title2.bold()).foregroundColor(.white))
+                NavigationLink(destination: PerformerDetailView(performer: performer.toPerformer())) {
+                    Group {
+                        if let url = performer.thumbnailURL {
+                            CustomAsyncImage(url: url) { loader in
+                                if loader.isLoading {
+                                    Circle().fill(Color.gray.opacity(0.3))
+                                } else if let img = loader.image {
+                                    img.resizable().scaledToFill()
+                                } else {
+                                    Circle().fill(Color.gray.opacity(0.3))
+                                        .overlay(Text(performer.name.prefix(1)).font(.title2.bold()).foregroundColor(.white))
+                                }
                             }
+                        } else {
+                            Circle().fill(Color.gray.opacity(0.3))
+                                .overlay(Text(performer.name.prefix(1)).font(.title2.bold()).foregroundColor(.white))
                         }
-                    } else {
-                        Circle().fill(Color.gray.opacity(0.3))
-                            .overlay(Text(performer.name.prefix(1)).font(.title2.bold()).foregroundColor(.white))
                     }
+                    .frame(width: 96, height: 96)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(appearanceManager.tintColor, lineWidth: 2))
                 }
-                .frame(width: 96, height: 96)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(appearanceManager.tintColor, lineWidth: 2))
+                .buttonStyle(.plain)
 
                 // Stats
                 VStack(alignment: .leading, spacing: 8) {
@@ -548,6 +551,7 @@ struct StashLinePostView: View {
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                     .aspectRatio(imageAspectRatio(for: image), contentMode: .fit)
+                    .clipped()
 
                     // Page indicator pill — top right
                     Text("\(carouselIndex + 1)/\(post.images.count)")
@@ -563,9 +567,9 @@ struct StashLinePostView: View {
                 GeometryReader { geo in
                     singleImageView(image, ratio: imageAspectRatio(for: image))
                         .frame(width: geo.size.width, height: geo.size.width / imageAspectRatio(for: image))
-                        .clipped()
                 }
                 .aspectRatio(imageAspectRatio(for: image), contentMode: .fit)
+                .clipped()
             }
 
             // Counter burst animation
@@ -579,6 +583,11 @@ struct StashLinePostView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .clipped()
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() }
+        }
     }
 
     private func imageAspectRatio(for img: StashImage) -> CGFloat {
@@ -615,10 +624,7 @@ struct StashLinePostView: View {
             }
         }
         .clipped()
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() }
-        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - Action Bar
