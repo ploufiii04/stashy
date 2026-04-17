@@ -25,14 +25,13 @@ struct ScenesView: View {
     @State private var showLiveFilterSheet = false
     @State private var liveFilterMinRating: Int = 0      // 0 = any, 1–5 stars
     @State private var liveFilterOrganized: Bool? = nil  // nil = any
-    @State private var liveFilterHasMarkers: Bool = false
     @State private var liveFilterInteractive: Bool? = nil // nil = any
     @State private var liveFilterOrientation: String? = nil // nil = any, "LANDSCAPE"/"PORTRAIT"/"SQUARE"
     @State private var liveFilterPerformerCount: Int? = nil // nil = any, 1/2/3 (3 = 3+)
     var hideTitle: Bool = false
 
     private var isLiveFilterActive: Bool {
-        liveFilterMinRating > 0 || liveFilterOrganized != nil || liveFilterHasMarkers
+        liveFilterMinRating > 0 || liveFilterOrganized != nil
         || liveFilterInteractive != nil || liveFilterOrientation != nil || liveFilterPerformerCount != nil
     }
 
@@ -44,9 +43,6 @@ struct ScenesView: View {
         }
         if let org = liveFilterOrganized {
             dict["organized"] = org
-        }
-        if liveFilterHasMarkers {
-            dict["has_markers"] = "true"
         }
         if let interactive = liveFilterInteractive {
             dict["interactive"] = interactive
@@ -415,7 +411,6 @@ struct ScenesView: View {
             SceneLiveFilterSheet(
                 minRating: $liveFilterMinRating,
                 organized: $liveFilterOrganized,
-                hasMarkers: $liveFilterHasMarkers,
                 interactive: $liveFilterInteractive,
                 orientation: $liveFilterOrientation,
                 performerCount: $liveFilterPerformerCount,
@@ -423,7 +418,6 @@ struct ScenesView: View {
                 onReset: {
                     liveFilterMinRating = 0
                     liveFilterOrganized = nil
-                    liveFilterHasMarkers = false
                     liveFilterInteractive = nil
                     liveFilterOrientation = nil
                     liveFilterPerformerCount = nil
@@ -640,7 +634,6 @@ struct ScenesView: View {
 struct SceneLiveFilterSheet: View {
     @Binding var minRating: Int
     @Binding var organized: Bool?
-    @Binding var hasMarkers: Bool
     @Binding var interactive: Bool?
     @Binding var orientation: String?
     @Binding var performerCount: Int?
@@ -665,11 +658,6 @@ struct SceneLiveFilterSheet: View {
                         filterChip("Any", isActive: organized == nil)   { organized = nil;   onApply() }
                         filterChip("Yes", isActive: organized == true)  { organized = true;  onApply() }
                         filterChip("No",  isActive: organized == false) { organized = false; onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Markers") {
-                        filterChip("Any",         isActive: !hasMarkers)  { hasMarkers = false; onApply() }
-                        filterChip("Has markers", isActive: hasMarkers)   { hasMarkers = true;  onApply() }
                     }
                     Divider().padding(.leading, 16)
                     filterRow(label: "Interactive") {

@@ -22,6 +22,32 @@ struct StudiosView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    // Live filter
+    @State private var showLiveFilterSheet = false
+    @State private var liveFilterFavorite: Bool? = nil
+    @State private var liveFilterMinRating: Int = 0
+    @State private var liveFilterScenes: String? = nil // nil=any, "has"=has scenes, "none"=no scenes
+
+    private var isLiveFilterActive: Bool {
+        liveFilterFavorite != nil || liveFilterMinRating > 0 || liveFilterScenes != nil
+    }
+
+    private var activeLiveFilterDict: [String: Any] {
+        var dict: [String: Any] = [:]
+        if let fav = liveFilterFavorite { dict["favorite"] = fav }
+        if liveFilterMinRating > 0 {
+            dict["rating100"] = ["value": (liveFilterMinRating * 20) - 1, "modifier": "GREATER_THAN"]
+        }
+        if liveFilterScenes == "has"  { dict["scene_count"] = ["value": 0, "modifier": "GREATER_THAN"] }
+        if liveFilterScenes == "none" { dict["scene_count"] = ["value": 0, "modifier": "EQUALS"] }
+        return dict
+    }
+
+    private func applyLiveFilter() {
+        viewModel.currentStudioLiveFilter = activeLiveFilterDict
+        viewModel.fetchStudios(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
+    }
+
     init(initialSort: StashDBViewModel.StudioSortOption? = nil, hideTitle: Bool = false) {
         let savedSort = StashDBViewModel.StudioSortOption(rawValue: TabManager.shared.getSortOption(for: .studios) ?? "")
         _selectedSortOption = State(initialValue: initialSort ?? savedSort ?? .nameAsc)
@@ -39,12 +65,12 @@ struct StudiosView: View {
         TabManager.shared.setSortOption(for: .studios, option: newOption.rawValue)
 
         // Fetch new data immediately
-        viewModel.fetchStudios(sortBy: newOption, searchQuery: searchText, filter: selectedFilter)
+        viewModel.fetchStudios(sortBy: newOption, searchQuery: searchText, filter: selectedFilter, liveFilter: isLiveFilterActive ? activeLiveFilterDict : nil)
     }
     
     // Search function with debouncing
     private func performSearch() {
-        viewModel.fetchStudios(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter)
+        viewModel.fetchStudios(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: isLiveFilterActive ? activeLiveFilterDict : nil)
     }
 
     var body: some View {
@@ -212,7 +238,40 @@ struct StudiosView: View {
                         .foregroundColor(selectedFilter != nil ? appearance.tintColor : .primary)
                 }
                 .frame(maxWidth: .infinity)
+
+                // Live Filter button
+                Button(action: { showLiveFilterSheet = true }) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 20))
+                        .foregroundColor(isLiveFilterActive ? appearance.tintColor : .primary)
+                        .overlay(alignment: .topTrailing) {
+                            if isLiveFilterActive {
+                                Circle()
+                                    .fill(appearance.tintColor)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: 3, y: -3)
+                            }
+                        }
+                }
+                .frame(maxWidth: .infinity)
             }
+        }
+        .sheet(isPresented: $showLiveFilterSheet) {
+            StudioLiveFilterSheet(
+                minRating: $liveFilterMinRating,
+                favorite: $liveFilterFavorite,
+                scenes: $liveFilterScenes,
+                onApply: { applyLiveFilter() },
+                onReset: {
+                    liveFilterMinRating = 0
+                    liveFilterFavorite = nil
+                    liveFilterScenes = nil
+                    applyLiveFilter()
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
         }
         .onAppear {
             onAppearAction()
@@ -671,5 +730,84 @@ struct SVGWebView: UIViewRepresentable {
 
 #Preview {
     StudiosView()
+}
+
+// MARK: - Studio Live Filter Sheet
+
+struct StudioLiveFilterSheet: View {
+    @Binding var minRating: Int
+    @Binding var favorite: Bool?
+    @Binding var scenes: String?
+    var onApply: () -> Void
+    var onReset: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    filterRow(label: "Rating") {
+                        filterChip("Any", isActive: minRating == 0) { minRating = 0; onApply() }
+                        ForEach(1...5, id: \.self) { star in
+                            filterChip("\(star)★", isActive: minRating == star) { minRating = star; onApply() }
+                        }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Favorite") {
+                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
+                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
+                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Scenes") {
+                        filterChip("Any",        isActive: scenes == nil)     { scenes = nil;    onApply() }
+                        filterChip("Has scenes", isActive: scenes == "has")   { scenes = "has";  onApply() }
+                        filterChip("None",       isActive: scenes == "none")  { scenes = "none"; onApply() }
+                    }
+                }
+                .background(Color.secondaryAppBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                Spacer()
+            }
+            .background(Color.appBackground)
+            .navigationTitle("Live Filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Reset", role: .destructive) { onReset() }.foregroundColor(.red)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterRow<C: View>(label: String, @ViewBuilder chips: () -> C) -> some View {
+        HStack(spacing: 12) {
+            Text(label).font(.system(size: 15)).frame(width: 80, alignment: .leading).foregroundColor(.primary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { chips() }.padding(.vertical, 12)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(isActive ? appearance.tintColor : Color.secondary.opacity(0.15))
+                .foregroundColor(isActive ? .white : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
 }
 #endif

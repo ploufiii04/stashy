@@ -19,7 +19,28 @@ struct TagsView: View {
     @State private var searchText = ""
     @State private var isSearchVisible = false
     var hideTitle: Bool = false
-    
+
+    // Live filter
+    @State private var showLiveFilterSheet = false
+    @State private var liveFilterFavorite: Bool? = nil
+    @State private var liveFilterHasScenes: Bool = false
+
+    private var isLiveFilterActive: Bool {
+        liveFilterFavorite != nil || liveFilterHasScenes
+    }
+
+    private var activeLiveFilterDict: [String: Any] {
+        var dict: [String: Any] = [:]
+        if let fav = liveFilterFavorite { dict["favorite"] = fav }
+        if liveFilterHasScenes { dict["scene_count"] = ["value": 0, "modifier": "GREATER_THAN"] }
+        return dict
+    }
+
+    private func applyLiveFilter() {
+        viewModel.currentTagLiveFilter = activeLiveFilterDict
+        viewModel.fetchTags(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
+    }
+
     @Environment(\.verticalSizeClass) var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -33,7 +54,7 @@ struct TagsView: View {
 
     // Search function
     private func performSearch(isInitialLoad: Bool = true) {
-        viewModel.fetchTags(sortBy: selectedSortOption, searchQuery: searchText, isInitialLoad: isInitialLoad, filter: selectedFilter)
+        viewModel.fetchTags(sortBy: selectedSortOption, searchQuery: searchText, isInitialLoad: isInitialLoad, filter: selectedFilter, liveFilter: isLiveFilterActive ? activeLiveFilterDict : nil)
     }
 
     var body: some View {
@@ -229,7 +250,7 @@ struct TagsView: View {
                         }
                     } label: {
                         Image(systemName: "arrow.up.arrow.down.circle")
-                            .foregroundColor(appearanceManager.tintColor)
+                            .foregroundColor(.primary)
                     }
                     .frame(maxWidth: .infinity)
 
@@ -269,8 +290,39 @@ struct TagsView: View {
                             .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
                     }
                     .frame(maxWidth: .infinity)
+
+                    // Live Filter button
+                    Button(action: { showLiveFilterSheet = true }) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 20))
+                            .foregroundColor(isLiveFilterActive ? appearanceManager.tintColor : .primary)
+                            .overlay(alignment: .topTrailing) {
+                                if isLiveFilterActive {
+                                    Circle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 3, y: -3)
+                                }
+                            }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
+        .sheet(isPresented: $showLiveFilterSheet) {
+            TagLiveFilterSheet(
+                favorite: $liveFilterFavorite,
+                hasScenes: $liveFilterHasScenes,
+                onApply: { applyLiveFilter() },
+                onReset: {
+                    liveFilterFavorite = nil
+                    liveFilterHasScenes = false
+                    applyLiveFilter()
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
+        }
         .onAppear {
             // Check for search text from navigation
             if !coordinator.activeSearchText.isEmpty {
@@ -1010,6 +1062,76 @@ struct TagImageView: View {
     private func isSVG(_ data: Data) -> Bool {
         let str = String(data: data.prefix(100), encoding: .utf8) ?? ""
         return str.lowercased().contains("<svg")
+    }
+}
+
+// MARK: - Tag Live Filter Sheet
+
+struct TagLiveFilterSheet: View {
+    @Binding var favorite: Bool?
+    @Binding var hasScenes: Bool
+    var onApply: () -> Void
+    var onReset: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    filterRow(label: "Favorite") {
+                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
+                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
+                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Scenes") {
+                        filterChip("Any",        isActive: !hasScenes) { hasScenes = false; onApply() }
+                        filterChip("Has scenes", isActive: hasScenes)  { hasScenes = true;  onApply() }
+                    }
+                }
+                .background(Color.secondaryAppBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                Spacer()
+            }
+            .background(Color.appBackground)
+            .navigationTitle("Live Filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Reset", role: .destructive) { onReset() }.foregroundColor(.red)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterRow<C: View>(label: String, @ViewBuilder chips: () -> C) -> some View {
+        HStack(spacing: 12) {
+            Text(label).font(.system(size: 15)).frame(width: 80, alignment: .leading).foregroundColor(.primary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { chips() }.padding(.vertical, 12)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(isActive ? appearance.tintColor : Color.secondary.opacity(0.15))
+                .foregroundColor(isActive ? .white : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 #endif

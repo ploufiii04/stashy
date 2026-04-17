@@ -319,6 +319,7 @@ class StashDBViewModel: ObservableObject {
     private let studiosPerPage = 500
     private var currentStudioSortOption: StudioSortOption = .nameAsc
     @Published var currentStudioFilter: SavedFilter? = nil
+    var currentStudioLiveFilter: [String: Any] = [:]
 
     // GraphQL Fragments
 
@@ -2445,9 +2446,8 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchStudios(sortBy: StudioSortOption = .nameAsc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchStudios(sortBy: StudioSortOption = .nameAsc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
-            // Reset pagination
             currentStudioPage = 1
             currentStudioSortOption = sortBy
             currentStudioSearchQuery = searchQuery
@@ -2455,6 +2455,7 @@ class StashDBViewModel: ObservableObject {
             hasMoreStudios = true
             studios = []
             isLoadingStudios = true
+            if let lf = liveFilter { currentStudioLiveFilter = lf }
         } else {
             isLoadingStudios = true
         }
@@ -2503,7 +2504,7 @@ class StashDBViewModel: ObservableObject {
         
         let variables: [String: Any] = [
             "filter": filterParams,
-            "studio_filter": studioFilter
+            "studio_filter": currentStudioLiveFilter.isEmpty ? studioFilter : studioFilter.merging(currentStudioLiveFilter) { _, new in new }
         ]
         
         let query = GraphQLQueries.queryWithFragments("findStudios")
@@ -2563,16 +2564,18 @@ class StashDBViewModel: ObservableObject {
     @Published var isLoadingMoreTags = false
     @Published var hasMoreTags = true
     @Published var currentTagFilter: SavedFilter? = nil
+    var currentTagLiveFilter: [String: Any] = [:]
     private var currentTagPage = 1
     private let tagsPerPage = 500
     private var currentTagSortOption: TagSortOption = .nameAsc
     private var currentTagSearchQuery: String = ""
     
     
-    func fetchTags(sortBy: TagSortOption = .nameAsc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchTags(sortBy: TagSortOption = .nameAsc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentTagPage = 1
             tags = []
+            if let lf = liveFilter { currentTagLiveFilter = lf }
         }
         currentTagSortOption = sortBy
         currentTagSearchQuery = searchQuery
@@ -2622,7 +2625,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
                 "direction": sortBy.direction
             ],
-            "tag_filter": tagFilter
+            "tag_filter": currentTagLiveFilter.isEmpty ? tagFilter : tagFilter.merging(currentTagLiveFilter) { _, new in new }
         ]
         
         let query = GraphQLQueries.queryWithFragments("findTags")
