@@ -61,7 +61,7 @@ struct ReelsView: View {
         var icon: String {
             switch self {
             case .scenes: return "film"
-            case .markers: return "mappin.and.ellipse"
+            case .markers: return "bookmark.fill"
             case .clips: return "photo.on.rectangle.angled"
             case .previews: return "play.rectangle.on.rectangle.fill"
             }
@@ -313,30 +313,36 @@ struct ReelsView: View {
 
         // If we are clearing filters (returning to main list) and have a saved position, restore it.
         let isClearingFilters = performer == nil && tags.isEmpty
+        let restoredPosition: String?
         if isClearingFilters, let savedPos = lastMainListPosition {
             print("🔄 ReelsView: Restoring scroll position to \(savedPos)")
             currentVisibleSceneId = savedPos
             lastMainListPosition = nil
-        } else if !isClearingFilters && lastMainListPosition == nil {
-            // If we are ADDING a filter for the first time (not already filtering), save.
-            // Check if we already have criterion set (avoid overwriting on second tag)
-            if selectedPerformer == nil && selectedTags.isEmpty {
-                print("💾 ReelsView: Saving position \(currentVisibleSceneId ?? "none") before filtering")
-                lastMainListPosition = currentVisibleSceneId
+            restoredPosition = savedPos
+        } else {
+            restoredPosition = nil
+            if !isClearingFilters && lastMainListPosition == nil {
+                // If we are ADDING a filter for the first time (not already filtering), save.
+                // Check if we already have criterion set (avoid overwriting on second tag)
+                if selectedPerformer == nil && selectedTags.isEmpty {
+                    print("💾 ReelsView: Saving position \(currentVisibleSceneId ?? "none") before filtering")
+                    lastMainListPosition = currentVisibleSceneId
+                }
+                currentVisibleSceneId = nil // Start at top for filter results
+            } else if !isClearingFilters {
+                // Already filtered, just reset for new filter results
+                currentVisibleSceneId = nil
             }
-            currentVisibleSceneId = nil // Start at top for filter results
-        } else if !isClearingFilters {
-            // Already filtered, just reset for new filter results
-            currentVisibleSceneId = nil
         }
 
         // Update local state and handle random re-roll
+        // Don't override a just-restored position with nil
         if let sortBy = sortBy {
             if sortBy == .random && selectedSortOption == .random && reelsMode == .scenes {
                 viewModel.refreshRandomSeed()
             }
             selectedSortOption = sortBy
-            currentVisibleSceneId = nil
+            if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         if let markerSortBy = markerSortBy {
@@ -344,7 +350,7 @@ struct ReelsView: View {
                 viewModel.refreshRandomSeed()
             }
             selectedMarkerSortOption = markerSortBy
-            currentVisibleSceneId = nil
+            if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         if let clipSortBy = clipSortBy {
@@ -352,7 +358,7 @@ struct ReelsView: View {
                 viewModel.refreshRandomSeed()
             }
             selectedClipSortOption = clipSortBy
-            currentVisibleSceneId = nil
+            if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         if let previewSortBy = previewSortBy {
@@ -361,7 +367,7 @@ struct ReelsView: View {
             }
             // Previews use standard selectedSortOption since they are scenes
             selectedSortOption = previewSortBy
-            currentVisibleSceneId = nil
+            if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         // For clip filter: use explicitly passed value; fall back to existing selectedClipFilter
@@ -1301,13 +1307,7 @@ struct ReelsView: View {
                     .fixedSize()
                 }
 
-                if let scene = currentItem?.underlyingScene {
-                    NavigationLink(destination: SceneDetailView(scene: scene)) {
-                        Image(systemName: "film").foregroundColor(.white)
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                }
+
             }
             .font(.system(size: 17))
             .frame(maxWidth: .infinity)
@@ -1365,10 +1365,20 @@ struct ReelsView: View {
                                 .foregroundColor(.white.opacity(0.6))
                         }
                         if let title = item.title, !title.isEmpty {
-                            Text(title)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.white.opacity(0.85))
-                                .lineLimit(1)
+                            if let scene = item.underlyingScene {
+                                NavigationLink(destination: SceneDetailView(scene: scene)) {
+                                    Text(title)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.85))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                Text(title)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .lineLimit(1)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -2234,7 +2244,7 @@ extension ReelItemView {
             }
             .onChange(of: isActive) { _, newValue in
                 if newValue {
-                    if player == nil { setupPlayer() }
+                    if player == nil { setupPlayer() } else { refreshTimeObserver() }
                     if isPlaying && !isRotating { player?.play() }
                     onInteraction()
                     if item.isAnimated { startAnimationAdvanceTimer() }
@@ -2699,6 +2709,27 @@ extension ReelItemView {
         player?.replaceCurrentItem(with: nil)
         player = nil
         print("🎬 Reels: Player cleaned up for item \(item.id)")
+    }
+
+    /// Re-creates the periodic time observer so it captures the current `self`
+    /// (with the correct `currentTime` / `duration` bindings). Called when the
+    /// item becomes the active (visible) one after already having a player.
+    func refreshTimeObserver() {
+        if let old = timeObserver {
+            player?.removeTimeObserver(old)
+            timeObserver = nil
+        }
+        guard let player = player else { return }
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak player] time in
+            guard let player = player else { return }
+            if !self.isSeeking {
+                self.currentTime = time.seconds
+            }
+            if let d = player.currentItem?.duration.seconds, d > 0, !d.isNaN {
+                self.duration = d
+            }
+        }
     }
 
     func seek(to time: Double) {

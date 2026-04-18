@@ -123,13 +123,15 @@ struct CatalogsView: View {
         .navigationBarHidden(true)
         .safeAreaInset(edge: .top, spacing: 0) {
             if showTabSwitcher {
-                CatalogCategoryRow(tabs: sortedVisibleTabs, selection: selectedTabBinding)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.bar)
-                    .overlay(alignment: .bottom) {
-                        Divider()
-                    }
+                VStack(spacing: 0) {
+                    CatalogCategoryRow(tabs: sortedVisibleTabs, selection: selectedTabBinding)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+
+                    Divider().overlay(Color.white.opacity(0.15))
+                }
+                .background(.bar)
+                .colorScheme(.dark)
             }
         }
     }
