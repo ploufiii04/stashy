@@ -27,10 +27,7 @@ struct ServerStatisticsView: View {
                             statRow("Groups", value: "\(stats.groupCount)")
                             statRow("Tags", value: "\(stats.tagCount)")
                         }
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                                .fill(Color.secondaryAppBackground)
-                        )
+                        .listRowBackground(Color.secondaryAppBackground)
 
                         Section("Usage") {
                             statRow("Total Size", value: formatBytes(stats.scenesSize))
@@ -39,10 +36,7 @@ struct ServerStatisticsView: View {
                             statRow("Total Play Count", value: "\(stats.totalPlayCount)")
                             statRow("Scenes Played", value: "\(stats.scenesPlayed)")
                         }
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                                .fill(Color.secondaryAppBackground)
-                        )
+                        .listRowBackground(Color.secondaryAppBackground)
 
                         Section("Performers") {
                             statRow("Total", value: "\(stats.performerCount)")
@@ -73,10 +67,7 @@ struct ServerStatisticsView: View {
                                 }
                             }
                         }
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                                .fill(Color.secondaryAppBackground)
-                        )
+                        .listRowBackground(Color.secondaryAppBackground)
                     }
                 }
                 .scrollContentBackground(.hidden)

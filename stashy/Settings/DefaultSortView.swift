@@ -17,20 +17,14 @@ struct DefaultSortView: View {
                     sortRow(for: tab.id)
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
 
             Section(header: Text("Detail Views Sort Order")) {
                 ForEach(tabManager.detailViews) { config in
                     detailSortRow(for: config)
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Default Sorting")

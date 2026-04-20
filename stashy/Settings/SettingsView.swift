@@ -173,10 +173,7 @@ struct SettingsView: View {
                 Text("Playback settings require an active server.")
                     .foregroundColor(.secondary)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
     }
 
@@ -191,20 +188,14 @@ struct SettingsView: View {
                 Label("Editing", systemImage: "pencil.circle")
             }
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
 
         Section(header: Text("Security")) {
             NavigationLink(destination: SecuritySettingsView()) {
                 Label("Security", systemImage: "lock.shield")
             }
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
 
         if configManager.activeConfig != nil {
             ContentSettingsSection()
@@ -218,19 +209,13 @@ struct SettingsView: View {
                     Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         } else {
             Section {
                 Text("Content & default settings require an active server.")
                     .foregroundColor(.secondary)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
     }
 
@@ -244,10 +229,7 @@ struct SettingsView: View {
                 Label("StashSync", systemImage: "bolt.fill")
             }
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     // MARK: - App Store Banner
@@ -354,10 +336,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     private func tipRow(icon: String, title: String, price: String) -> some View {
@@ -394,10 +373,7 @@ struct SettingsView: View {
                         .foregroundColor(appearanceManager.tintColor)
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
         }
     }
@@ -414,10 +390,7 @@ struct SettingsView: View {
                 Label("Love Spouse", systemImage: "antenna.radiowaves.left.and.right")
             }
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     // MARK: - Actions
@@ -506,10 +479,7 @@ struct IntifaceSettingsView: View {
                 Toggle("Enable Intiface", isOn: $buttplugManager.isEnabled)
                     .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
             Section(header: Text("Intiface Server")) {
                 TextField("Server Address", text: $buttplugManager.serverAddress)
@@ -535,10 +505,7 @@ struct IntifaceSettingsView: View {
                     .disabled(!buttplugManager.isEnabled)
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
             if !buttplugManager.devices.isEmpty {
                 Section(header: Text("Discovered Devices")) {
@@ -552,18 +519,12 @@ struct IntifaceSettingsView: View {
                         }
                     }
                 }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                        .fill(Color.secondaryAppBackground)
-                )
+                .listRowBackground(Color.secondaryAppBackground)
             }
             
             Section(footer: Text("Stashy connects to Intiface Desktop or Intiface Central via WebSockets. Ensure 'Enable Remote Network Access' is turned on in Intiface settings.")) {
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .navigationTitle("Intiface")
         .navigationBarTitleDisplayMode(.inline)
@@ -582,10 +543,7 @@ struct HandySettingsView: View {
                 Toggle("Enable The Handy", isOn: $handyManager.isEnabled)
                     .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
 
             Section(header: Text("Device Type"), footer: Text("The Handy uses HAMP protocol. The Oh. uses HVP protocol.")) {
                 Picker("Device", selection: $handyManager.deviceType) {
@@ -595,10 +553,7 @@ struct HandySettingsView: View {
                 .pickerStyle(.segmented)
                 .disabled(!handyManager.isEnabled)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
 
             if handyManager.deviceType == "The Handy" {
                 Section(header: Text("StashSync Controls")) {
@@ -625,10 +580,7 @@ struct HandySettingsView: View {
                             .tint(appearanceManager.tintColor)
                     }
                 }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                        .fill(Color.secondaryAppBackground)
-                )
+                .listRowBackground(Color.secondaryAppBackground)
                 .disabled(!handyManager.isEnabled)
             } else {
                 Section(header: Text("StashSync Controls")) {
@@ -644,10 +596,7 @@ struct HandySettingsView: View {
                             .tint(appearanceManager.tintColor)
                     }
                 }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                        .fill(Color.secondaryAppBackground)
-                )
+                .listRowBackground(Color.secondaryAppBackground)
                 .disabled(!handyManager.isEnabled)
             }
 
@@ -675,10 +624,7 @@ struct HandySettingsView: View {
                 }
                 .disabled(!handyManager.isEnabled)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .navigationTitle("The Handy")
         .navigationBarTitleDisplayMode(.inline)
@@ -697,10 +643,7 @@ struct LoveSpouseSettingsView: View {
                 Toggle("Enable Love Spouse", isOn: $loveSpouseManager.isEnabled)
                     .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
             Section(header: Text("Connection Status")) {
                 HStack {
@@ -710,17 +653,11 @@ struct LoveSpouseSettingsView: View {
                         .foregroundColor(loveSpouseManager.isConnected ? .green : .secondary)
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
             Section(footer: Text("Love Spouse 2.4g toys use BLE advertising. Ensure Bluetooth is enabled and the toy is in pairing/scan mode. Both toys in range will react simultaneously.")) {
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .navigationTitle("Love Spouse")
         .navigationBarTitleDisplayMode(.inline)
@@ -754,10 +691,7 @@ struct StashSyncSettingsView: View {
                 }
                 .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
             Section(header: Text("Sensitivity")) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -770,10 +704,7 @@ struct StashSyncSettingsView: View {
                 }.padding(.vertical, 4)
             }
             .disabled(!videoManager.isVideoSyncEnabled)
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
 
             Section(header: Text("Optical Flow Smoothing")) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -786,10 +717,7 @@ struct StashSyncSettingsView: View {
                 }
             }
             .disabled(!videoManager.isVideoSyncEnabled)
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
 
         }

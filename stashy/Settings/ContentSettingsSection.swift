@@ -23,17 +23,14 @@ struct ContentSettingsSection: View {
             }
 
             NavigationLink(destination: ToolsSettingsView()) {
-                Label("Tools", systemImage: "wand.and.stars")
+                Label("Tools", systemImage: "cube.box")
             }
 
             NavigationLink(destination: TabSettingsView()) {
                 Label("Tabs", systemImage: "square.grid.2x2")
             }
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 }
 
@@ -62,10 +59,7 @@ struct ToolsSettingsView: View {
                 }
                 .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
 
             Section("Tools Order") {
                 // Anchored Downloads
@@ -90,10 +84,7 @@ struct ToolsSettingsView: View {
                     tabManager.moveTools(from: indices, to: newOffset)
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .listStyle(.insetGrouped)
         .environment(\.editMode, .constant(.active))
@@ -145,10 +136,7 @@ struct TabSettingsView: View {
             } footer: {
                 Text("Reorder cards and toggle visibility. Dashboard is anchored at the top.")
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .listStyle(.insetGrouped)
         .environment(\.editMode, .constant(.active))

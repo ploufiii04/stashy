@@ -35,20 +35,14 @@ struct SecuritySettingsView: View {
                     }
                 }
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
             
             if securityManager.isPasscodeSet {
                 Section(header: Text("Options"), footer: Text("The app will automatically lock whenever it is moved to the background.")) {
                     Toggle("Auto-lock on Background", isOn: $securityManager.autoLockOnBackground)
                         .tint(appearanceManager.tintColor)
                 }
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                        .fill(Color.secondaryAppBackground)
-                )
+                .listRowBackground(Color.secondaryAppBackground)
             }
         }
         .navigationTitle("Security")

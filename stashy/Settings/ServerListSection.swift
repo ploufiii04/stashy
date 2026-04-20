@@ -43,20 +43,14 @@ struct ServerListSection: View {
             .onDelete { indexSet in
                 configManager.deleteServer(at: indexSet)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
 
             Button(action: {
                 showingAddServerSheet = true
             }) {
                 Label("Add New Server", systemImage: "plus")
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
     }
 }

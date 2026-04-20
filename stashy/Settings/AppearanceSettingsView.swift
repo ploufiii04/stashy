@@ -32,10 +32,7 @@ struct AppearanceSettingsView: View {
             }
             .pickerStyle(.segmented)
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     private var accentColorSection: some View {
@@ -67,10 +64,7 @@ struct AppearanceSettingsView: View {
             }
             .padding(.vertical, 8)
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     private var counterIconSection: some View {
@@ -82,10 +76,7 @@ struct AppearanceSettingsView: View {
             }
             .padding(.vertical, 8)
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     private func counterIconItem(for option: IconOption) -> some View {

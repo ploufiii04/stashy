@@ -59,10 +59,7 @@ struct PlaybackSettingsSection: View {
             .tint(appearanceManager.tintColor)
             #endif
         }
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                .fill(Color.secondaryAppBackground)
-        )
+        .listRowBackground(Color.secondaryAppBackground)
 
     }
 }

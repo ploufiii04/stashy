@@ -10,10 +10,7 @@ struct EditModeSettingsView: View {
                 Toggle("Enable Editing", isOn: $appearanceManager.isEditModeEnabled)
                     .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                    .fill(Color.secondaryAppBackground)
-            )
+            .listRowBackground(Color.secondaryAppBackground)
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Editing")

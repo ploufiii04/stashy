@@ -333,10 +333,7 @@ private struct ToolsServerView: View {
                             }
                         }
                     }
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                            .fill(Color.secondaryAppBackground)
-                    )
+                    .listRowBackground(Color.secondaryAppBackground)
                     
                     Section("Generate") {
                         taskRow(label: "Scene covers", icon: "photo.fill", taskId: "gen_covers") {
@@ -405,10 +402,7 @@ private struct ToolsServerView: View {
                             }
                         }
                     }
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                            .fill(Color.secondaryAppBackground)
-                    )
+                    .listRowBackground(Color.secondaryAppBackground)
                     
                     Section("Cache") {
                         taskRow(label: "Clear Image Cache", icon: "internaldrive", taskId: "cache_clear") {
@@ -416,10 +410,7 @@ private struct ToolsServerView: View {
                             showResult(title: "Cache Cleared", message: "Images will be reloaded from the server.")
                         }
                     }
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
-                            .fill(Color.secondaryAppBackground)
-                    )
+                    .listRowBackground(Color.secondaryAppBackground)
                 }
                 .navigationTitle("Server")
                 .scrollContentBackground(.hidden)
