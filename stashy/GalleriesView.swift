@@ -508,7 +508,7 @@ struct GalleryCardView: View {
     }
 }
 
-// MARK: - Gallery Item View (StashTok-style per-item view)
+// MARK: - Gallery Item View (Feeds-style per-item view)
 
 struct GalleryItemView: View {
     let image: StashImage
@@ -546,7 +546,7 @@ struct GalleryItemView: View {
     private var mediaLayer: some View {
         Group {
             if image.isAnimated {
-                ZoomableScrollView(isZoomed: $isZoomed, onTap: {
+                ZoomableScrollView(isZoomed: $isZoomed, onTap: { _ in
                     withAnimation(.easeInOut(duration: 0.4)) { showUI.toggle() }
                     if showUI { onInteraction() }
                 }) {
@@ -567,7 +567,7 @@ struct GalleryItemView: View {
                     }
                 }
             } else if image.isVideo {
-                ZoomableScrollView(isZoomed: $isZoomed, onTap: {
+                ZoomableScrollView(isZoomed: $isZoomed, onTap: { _ in
                     withAnimation(.easeInOut(duration: 0.4)) { showUI.toggle() }
                     if showUI { onInteraction() }
                 }) {
@@ -589,7 +589,7 @@ struct GalleryItemView: View {
                 }
             } else {
                 // Static image
-                ZoomableScrollView(isZoomed: $isZoomed, onTap: {
+                ZoomableScrollView(isZoomed: $isZoomed, onTap: { _ in
                     withAnimation(.easeInOut(duration: 0.4)) { showUI.toggle() }
                     if showUI { onInteraction() }
                 }) {
@@ -827,7 +827,7 @@ struct GalleryItemView: View {
     private var performerLabel: some View {
         if let performers = image.performers, let firstPerf = performers.first {
             let performerObj = Performer(
-                id: firstPerf.id, name: firstPerf.name, disambiguation: nil, birthdate: nil, country: nil, imagePath: nil, sceneCount: 0, galleryCount: nil, gender: nil, ethnicity: nil, height: nil, weight: nil, measurements: nil, fakeTits: nil, careerLength: nil, tattoos: nil, piercings: nil, aliasList: nil, favorite: nil, rating100: nil, createdAt: nil, updatedAt: nil, oCounter: nil
+                id: firstPerf.id, name: firstPerf.name, disambiguation: nil, birthdate: nil, country: nil, imagePath: nil, sceneCount: 0, galleryCount: nil, gender: nil, ethnicity: nil, height: nil, weight: nil, measurements: nil, fakeTits: nil, penis_length: nil, careerLength: nil, tattoos: nil, piercings: nil, aliasList: nil, favorite: nil, rating100: nil, createdAt: nil, updatedAt: nil, oCounter: nil
             )
             NavigationLink(destination: PerformerDetailView(performer: performerObj)) {
                 Text(firstPerf.name)
@@ -917,7 +917,7 @@ struct GalleryItemView: View {
         player?.seek(to: cmTime)
     }
 }
-// MARK: - Full Screen Image View (StashTok-style vertical paging)
+// MARK: - Full Screen Image View (Feeds-style vertical paging)
 
 struct FullScreenImageView: View {
     @Binding var images: [StashImage]

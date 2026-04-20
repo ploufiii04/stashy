@@ -44,7 +44,7 @@ struct PlaybackSettingsSection: View {
                         Text(quality.displayName).tag(quality)
                     }
                 } label: {
-                    Label("StashTok Quality", systemImage: "play.rectangle.on.rectangle")
+                    Label("Feeds Quality", systemImage: "play.rectangle.on.rectangle")
                 }
             } else {
                 Text("Connect to a server to configure quality settings.")

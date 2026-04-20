@@ -37,7 +37,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .media: return "Media"
         case .catalogue: return "Home"
         case .downloads: return "Downloads"
-        case .reels: return "StashTok"
+        case .reels: return "Feeds"
         case .search: return "Search"
         case .settings: return "Settings"
         case .groups: return "Groups"
@@ -204,6 +204,7 @@ enum ReelsModeType: String, Codable, CaseIterable {
     case markers
     case clips
     case previews
+    case pics
     
     var defaultTitle: String {
         switch self {
@@ -211,6 +212,7 @@ enum ReelsModeType: String, Codable, CaseIterable {
         case .markers: return "Markers"
         case .clips: return "Clips"
         case .previews: return "Previews"
+        case .pics: return "Pics"
         }
     }
     
@@ -220,6 +222,7 @@ enum ReelsModeType: String, Codable, CaseIterable {
         case .markers: return "bookmark.fill"
         case .clips: return "photo.on.rectangle.angled"
         case .previews: return "play.rectangle.on.rectangle.fill"
+        case .pics: return "photo.fill"
         }
     }
 }
@@ -332,13 +335,13 @@ class TabManager: ObservableObject {
     }
     
     var visibleTabs: [AppTab] {
-        // Fixed order: Home, StashTok (optional), StashLine (optional), Settings
+        // Fixed order: Home, Feeds (optional), StashLine (optional), Settings
         // Dashboard, Studios, Tags, Performers, Scenes, Galleries are now sub-tabs of Home
         let reelsVisible = tabs.first(where: { $0.id == .reels })?.isVisible ?? true
-        let stashlineVisible = tabs.first(where: { $0.id == .stashline })?.isVisible ?? true
+        let downloadsVisible = tabs.first(where: { $0.id == .downloads })?.isVisible ?? true
         var result: [AppTab] = [.catalogue]
         if reelsVisible { result.append(.reels) }
-        if stashlineVisible { result.append(.stashline) }
+        if downloadsVisible { result.append(.downloads) }
         result.append(.settings)
         return result
     }

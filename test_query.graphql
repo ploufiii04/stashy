@@ -1,0 +1,8 @@
+query FindImagesTest {
+  findImages(
+    filter: { page: 1, per_page: 5 }
+    image_filter: { performers: { value: ["1"], modifier: INCLUDES } }
+  ) {
+    count
+  }
+}

@@ -562,10 +562,16 @@ struct GroupDetailView: View {
     @Environment(\.verticalSizeClass) var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getPersistentDetailSortOption(for: DetailViewContext.group.rawValue) ?? "") ?? .dateDesc
+    @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
+    @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     
     enum DetailTab: String, CaseIterable {
         case scenes = "Scenes"
         case galleries = "Galleries"
+        case performers = "Performers"
+        case studios = "Studios"
+        case tags = "Tags"
+        case images = "Images"
     }
     @State private var selectedDetailTab: DetailTab = .scenes
 
@@ -596,9 +602,20 @@ struct GroupDetailView: View {
     private var effectiveGalleries: Int {
         max(viewModel.totalGroupGalleries, selectedGroup.gallery_count ?? 0)
     }
-    
+
+    private var availableTabs: [DetailTab] {
+        var tabs: [DetailTab] = []
+        if (selectedGroup.scene_count ?? 0) > 0 { tabs.append(.scenes) }
+        if effectiveGalleries > 0 { tabs.append(.galleries) }
+        if viewModel.totalDetailPerformers > 0 { tabs.append(.performers) }
+        if viewModel.totalDetailStudios > 0 { tabs.append(.studios) }
+        if viewModel.totalDetailTags > 0 { tabs.append(.tags) }
+        if viewModel.totalDetailImages > 0 { tabs.append(.images) }
+        return tabs
+    }
+
     private var showTabSwitcher: Bool {
-        (selectedGroup.scene_count ?? 0) > 0 && effectiveGalleries > 0
+        availableTabs.count > 1
     }
 
     var body: some View {
@@ -618,7 +635,7 @@ struct GroupDetailView: View {
                     } else {
                         Text("No scenes found").foregroundColor(.secondary).padding(.top, 40)
                     }
-                } else {
+                } else if selectedDetailTab == .galleries {
                     if !viewModel.groupGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingGroupGalleries {
@@ -629,6 +646,14 @@ struct GroupDetailView: View {
                     } else {
                         Text("No galleries found").foregroundColor(.secondary).padding(.top, 40)
                     }
+                } else if selectedDetailTab == .performers {
+                    performerGrid
+                } else if selectedDetailTab == .studios {
+                    studioGrid
+                } else if selectedDetailTab == .tags {
+                    tagGrid
+                } else if selectedDetailTab == .images {
+                    imageGrid
                 }
             }
         }
@@ -637,25 +662,54 @@ struct GroupDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                if showTabSwitcher {
-                    Picker("View", selection: $selectedDetailTab) {
-                        Text("Scenes").tag(DetailTab.scenes)
-                        Text("Galleries").tag(DetailTab.galleries)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                } else {
-                    Text(selectedGroup.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                }
+                Text(selectedGroup.name)
+                    .font(.headline)
+                    .lineLimit(1)
             }
             
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if showTabSwitcher {
+                    Menu {
+                        ForEach(availableTabs, id: \.self) { tab in
+                            Button(action: { 
+                                withAnimation(DesignTokens.Animation.quick) {
+                                    selectedDetailTab = tab 
+                                }
+                            }) {
+                                HStack {
+                                    Text(tab.rawValue)
+                                    if selectedDetailTab == tab {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(selectedDetailTab.rawValue)
+                                .font(.system(size: 14, weight: .semibold))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(appearanceManager.tintColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(appearanceManager.tintColor.opacity(0.1))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
         }
         .floatingActionBar {
             HStack(spacing: 0) {
                 if selectedDetailTab == .scenes {
                     sceneSortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .galleries {
+                    gallerySortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .images {
+                    imageSortMenu
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -665,9 +719,83 @@ struct GroupDetailView: View {
                 viewModel.fetchGroupScenes(groupId: selectedGroup.id, sortBy: selectedSortOption, isInitialLoad: true)
             }
             if viewModel.groupGalleries.isEmpty {
-                viewModel.fetchGroupGalleries(groupId: selectedGroup.id, isInitialLoad: true)
+                viewModel.fetchGroupGalleries(groupId: selectedGroup.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
+            }
+            
+            // Fetch extended content
+            viewModel.fetchDetailPerformers(groupId: selectedGroup.id)
+            viewModel.fetchDetailStudios(groupId: selectedGroup.id)
+            viewModel.fetchDetailTags(groupId: selectedGroup.id)
+            viewModel.fetchDetailImages(groupId: selectedGroup.id, sortBy: selectedImageSortOption)
+        }
+    }
+    
+    private var performerGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailPerformers) { performer in
+                NavigationLink(destination: PerformerDetailView(performer: performer)) {
+                    PerformerCardView(performer: performer)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailPerformers { ProgressView().padding() }
+            else if viewModel.hasMoreDetailPerformers {
+                Color.clear.onAppear { viewModel.fetchDetailPerformers(groupId: selectedGroup.id, isInitialLoad: false) }
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 32)
+    }
+    
+    private var studioGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailStudios) { subStudio in
+                NavigationLink(destination: StudioDetailView(studio: subStudio)) {
+                    StudioCardView(studio: subStudio)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailStudios { ProgressView().padding() }
+            else if viewModel.hasMoreDetailStudios {
+                Color.clear.onAppear { viewModel.fetchDetailStudios(groupId: selectedGroup.id, isInitialLoad: false) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 32)
+    }
+    
+    private var tagGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailTags) { tag in
+                NavigationLink(destination: TagsView()) {
+                    TagCardView(tag: tag)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailTags { ProgressView().padding() }
+            else if viewModel.hasMoreDetailTags {
+                Color.clear.onAppear { viewModel.fetchDetailTags(groupId: selectedGroup.id, isInitialLoad: false) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 32)
+    }
+    
+    private var imageGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailImages) { image in
+                NavigationLink(destination: FullScreenImageView(images: .constant(viewModel.detailImages), selectedImageId: image.id)) {
+                    ImageThumbnailCard(image: image)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailImages { ProgressView().padding() }
+            else if viewModel.hasMoreDetailImages {
+                Color.clear.onAppear { viewModel.fetchDetailImages(groupId: selectedGroup.id, isInitialLoad: false) }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 32)
     }
 
     private var sceneSortMenu: some View {
@@ -757,6 +885,182 @@ struct GroupDetailView: View {
         selectedSortOption = option
         TabManager.shared.setPersistentDetailSortOption(for: DetailViewContext.group.rawValue, option: option.rawValue)
         viewModel.fetchGroupScenes(groupId: selectedGroup.id, sortBy: option, isInitialLoad: true)
+    }
+
+    private func changeGallerySortOption(to option: StashDBViewModel.GallerySortOption) {
+        if option == .random && selectedGallerySortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedGallerySortOption = option
+        viewModel.fetchGroupGalleries(groupId: selectedGroup.id, sortBy: option, isInitialLoad: true)
+    }
+
+    private func changeImageSortOption(to option: StashDBViewModel.ImageSortOption) {
+        if option == .random && selectedImageSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedImageSortOption = option
+        viewModel.fetchDetailImages(groupId: selectedGroup.id, sortBy: option, isInitialLoad: true)
+    }
+
+    private var gallerySortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeGallerySortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedGallerySortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Name
+            Menu {
+                Button(action: { changeGallerySortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedGallerySortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Name")
+                    if selectedGallerySortOption == .titleAsc || selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeGallerySortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedGallerySortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedGallerySortOption == .dateDesc || selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeGallerySortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedGallerySortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedGallerySortOption == .ratingDesc || selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+    
+    private var imageSortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeImageSortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedImageSortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Title
+            Menu {
+                Button(action: { changeImageSortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedImageSortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Title")
+                    if selectedImageSortOption == .titleAsc || selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeImageSortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedImageSortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedImageSortOption == .dateDesc || selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeImageSortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedImageSortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedImageSortOption == .ratingDesc || selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
     }
 
     private var sceneGrid: some View {

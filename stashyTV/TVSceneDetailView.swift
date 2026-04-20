@@ -399,25 +399,31 @@ struct TVSceneDetailView: View {
             hasAddedPlay = true
         }
         
-        // Prefer HLS stream
-        if let hlsStream = sceneStreams.first(where: { $0.mime_type == "application/vnd.apple.mpegurl" }) {
-            playerViewModel.setupPlayer(url: URL(string: hlsStream.url)!, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
+        let quality = ServerConfigManager.shared.activeConfig?.defaultQuality ?? .original
+        
+        // Use bestStream() which respects quality settings and format compatibility.
+        // For compatible formats (MP4) at Original quality, bestStream returns nil
+        // → use direct stream path (much faster seeking than HLS transcoding).
+        let sceneWithStreams = scene.withStreams(sceneStreams)
+        if let streamURL = sceneWithStreams.bestStream(for: quality) {
+            print("📺 TV: Using quality-selected stream (\(quality.displayName))")
+            playerViewModel.setupPlayer(url: streamURL, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
             return
         }
-
-        // Fallback to MP4
-        if let mp4Stream = sceneStreams.first(where: { $0.mime_type == "video/mp4" }) {
-            playerViewModel.setupPlayer(url: URL(string: mp4Stream.url)!, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
-            return
-        }
-
-        // Fallback to direct stream
+        
+        // Direct stream fallback (original quality for compatible formats)
         if let directPath = scene.paths?.stream {
+            let fullURL: String
             if directPath.starts(with: "http://") || directPath.starts(with: "https://") {
-                playerViewModel.setupPlayer(url: URL(string: directPath)!, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
-            } else if let config = ServerConfigManager.shared.loadConfig() {
-                let fullURL = "\(config.baseURL)\(directPath)"
-                playerViewModel.setupPlayer(url: URL(string: fullURL)!, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
+                fullURL = directPath
+            } else if let config = ServerConfigManager.shared.activeConfig {
+                fullURL = "\(config.baseURL)\(directPath)"
+            } else {
+                return
+            }
+            if let url = URL(string: fullURL) {
+                print("📺 TV: Using direct stream (Original quality)")
+                playerViewModel.setupPlayer(url: url, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
             }
         }
     }

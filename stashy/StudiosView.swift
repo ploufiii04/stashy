@@ -34,7 +34,10 @@ struct StudiosView: View {
 
     private var activeLiveFilterDict: [String: Any] {
         var dict: [String: Any] = [:]
-        if let fav = liveFilterFavorite { dict["favorite"] = fav }
+        if let fav = liveFilterFavorite { 
+            // For Studios, the filter key appears to be "favorite"
+            dict["favorite"] = fav 
+        }
         if liveFilterMinRating > 0 {
             dict["rating100"] = ["value": (liveFilterMinRating * 20) - 1, "modifier": "GREATER_THAN"]
         }
@@ -748,17 +751,17 @@ struct StudioLiveFilterSheet: View {
         NavigationView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(spacing: 0) {
+                    filterRow(label: "Favorite") {
+                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
+                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
+                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
                     filterRow(label: "Rating") {
                         filterChip("Any", isActive: minRating == 0) { minRating = 0; onApply() }
                         ForEach(1...5, id: \.self) { star in
                             filterChip("\(star)★", isActive: minRating == star) { minRating = star; onApply() }
                         }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Favorite") {
-                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
-                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
-                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
                     }
                     Divider().padding(.leading, 16)
                     filterRow(label: "Scenes") {

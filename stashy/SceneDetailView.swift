@@ -609,7 +609,10 @@ struct SceneDetailView: View {
             startPlayback(resume: false)
         }
         
-        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+        // Optimization: Small tolerances (0.1s) allow much smoother scrubbing 
+        // by avoiding heavy frame-exact calculations while staying visually precise.
+        player?.seek(to: targetTime, toleranceBefore: CMTime(seconds: 0.1, preferredTimescale: 600), toleranceAfter: CMTime(seconds: 0.1, preferredTimescale: 600))
         player?.play()
         if handyManager.isSyncing {
             handyManager.play(at: seconds)
@@ -702,6 +705,7 @@ extension ScenePerformer {
             weight: nil,
             measurements: nil,
             fakeTits: nil,
+            penis_length: nil,
             careerLength: nil,
             tattoos: nil,
             piercings: nil,

@@ -24,7 +24,7 @@ struct ReelsModeSettingsView: View {
                     get: { isEnabled },
                     set: { _ in tabManager.toggle(.reels) }
                 )) {
-                    Label("Show StashTok Tab", systemImage: "play.rectangle.on.rectangle")
+                    Label("Show Feeds Tab", systemImage: "play.rectangle.on.rectangle")
                 }
                 .tint(appearanceManager.tintColor)
             }
@@ -81,6 +81,19 @@ struct ReelsModeSettingsView: View {
                                 filterPicker(for: modeConfig.type)
                             }
                             .padding(.top, 4)
+
+                            if modeConfig.type == .pics {
+                                Toggle(isOn: Binding(
+                                    get: { UserDefaults.standard.object(forKey: "stashline_crop_enabled") as? Bool ?? true },
+                                    set: { UserDefaults.standard.set($0, forKey: "stashline_crop_enabled") }
+                                )) {
+                                    Text("Crop to 4:5 / 16:9")
+                                        .foregroundColor(.secondary)
+                                        .font(.subheadline)
+                                }
+                                .tint(appearanceManager.tintColor)
+                                .padding(.top, 4)
+                            }
                         }
                     }
                     .padding(.vertical, 6)
@@ -99,7 +112,7 @@ struct ReelsModeSettingsView: View {
         .listStyle(.insetGrouped)
         .environment(\.editMode, .constant(.active))
         .deleteDisabled(true)
-        .navigationTitle("StashTok")
+        .navigationTitle("Feeds")
         .applyAppBackground()
         .onAppear {
             viewModel.fetchSavedFilters()
@@ -156,6 +169,18 @@ struct ReelsModeSettingsView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+
+        case .pics:
+            Picker("", selection: Binding(
+                get: { StashDBViewModel.ImageSortOption(rawValue: tabManager.getPersistentSortOption(for: .stashline) ?? "") ?? .dateDesc },
+                set: { tabManager.setPersistentSortOption(for: .stashline, option: $0.rawValue) }
+            )) {
+                ForEach(StashDBViewModel.ImageSortOption.allCases, id: \.self) { option in
+                    Text(option.displayName).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
         }
     }
 
@@ -167,6 +192,7 @@ struct ReelsModeSettingsView: View {
             case .markers: return .sceneMarkers
             case .clips: return .images
             case .previews: return .scenes
+            case .pics: return .images
             }
         }()
 
@@ -245,6 +271,25 @@ struct ReelsModeSettingsView: View {
                             tabManager.setDefaultPreviewFilter(for: .reels, filterId: nil, filterName: nil)
                         } else if let filter = filters.first(where: { $0.id == newId }) {
                             tabManager.setDefaultPreviewFilter(for: .reels, filterId: filter.id, filterName: filter.name)
+                        }
+                    }
+                )) {
+                    Text("None").tag("")
+                    ForEach(filters) { filter in
+                        Text(filter.name).tag(filter.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+
+            case .pics:
+                Picker("", selection: Binding(
+                    get: { tabManager.getDefaultFilterId(for: .stashline) ?? "" },
+                    set: { newId in
+                        if newId.isEmpty {
+                            tabManager.setDefaultFilter(for: .stashline, filterId: nil, filterName: nil)
+                        } else if let filter = filters.first(where: { $0.id == newId }) {
+                            tabManager.setDefaultFilter(for: .stashline, filterId: filter.id, filterName: filter.name)
                         }
                     }
                 )) {

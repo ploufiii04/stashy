@@ -100,7 +100,14 @@ func createPlayer(for url: URL) -> AVPlayer {
     
     let asset = AVURLAsset(url: authenticatedURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
     let playerItem = AVPlayerItem(asset: asset)
+    
+    // Performance Optimizations for scrubbing and playback
+    playerItem.preferredForwardBufferDuration = 10 // Pre-buffer 10 seconds ahead
+    playerItem.automaticallyPreservesTimeOffsetFromLive = true
+    playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+    
     let player = AVPlayer(playerItem: playerItem)
+    player.automaticallyWaitsToMinimizeStalling = true // Ensure smooth playback on slow networks
     player.allowsExternalPlayback = true
     player.preventsDisplaySleepDuringVideoPlayback = true
     return player
@@ -314,11 +321,11 @@ struct AnimatedWebView: UIViewRepresentable {
 /// A wrapper around UIScrollView that provides pinch-to-zoom and panning for any SwiftUI view.
 struct ZoomableScrollView<Content: View>: UIViewRepresentable {
     private var content: Content
-    private var onTap: (() -> Void)?
+    private var onTap: ((CGPoint) -> Void)?
     private var onLongPress: ((Bool) -> Void)?
     @Binding var isZoomed: Bool
     
-    init(isZoomed: Binding<Bool> = .constant(false), onTap: (() -> Void)? = nil, onLongPress: ((Bool) -> Void)? = nil, @ViewBuilder content: () -> Content) {
+    init(isZoomed: Binding<Bool> = .constant(false), onTap: ((CGPoint) -> Void)? = nil, onLongPress: ((Bool) -> Void)? = nil, @ViewBuilder content: () -> Content) {
         self._isZoomed = isZoomed
         self.onTap = onTap
         self.onLongPress = onLongPress
@@ -383,10 +390,10 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
     class Coordinator: NSObject, UIScrollViewDelegate {
         var hostingController: UIHostingController<Content>
         var isZoomed: Binding<Bool>
-        var onTap: (() -> Void)?
+        var onTap: ((CGPoint) -> Void)?
         var onLongPress: ((Bool) -> Void)?
         
-        init(hostingController: UIHostingController<Content>, isZoomed: Binding<Bool>, onTap: (() -> Void)? = nil, onLongPress: ((Bool) -> Void)? = nil) {
+        init(hostingController: UIHostingController<Content>, isZoomed: Binding<Bool>, onTap: ((CGPoint) -> Void)? = nil, onLongPress: ((Bool) -> Void)? = nil) {
             self.hostingController = hostingController
             self.isZoomed = isZoomed
             self.onTap = onTap
@@ -412,7 +419,8 @@ struct ZoomableScrollView<Content: View>: UIViewRepresentable {
         }
         
         @objc func handleSingleTap(_ gesture: UITapGestureRecognizer) {
-            onTap?()
+            let location = gesture.location(in: gesture.view?.window)
+            onTap?(location)
         }
         
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -898,7 +906,8 @@ public struct FilterMapper {
         }
         
         // String extraction fields (Stash API expects simple String for these, not a criterion object)
-        let stringExtractionFields: Set<String> = ["is_missing", "has_markers", "has_image"]
+        // Note: `has_image` is treated as boolean in practice (see booleanFields below).
+        let stringExtractionFields: Set<String> = ["is_missing", "has_markers"]
         if stringExtractionFields.contains(key) {
             if let vd = subDict["value"] as? [String: Any], let inner = vd["value"] as? String { return inner }
             if let valArray = subDict["value"] as? [Any], let first = valArray.first as? String { return first }
@@ -955,7 +964,7 @@ public struct FilterMapper {
         }
         
         // Boolean field flattening (Stash API expects simple Bool for these, not a criterion object)
-        let booleanFields: Set<String> = ["interactive", "organized", "favorite", "performer_favorite", "studio_favorite", "gallery_favorite", "filter_favorites"]
+        let booleanFields: Set<String> = ["interactive", "organized", "favorite", "performer_favorite", "studio_favorite", "gallery_favorite", "filter_favorites", "has_image"]
         if booleanFields.contains(key) {
             if let v = subDict["value"] {
                 return castToBool(v)

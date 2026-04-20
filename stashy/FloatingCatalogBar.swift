@@ -21,7 +21,7 @@ struct FloatingActionBar<Content: View>: View {
                     .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
             )
             .frame(height: 36)
-            .padding(.horizontal, 80)
+            .padding(.horizontal, 24)
             .padding(.bottom, 6)
     }
 }

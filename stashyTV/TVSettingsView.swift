@@ -117,6 +117,38 @@ struct TVSettingsView: View {
                     Text("Appearance")
                 }
 
+                // MARK: - Playback
+                Section {
+                    if let config = configManager.activeConfig {
+                        Picker(selection: Binding(
+                            get: { config.defaultQuality },
+                            set: { newValue in
+                                var updated = config
+                                updated.defaultQuality = newValue
+                                configManager.saveConfig(updated)
+                                configManager.addOrUpdateServer(updated)
+                            }
+                        )) {
+                            ForEach(StreamingQuality.allCases, id: \.self) { quality in
+                                Text(quality.displayName).tag(quality)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "film")
+                                    .foregroundColor(appearanceManager.tintColor)
+                                Text("Streaming Quality")
+                            }
+                        }
+                    } else {
+                        Text("Connect to a server to configure quality.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Playback")
+                } footer: {
+                    Text("\"Original\" streams MP4 files directly for the best seeking performance. Lower quality options use HLS transcoding.")
+                }
+
                 // MARK: - About
                 Section {
                     HStack {

@@ -121,7 +121,6 @@
 		DFST0000B2F30A000000000B /* ContentSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFST0000A2F30A000000000A /* ContentSettingsSection.swift */; };
 		DFST0000D2F30A000000000D /* DashboardSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFST0000C2F30A000000000C /* DashboardSettingsView.swift */; };
 		DFST0000F2F30A000000000F /* ReelsModeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFST0000E2F30A000000000E /* ReelsModeSettingsView.swift */; };
-		DFSL1NST2F30A0000000SETB /* StashLineSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFSL1NST2F30A0000000SETF /* StashLineSettingsView.swift */; };
 		DFST000112F30A0000000011 /* DefaultSortView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFST000102F30A0000000010 /* DefaultSortView.swift */; };
 		DFST000132F30A0000000013 /* DefaultFilterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFST000122F30A0000000012 /* DefaultFilterView.swift */; };
 		DFST000152F30A0000000015 /* ServerStatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFST000142F30A0000000014 /* ServerStatisticsView.swift */; };
@@ -206,7 +205,6 @@
 		DFST0000A2F30A000000000A /* ContentSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSettingsSection.swift; sourceTree = "<group>"; };
 		DFST0000C2F30A000000000C /* DashboardSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardSettingsView.swift; sourceTree = "<group>"; };
 		DFST0000E2F30A000000000E /* ReelsModeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelsModeSettingsView.swift; sourceTree = "<group>"; };
-		DFSL1NST2F30A0000000SETF /* StashLineSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StashLineSettingsView.swift; sourceTree = "<group>"; };
 		DFST000102F30A0000000010 /* DefaultSortView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultSortView.swift; sourceTree = "<group>"; };
 		DFST000122F30A0000000012 /* DefaultFilterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultFilterView.swift; sourceTree = "<group>"; };
 		DFST000142F30A0000000014 /* ServerStatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerStatisticsView.swift; sourceTree = "<group>"; };
@@ -376,7 +374,6 @@
 				DFST000102F30A0000000010 /* DefaultSortView.swift */,
 				DFST000082F30A0000000008 /* PlaybackSettingsSection.swift */,
 				DFST0000E2F30A000000000E /* ReelsModeSettingsView.swift */,
-				DFSL1NST2F30A0000000SETF /* StashLineSettingsView.swift */,
 				DFST000062F30A0000000006 /* ServerDetailView.swift */,
 				DFST000042F30A0000000004 /* ServerListSection.swift */,
 				DFST000142F30A0000000014 /* ServerStatisticsView.swift */,
@@ -521,7 +518,6 @@
 				DFST0000B2F30A000000000B /* ContentSettingsSection.swift in Sources */,
 				DFST0000D2F30A000000000D /* DashboardSettingsView.swift in Sources */,
 				DFST0000F2F30A000000000F /* ReelsModeSettingsView.swift in Sources */,
-				DFSL1NST2F30A0000000SETB /* StashLineSettingsView.swift in Sources */,
 				DFST000112F30A0000000011 /* DefaultSortView.swift in Sources */,
 				372E2D992F64272300603361 /* VideoAnalysisManager.swift in Sources */,
 				DFST000132F30A0000000013 /* DefaultFilterView.swift in Sources */,

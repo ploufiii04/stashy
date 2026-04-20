@@ -243,6 +243,39 @@ class StashDBViewModel: ObservableObject {
     // Data properties
     @Published var statistics: Statistics?
     @Published var scenes: [Scene] = []
+    // Detailed Content for DetailViews (Tag, Performer, Studio)
+    @Published var detailStudios: [Studio] = []
+    @Published var detailTags: [Tag] = []
+    @Published var detailGroups: [StashGroup] = []
+    @Published var detailPerformers: [Performer] = []
+    @Published var detailImages: [StashImage] = []
+    
+    @Published var totalDetailStudios = 0
+    @Published var totalDetailTags = 0
+    @Published var totalDetailGroups = 0
+    @Published var totalDetailPerformers = 0
+    @Published var totalDetailImages = 0
+    
+    @Published var isLoadingDetailStudios = false
+    @Published var isLoadingDetailTags = false
+    @Published var isLoadingDetailGroups = false
+    @Published var isLoadingDetailPerformers = false
+    @Published var isLoadingDetailImages = false
+    
+    var hasMoreDetailStudios = false
+    var hasMoreDetailTags = false
+    var hasMoreDetailGroups = false
+    var hasMoreDetailPerformers = false
+    var hasMoreDetailImages = false
+    
+    var currentDetailStudioPage = 1
+    var currentDetailTagPage = 1
+    var currentDetailGroupPage = 1
+    var currentDetailPerformerPage = 1
+    var currentDetailPerformerSortOption: PerformerSortOption = .nameAsc
+    var currentDetailImagePage = 1
+    private var currentDetailImageSortOption: ImageSortOption = .dateDesc
+    
     @Published var performers: [Performer] = []
     @Published var studios: [Studio] = []
     
@@ -1433,13 +1466,13 @@ class StashDBViewModel: ObservableObject {
             }
         }
 
-        // Merge live filter on top of saved filter (already in correct API format, no sanitize needed)
+        // Merge live filter on top of saved filter
         if !previewOnly && !currentSceneLiveFilter.isEmpty {
             var merged = (variables["scene_filter"] as? [String: Any]) ?? [:]
             for (key, value) in currentSceneLiveFilter {
                 merged[key] = value
             }
-            variables["scene_filter"] = merged
+            variables["scene_filter"] = sanitizeFilter(merged)
         }
         
         let body: [String: Any] = [
@@ -1908,21 +1941,23 @@ class StashDBViewModel: ObservableObject {
         
         // 3. Force Performer if selected
         if let performer = performer {
+            print("🔍 mergeFilterWithCriteria: Forcing Performer \(performer.name) (\(performer.id))")
             criteria.removeAll { ($0["id"] as? String) == "performers" }
             criteria.append([
                 "id": "performers",
                 "value": [performer.id],
-                "modifier": "INCLUDES_ALL"
+                "modifier": "INCLUDES"
             ])
         }
 
         // 4. Force Tags if selected
         if !tags.isEmpty {
+            print("🔍 mergeFilterWithCriteria: Forcing Tags \(tags.map { $0.name })")
             criteria.removeAll { ($0["id"] as? String) == "tags" }
             criteria.append([
                 "id": "tags",
                 "value": tags.map { $0.id },
-                "modifier": "INCLUDES_ALL"
+                "modifier": "INCLUDES"
             ])
         }
         
@@ -1967,9 +2002,9 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentPerformerGalleryPage + 1
         
         // Sort Logic
-        // Sort Logic
-        let sortField = sortBy.sortField
-        let sortDirection = sortBy.direction
+        let sortByToUse = isInitialLoad ? sortBy : currentPerformerGallerySortOption
+        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortDirection = sortByToUse.direction
         
         // Find galleries with performer filter
         let query = GraphQLQueries.queryWithFragments("findGalleries")
@@ -2039,9 +2074,9 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentStudioGalleryPage + 1
         
         // Sort Logic
-        // Sort Logic
-        let sortField = sortBy.sortField
-        let sortDirection = sortBy.direction
+        let sortByToUse = isInitialLoad ? sortBy : currentStudioGallerySortOption
+        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortDirection = sortByToUse.direction
         
         // Find galleries with studio filter
         let query = GraphQLQueries.queryWithFragments("findGalleries")
@@ -2184,6 +2219,273 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Detail Content Fetching
+    
+    func fetchDetailStudios(performerId: String? = nil, tagId: String? = nil, parentStudioId: String? = nil, groupId: String? = nil, isInitialLoad: Bool = true) {
+        if isInitialLoad {
+            currentDetailStudioPage = 1
+            detailStudios = []
+            isLoadingDetailStudios = true
+            hasMoreDetailStudios = true
+        } else {
+            isLoadingDetailStudios = true
+        }
+        
+        let page = isInitialLoad ? 1 : currentDetailStudioPage + 1
+        let query = GraphQLQueries.queryWithFragments("findStudios")
+        
+        var studioFilter: [String: Any] = [:]
+        if let pid = performerId {
+            studioFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+        }
+        if let tid = tagId {
+            studioFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+        }
+        if let psid = parentStudioId {
+            studioFilter["parent_id"] = psid
+        }
+        if let gid = groupId {
+            studioFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+        }
+        
+        let variables: [String: Any] = [
+            "filter": ["page": page, "per_page": 20, "sort": "name", "direction": "ASC"],
+            "studio_filter": studioFilter
+        ]
+        
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
+              
+        performGraphQLQuery(query: bodyString) { (response: StudiosResponse?) in
+            DispatchQueue.main.async {
+                if let result = response?.data?.findStudios {
+                    if isInitialLoad {
+                        self.detailStudios = result.studios
+                        self.totalDetailStudios = result.count
+                    } else {
+                        self.detailStudios.append(contentsOf: result.studios)
+                    }
+                    self.hasMoreDetailStudios = result.studios.count == 20
+                    self.currentDetailStudioPage = page
+                }
+                self.isLoadingDetailStudios = false
+            }
+        }
+    }
+    
+    func fetchDetailTags(performerId: String? = nil, studioId: String? = nil, groupId: String? = nil, isInitialLoad: Bool = true) {
+        if isInitialLoad {
+            currentDetailTagPage = 1
+            detailTags = []
+            isLoadingDetailTags = true
+            hasMoreDetailTags = true
+        } else {
+            isLoadingDetailTags = true
+        }
+        
+        let page = isInitialLoad ? 1 : currentDetailTagPage + 1
+        let query = GraphQLQueries.queryWithFragments("findTags")
+        
+        var tagFilter: [String: Any] = [:]
+        if let pid = performerId {
+            tagFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+        }
+        if let sid = studioId {
+            tagFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+        }
+        if let gid = groupId {
+            tagFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+        }
+        
+        let variables: [String: Any] = [
+            "filter": ["page": page, "per_page": 40, "sort": "name", "direction": "ASC"],
+            "tag_filter": tagFilter
+        ]
+        
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
+              
+        performGraphQLQuery(query: bodyString) { (response: TagsResponse?) in
+            DispatchQueue.main.async {
+                if let result = response?.data?.findTags {
+                    if isInitialLoad {
+                        self.detailTags = result.tags
+                        self.totalDetailTags = result.count
+                    } else {
+                        self.detailTags.append(contentsOf: result.tags)
+                    }
+                    self.hasMoreDetailTags = result.tags.count == 40
+                    self.currentDetailTagPage = page
+                }
+                self.isLoadingDetailTags = false
+            }
+        }
+    }
+    
+    func fetchDetailGroups(performerId: String? = nil, tagId: String? = nil, studioId: String? = nil, groupId: String? = nil, isInitialLoad: Bool = true) {
+        if isInitialLoad {
+            currentDetailGroupPage = 1
+            detailGroups = []
+            isLoadingDetailGroups = true
+            hasMoreDetailGroups = true
+        } else {
+            isLoadingDetailGroups = true
+        }
+        
+        let page = isInitialLoad ? 1 : currentDetailGroupPage + 1
+        let query = GraphQLQueries.queryWithFragments("findGroups")
+        
+        var groupFilter: [String: Any] = [:]
+        if let pid = performerId {
+            groupFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+        }
+        if let tid = tagId {
+            groupFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+        }
+        if let sid = studioId {
+            groupFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+        }
+        if let gid = groupId {
+             groupFilter["id"] = ["value": [gid], "modifier": "NOT_EQUALS"] // Don't show self in sub-groups?
+        }
+        
+        let variables: [String: Any] = [
+            "filter": ["page": page, "per_page": 20, "sort": "name", "direction": "ASC"],
+            "group_filter": groupFilter
+        ]
+        
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
+              
+        performGraphQLQuery(query: bodyString) { (response: GroupsResponse?) in
+            DispatchQueue.main.async {
+                if let result = response?.data?.findGroups {
+                    if isInitialLoad {
+                        self.detailGroups = result.groups
+                        self.totalDetailGroups = result.count
+                    } else {
+                        self.detailGroups.append(contentsOf: result.groups)
+                    }
+                    self.hasMoreDetailGroups = result.groups.count == 20
+                    self.currentDetailGroupPage = page
+                }
+                self.isLoadingDetailGroups = false
+            }
+        }
+    }
+    
+    func fetchDetailPerformers(tagId: String? = nil, studioId: String? = nil, groupId: String? = nil, sortBy: PerformerSortOption = .nameAsc, isInitialLoad: Bool = true) {
+        if isInitialLoad {
+            currentDetailPerformerPage = 1
+            currentDetailPerformerSortOption = sortBy
+            detailPerformers = []
+            isLoadingDetailPerformers = true
+            hasMoreDetailPerformers = true
+        } else {
+            isLoadingDetailPerformers = true
+        }
+        
+        let page = isInitialLoad ? 1 : currentDetailPerformerPage + 1
+        let query = GraphQLQueries.queryWithFragments("findPerformers")
+        
+        var performerFilter: [String: Any] = [:]
+        if let tid = tagId {
+            performerFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+        }
+        if let sid = studioId {
+            performerFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+        }
+        if let gid = groupId {
+            performerFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+        }
+        
+        let sortByToUse = isInitialLoad ? sortBy : currentDetailPerformerSortOption
+        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        
+        let variables: [String: Any] = [
+            "filter": ["page": page, "per_page": 20, "sort": sortField, "direction": sortByToUse.direction],
+            "performer_filter": sanitizeFilter(performerFilter)
+        ]
+        
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
+              
+        performGraphQLQuery(query: bodyString) { (response: PerformersResponse?) in
+            DispatchQueue.main.async {
+                if let result = response?.data?.findPerformers {
+                    if isInitialLoad {
+                        self.detailPerformers = result.performers
+                        self.totalDetailPerformers = result.count
+                    } else {
+                        self.detailPerformers.append(contentsOf: result.performers)
+                    }
+                    self.hasMoreDetailPerformers = result.performers.count == 20
+                    self.currentDetailPerformerPage = page
+                }
+                self.isLoadingDetailPerformers = false
+            }
+        }
+    }
+    
+    func fetchDetailImages(performerId: String? = nil, tagId: String? = nil, studioId: String? = nil, groupId: String? = nil, sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true) {
+        if isInitialLoad {
+            currentDetailImagePage = 1
+            currentDetailImageSortOption = sortBy
+            detailImages = []
+            isLoadingDetailImages = true
+            hasMoreDetailImages = true
+        } else {
+            isLoadingDetailImages = true
+        }
+        
+        let page = isInitialLoad ? 1 : currentDetailImagePage + 1
+        let query = GraphQLQueries.queryWithFragments("findImages")
+        
+        var imageFilter: [String: Any] = [:]
+        if let pid = performerId {
+            imageFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+        }
+        if let tid = tagId {
+            imageFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+        }
+        if let sid = studioId {
+            imageFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+        }
+        if let gid = groupId {
+            imageFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+        }
+        
+        let sortByToUse = isInitialLoad ? sortBy : currentDetailImageSortOption
+        let variables: [String: Any] = [
+            "filter": [
+                "page": page,
+                "per_page": 40,
+                "sort": sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField,
+                "direction": sortByToUse.direction
+            ],
+            "image_filter": imageFilter
+        ]
+        
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
+              
+        performGraphQLQuery(query: bodyString) { (response: ImagesResponse?) in
+            DispatchQueue.main.async {
+                if let result = response?.data?.findImages {
+                    if isInitialLoad {
+                        self.detailImages = result.images
+                        self.totalDetailImages = result.count
+                    } else {
+                        self.detailImages.append(contentsOf: result.images)
+                    }
+                    self.hasMoreDetailImages = result.images.count == 40
+                    self.currentDetailImagePage = page
+                }
+                self.isLoadingDetailImages = false
+            }
+        }
+    }
+    
     func fetchPerformer(performerId: String, completion: @escaping (Performer?) -> Void) {
         let performerQuery = GraphQLQueries.queryWithFragments("findPerformers")
         
@@ -2309,7 +2611,7 @@ class StashDBViewModel: ObservableObject {
             currentPerformerSortOption = sortBy
             currentPerformerFilter = filter
             currentPerformerSearchQuery = searchQuery
-            if let lf = liveFilter { currentPerformerLiveFilter = lf }
+            currentPerformerLiveFilter = liveFilter ?? [:]
         } else {
             isLoadingPerformers = true
         }
@@ -2365,7 +2667,7 @@ class StashDBViewModel: ObservableObject {
         if !currentPerformerLiveFilter.isEmpty {
             var merged = (variables["performer_filter"] as? [String: Any]) ?? [:]
             for (key, value) in currentPerformerLiveFilter { merged[key] = value }
-            variables["performer_filter"] = merged
+            variables["performer_filter"] = sanitizeFilter(merged)
         }
         
         let body: [String: Any] = [
@@ -2455,7 +2757,7 @@ class StashDBViewModel: ObservableObject {
             hasMoreStudios = true
             studios = []
             isLoadingStudios = true
-            if let lf = liveFilter { currentStudioLiveFilter = lf }
+            currentStudioLiveFilter = liveFilter ?? [:]
         } else {
             isLoadingStudios = true
         }
@@ -2504,7 +2806,7 @@ class StashDBViewModel: ObservableObject {
         
         let variables: [String: Any] = [
             "filter": filterParams,
-            "studio_filter": currentStudioLiveFilter.isEmpty ? studioFilter : studioFilter.merging(currentStudioLiveFilter) { _, new in new }
+            "studio_filter": sanitizeFilter(currentStudioLiveFilter.isEmpty ? studioFilter : studioFilter.merging(currentStudioLiveFilter) { _, new in new })
         ]
         
         let query = GraphQLQueries.queryWithFragments("findStudios")
@@ -2575,7 +2877,7 @@ class StashDBViewModel: ObservableObject {
         if isInitialLoad {
             currentTagPage = 1
             tags = []
-            if let lf = liveFilter { currentTagLiveFilter = lf }
+            currentTagLiveFilter = liveFilter ?? [:]
         }
         currentTagSortOption = sortBy
         currentTagSearchQuery = searchQuery
@@ -2625,7 +2927,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
                 "direction": sortBy.direction
             ],
-            "tag_filter": currentTagLiveFilter.isEmpty ? tagFilter : tagFilter.merging(currentTagLiveFilter) { _, new in new }
+            "tag_filter": sanitizeFilter(currentTagLiveFilter.isEmpty ? tagFilter : tagFilter.merging(currentTagLiveFilter) { _, new in new })
         ]
         
         let query = GraphQLQueries.queryWithFragments("findTags")
@@ -2839,12 +3141,13 @@ class StashDBViewModel: ObservableObject {
         
         let page = isInitialLoad ? 1 : currentGroupGalleryPage + 1
         
+        let sortByToUse = isInitialLoad ? sortBy : currentGroupGallerySortOption
         let variables: [String: Any] = [
             "filter": [
                 "page": page,
                 "per_page": 20,
-                "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
-                "direction": sortBy.direction
+                "sort": sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField,
+                "direction": sortByToUse.direction
             ],
             "gallery_filter": [
                 "groups": [
@@ -2996,8 +3299,9 @@ class StashDBViewModel: ObservableObject {
         }
         
         let page = isInitialLoad ? 1 : currentTagGalleryPage + 1
-        let sortField = sortBy.sortField
-        let sortDirection = sortBy.direction
+        let sortByToUse = isInitialLoad ? sortBy : currentTagGallerySortOption
+        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortDirection = sortByToUse.direction
         let query = GraphQLQueries.queryWithFragments("findGalleries")
         
         let variables: [String: Any] = [
@@ -3379,7 +3683,9 @@ class StashDBViewModel: ObservableObject {
                     }
                 }
             } else if let obj = savedFilter.object_filter, let objDict = obj.value as? [String: Any] {
+                print("🔍 fetchClips: Using object_filter = \(objDict)")
                 let sanitized = sanitizeFilter(objDict)
+                print("🔍 fetchClips: Sanitized filter = \(sanitized)")
                 for (key, value) in sanitized {
                     if key != "path" {
                         imageFilter[key] = value
@@ -5265,6 +5571,9 @@ struct MarkerScene: Codable, Identifiable, Equatable {
     func withPlayCount(_ count: Int?) -> MarkerScene {
         MarkerScene(id: id, title: title, date: date, files: files, performers: performers, rating100: rating100, playCount: count, oCounter: oCounter, interactive: interactive, paths: paths, streams: streams)
     }
+    func withPerformers(_ newPerformers: [ScenePerformer]?) -> MarkerScene {
+        MarkerScene(id: id, title: title, date: date, files: files, performers: newPerformers, rating100: rating100, playCount: playCount, oCounter: oCounter, interactive: interactive, paths: paths, streams: streams)
+    }
 
     func toScene() -> Scene {
         Scene(
@@ -5571,6 +5880,10 @@ struct ScenePerformer: Codable, Identifiable, Equatable {
         }
         return signedURL(URL(string: thumbnailURLString))
     }
+
+    func toGalleryPerformer() -> GalleryPerformer {
+        GalleryPerformer(id: id, name: name, image_path: nil)
+    }
 }
 
 // MARK: - Scene Group Entry
@@ -5670,6 +5983,7 @@ struct Performer: Codable, Identifiable, Equatable {
     let weight: Int?
     let measurements: String?
     let fakeTits: String?
+    let penis_length: Double?
     let careerLength: String?
     let tattoos: String?
     let piercings: String?
@@ -5688,6 +6002,7 @@ struct Performer: Codable, Identifiable, Equatable {
         case galleryCount = "gallery_count"
         case height = "height_cm"
         case fakeTits = "fake_tits"
+        case penis_length
         case careerLength = "career_length"
         case aliasList = "alias_list"
         case createdAt = "created_at"
@@ -5892,6 +6207,14 @@ struct SingleGroupData: Codable {
     let findGroup: StashGroup?
 }
 
+struct ImagesResponse: Codable {
+    let data: ImagesData?
+}
+
+struct ImagesData: Codable {
+    let findImages: FindImagesResult
+}
+
 struct StashGroup: Codable, Identifiable, Equatable {
     let id: String
     let name: String
@@ -5978,7 +6301,7 @@ struct Gallery: Codable, Identifiable, Equatable {
     let createdAt: String?
     let updatedAt: String?
     let studio: GalleryStudio?
-    let performers: [GalleryPerformer]?
+    var performers: [GalleryPerformer]?
     let cover: GalleryCover?
 
     enum CodingKeys: String, CodingKey {
@@ -6037,7 +6360,7 @@ struct GalleryPerformer: Codable, Identifiable, Equatable, Hashable {
         Performer(id: id, name: name, disambiguation: nil, birthdate: nil, country: nil,
                   imagePath: image_path, sceneCount: 0, galleryCount: nil, gender: nil,
                   ethnicity: nil, height: nil, weight: nil, measurements: nil, fakeTits: nil,
-                  careerLength: nil, tattoos: nil, piercings: nil, aliasList: nil, favorite: nil,
+                  penis_length: nil, careerLength: nil, tattoos: nil, piercings: nil, aliasList: nil, favorite: nil,
                   rating100: nil, createdAt: nil, updatedAt: nil, oCounter: nil)
     }
 
@@ -6050,6 +6373,10 @@ struct GalleryPerformer: Codable, Identifiable, Equatable, Hashable {
             return signedURL(URL(string: sized))
         }
         return signedURL(URL(string: config.baseURL + sized))
+    }
+
+    func toScenePerformer() -> ScenePerformer {
+        ScenePerformer(id: id, name: name, birthdate: nil, sceneCount: 0, galleryCount: 0, oCounter: 0, updatedAt: nil)
     }
 }
 

@@ -508,6 +508,8 @@ struct TagDetailView: View {
     @Environment(\.verticalSizeClass) var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getDetailSortOption(for: "tag_detail") ?? "") ?? .dateDesc
+    @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
+    @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var isChangingSort = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
@@ -516,6 +518,9 @@ struct TagDetailView: View {
     enum DetailTab: String, CaseIterable {
         case scenes = "Scenes"
         case galleries = "Galleries"
+        case studios = "Studios"
+        case groups = "Groups"
+        case images = "Images"
     }
     @State private var selectedDetailTab: DetailTab = .scenes
 
@@ -525,27 +530,31 @@ struct TagDetailView: View {
             viewModel.refreshRandomSeed()
         }
         guard !isChangingSort else { return }
-
         isChangingSort = true
         selectedSortOption = newOption
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             TabManager.shared.setDetailSortOption(for: "tag_detail", option: newOption.rawValue)
-            
-            // Use existing filter if we have one loaded in viewModel, but we can't access it easily outside.
-            // However, fetchTagScenes will use the internal `currentTagDetailFilter` if isInitialLoad is false?
-            // No, fetchTagScenes takes `filter` arg. Only if isInitialLoad is TRUE does it store it.
-            // If isInitialLoad is TRUE, I MUST pass the filter again if I want to persist it?
-            // Yes, my implementation overwrite `currentTagDetailFilter = filter` on initial load.
-            
-            // But wait, here I am calling with isInitialLoad: true to reset pagination/sort.
-            // So I need to retrieve the filter again.
-            
             self.viewModel.fetchTagScenes(tagId: self.selectedTag.id, sortBy: newOption, isInitialLoad: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.isChangingSort = false
             }
         }
+    }
+
+    private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
+        if newOption == .random && selectedGallerySortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedGallerySortOption = newOption
+        viewModel.fetchTagGalleries(tagId: selectedTag.id, sortBy: newOption, isInitialLoad: true)
+    }
+
+    private func changeImageSortOption(to newOption: StashDBViewModel.ImageSortOption) {
+        if newOption == .random && selectedImageSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedImageSortOption = newOption
+        viewModel.fetchDetailImages(tagId: selectedTag.id, sortBy: newOption, isInitialLoad: true)
     }
     
     private var columns: [GridItem] {
@@ -584,8 +593,18 @@ struct TagDetailView: View {
         max(viewModel.totalTagGalleries, selectedTag.galleryCount ?? 0)
     }
     
+    private var availableTabs: [DetailTab] {
+        var tabs: [DetailTab] = []
+        if effectiveScenes > 0 { tabs.append(.scenes) }
+        if effectiveGalleries > 0 { tabs.append(.galleries) }
+        if viewModel.totalDetailStudios > 0 { tabs.append(.studios) }
+        if viewModel.totalDetailGroups > 0 { tabs.append(.groups) }
+        if viewModel.totalDetailImages > 0 { tabs.append(.images) }
+        return tabs
+    }
+
     private var showTabSwitcher: Bool {
-        effectiveScenes > 0 && effectiveGalleries > 0
+        availableTabs.count > 1
     }
 
     var body: some View {
@@ -604,7 +623,7 @@ struct TagDetailView: View {
                     } else {
                         Text("No scenes found").foregroundColor(.secondary).padding(.top, 40)
                     }
-                } else {
+                } else if selectedDetailTab == .galleries {
                     if !viewModel.tagGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingTagGalleries {
@@ -615,6 +634,12 @@ struct TagDetailView: View {
                     } else {
                         Text("No galleries found").foregroundColor(.secondary).padding(.top, 40)
                     }
+                } else if selectedDetailTab == .studios {
+                    studioGrid
+                } else if selectedDetailTab == .groups {
+                    groupGrid
+                } else if selectedDetailTab == .images {
+                    imageGrid
                 }
             }
             .padding(16)
@@ -640,17 +665,41 @@ struct TagDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
+                Text(selectedTag.name)
+                    .font(.headline)
+                    .lineLimit(1)
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
                 if showTabSwitcher {
-                    Picker("View", selection: $selectedDetailTab) {
-                        Text("Scenes").tag(DetailTab.scenes)
-                        Text("Galleries").tag(DetailTab.galleries)
+                    Menu {
+                        ForEach(availableTabs, id: \.self) { tab in
+                            Button(action: { 
+                                withAnimation(DesignTokens.Animation.quick) {
+                                    selectedDetailTab = tab 
+                                }
+                            }) {
+                                HStack {
+                                    Text(tab.rawValue)
+                                    if selectedDetailTab == tab {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(selectedDetailTab.rawValue)
+                                .font(.system(size: 14, weight: .semibold))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(appearanceManager.tintColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(appearanceManager.tintColor.opacity(0.1))
+                        .clipShape(Capsule())
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                } else {
-                    Text(selectedTag.name)
-                        .font(.headline)
-                        .lineLimit(1)
                 }
             }
             
@@ -682,6 +731,12 @@ struct TagDetailView: View {
                 if selectedDetailTab == .scenes {
                     sceneSortMenu
                         .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .galleries {
+                    gallerySortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .images {
+                    imageSortMenu
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -694,7 +749,7 @@ struct TagDetailView: View {
             viewModel.fetchTagScenes(tagId: selectedTag.id, sortBy: selectedSortOption, isInitialLoad: true)
         }
         if viewModel.tagGalleries.isEmpty && !viewModel.isLoadingTagGalleries {
-            viewModel.fetchTagGalleries(tagId: selectedTag.id, isInitialLoad: true)
+            viewModel.fetchTagGalleries(tagId: selectedTag.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
         }
         
         // Update favorite status from server
@@ -703,6 +758,11 @@ struct TagDetailView: View {
                 self.isFavorite = tag.favorite ?? false
             }
         }
+        
+        // Fetch extended content
+        viewModel.fetchDetailStudios(tagId: selectedTag.id)
+        viewModel.fetchDetailGroups(tagId: selectedTag.id)
+        viewModel.fetchDetailImages(tagId: selectedTag.id, sortBy: selectedImageSortOption)
     }
     
     private var tagHeaderView: some View {
@@ -734,18 +794,22 @@ struct TagDetailView: View {
                     
                     Spacer()
                     
-                    // StashTok Button (Top Right)
+                    // Social Button (Top Right)
                     if tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true {
                         Button(action: {
-                            coordinator.navigateToReels(tags: [selectedTag])
+                            coordinator.navigateToReels(tags: [selectedTag], mode: nil)
                         }) {
-                            Image(systemName: "play.rectangle.on.rectangle")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(Color.pillAccent)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(appearanceManager.tintColor.opacity(0.15))
-                                .clipShape(Capsule())
+                            HStack(spacing: 4) {
+                                Image(systemName: "sparkles.tv")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text("Social")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .foregroundColor(Color.pillAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(appearanceManager.tintColor.opacity(0.15))
+                            .clipShape(Capsule())
                         }
                     }
                 }
@@ -889,6 +953,211 @@ struct TagDetailView: View {
         }
     }
     
+    private var studioGrid: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(viewModel.detailStudios) { studio in
+                NavigationLink(destination: StudioDetailView(studio: studio)) {
+                    StudioCardView(studio: studio)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailStudios { ProgressView().padding() }
+            else if viewModel.hasMoreDetailStudios {
+                Color.clear.onAppear { viewModel.fetchDetailStudios(tagId: selectedTag.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var groupGrid: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(viewModel.detailGroups) { group in
+                NavigationLink(destination: GroupDetailView(selectedGroup: group)) {
+                    GroupCardView(group: group)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailGroups { ProgressView().padding() }
+            else if viewModel.hasMoreDetailGroups {
+                Color.clear.onAppear { viewModel.fetchDetailGroups(tagId: selectedTag.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var imageGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailImages) { image in
+                NavigationLink(destination: FullScreenImageView(images: .constant(viewModel.detailImages), selectedImageId: image.id)) {
+                    ImageThumbnailCard(image: image)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailImages { ProgressView().padding() }
+            else if viewModel.hasMoreDetailImages {
+                Color.clear.onAppear { viewModel.fetchDetailImages(tagId: selectedTag.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var gallerySortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeGallerySortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedGallerySortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Name
+            Menu {
+                Button(action: { changeGallerySortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedGallerySortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Name")
+                    if selectedGallerySortOption == .titleAsc || selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeGallerySortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedGallerySortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedGallerySortOption == .dateDesc || selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeGallerySortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedGallerySortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedGallerySortOption == .ratingDesc || selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+    
+    private var imageSortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeImageSortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedImageSortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Title
+            Menu {
+                Button(action: { changeImageSortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedImageSortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Title")
+                    if selectedImageSortOption == .titleAsc || selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeImageSortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedImageSortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedImageSortOption == .dateDesc || selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeImageSortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedImageSortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedImageSortOption == .ratingDesc || selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+    
     private var sceneSortMenu: some View {
         Menu {
             // Random
@@ -1007,7 +1276,7 @@ struct TagDetailView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down")
+            Image(systemName: "arrow.up.arrow.down.circle")
                 .foregroundColor(appearanceManager.tintColor)
         }
     }

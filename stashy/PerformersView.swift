@@ -31,10 +31,13 @@ struct PerformersView: View {
     @State private var liveFilterGender: String? = nil     // "FEMALE" / "MALE" / "TRANSGENDER_FEMALE" / "TRANSGENDER_MALE" / "NON_BINARY"
     @State private var liveFilterCountry: String? = nil    // "US" / "NOT_US"
     @State private var liveFilterImplants: Bool? = nil     // nil=any, true=has, false=none
+    @State private var liveFilterFavorite: Bool? = nil     // nil=any, true=yes, false=no
+    @State private var liveFilterMissingField: String? = nil // nil=any, "image" / "gender" / "hair_color"
 
     private var isLiveFilterActive: Bool {
         liveFilterAgeRange != nil || liveFilterHairColor != nil || liveFilterGender != nil
-        || liveFilterCountry != nil || liveFilterImplants != nil
+        || liveFilterCountry != nil || liveFilterImplants != nil || liveFilterFavorite != nil
+        || liveFilterMissingField != nil
     }
 
     private var activeLiveFilterDict: [String: Any] {
@@ -78,6 +81,15 @@ struct PerformersView: View {
         }
         if let implants = liveFilterImplants {
             dict["fake_tits"] = ["value": implants ? "FAKE" : "NATURAL", "modifier": "EQUALS"]
+        }
+        if let favorite = liveFilterFavorite {
+            dict["filter_favorites"] = favorite
+        }
+        // Missing-field filter uses Stash's `is_missing: "<field>"` convention.
+        // If explicitly set, it wins over `has_image` to avoid contradictory filters.
+        if let missingField = liveFilterMissingField, !missingField.isEmpty {
+            dict.removeValue(forKey: "has_image")
+            dict["is_missing"] = missingField
         }
         return dict
     }
@@ -402,6 +414,8 @@ struct PerformersView: View {
                 gender: $liveFilterGender,
                 country: $liveFilterCountry,
                 implants: $liveFilterImplants,
+                favorite: $liveFilterFavorite,
+                missingField: $liveFilterMissingField,
                 onApply: { applyLiveFilter() },
                 onReset: {
                     liveFilterAgeRange = nil
@@ -409,6 +423,8 @@ struct PerformersView: View {
                     liveFilterGender = nil
                     liveFilterCountry = nil
                     liveFilterImplants = nil
+                    liveFilterFavorite = nil
+                    liveFilterMissingField = nil
                     applyLiveFilter()
                 }
             )
@@ -686,6 +702,8 @@ struct PerformerLiveFilterSheet: View {
     @Binding var gender: String?
     @Binding var country: String?
     @Binding var implants: Bool?
+    @Binding var favorite: Bool?
+    @Binding var missingField: String?
     var onApply: () -> Void
     var onReset: () -> Void
 
@@ -696,6 +714,29 @@ struct PerformerLiveFilterSheet: View {
         NavigationView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(spacing: 0) {
+                    filterRow(label: "Favorite") {
+                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
+                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
+                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Missing") {
+                        filterChip("Any",    isActive: missingField == nil)            { missingField = nil;          onApply() }
+                        filterChip("Image",  isActive: missingField == "image")        { missingField = "image";      onApply() }
+                        filterChip("Gender", isActive: missingField == "gender")       { missingField = "gender";     onApply() }
+                        filterChip("Hair",   isActive: missingField == "hair_color")   { missingField = "hair_color"; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Gender") {
+                        filterChip("Any",    isActive: gender == nil)      { gender = nil;      onApply() }
+                        filterChip("Female", isActive: gender == "FEMALE") { gender = "FEMALE"; onApply() }
+                        filterChip("Male",   isActive: gender == "MALE")   { gender = "MALE";   onApply() }
+                        filterChip("Trans (M)", isActive: gender == "TRANSGENDER_MALE") { gender = "TRANSGENDER_MALE"; onApply() }
+                        filterChip("Trans (F)", isActive: gender == "TRANSGENDER_FEMALE") { gender = "TRANSGENDER_FEMALE"; onApply() }
+                        filterChip("Intersex", isActive: gender == "INTERSEX") { gender = "INTERSEX"; onApply() }
+                        filterChip("Non-binary", isActive: gender == "NON_BINARY") { gender = "NON_BINARY"; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
                     filterRow(label: "Age") {
                         filterChip("Any",   isActive: ageRange == nil)    { ageRange = nil;    onApply() }
                         filterChip("18–21", isActive: ageRange == "18-21") { ageRange = "18-21"; onApply() }
@@ -712,19 +753,13 @@ struct PerformerLiveFilterSheet: View {
                         filterChip("Black",    isActive: hairColor == "BLACK")     { hairColor = "BLACK";     onApply() }
                     }
                     Divider().padding(.leading, 16)
-                    filterRow(label: "Gender") {
-                        filterChip("Any",    isActive: gender == nil)      { gender = nil;      onApply() }
-                        filterChip("Female", isActive: gender == "FEMALE") { gender = "FEMALE"; onApply() }
-                        filterChip("Male",   isActive: gender == "MALE")   { gender = "MALE";   onApply() }
-                    }
-                    Divider().padding(.leading, 16)
                     filterRow(label: "Country") {
                         filterChip("Any",    isActive: country == nil)       { country = nil;      onApply() }
                         filterChip("US",     isActive: country == "US")      { country = "US";     onApply() }
                         filterChip("Non-US", isActive: country == "NOT_US")  { country = "NOT_US"; onApply() }
                     }
                     Divider().padding(.leading, 16)
-                    filterRow(label: "Implants") {
+                    filterRow(label: "Tits") {
                         filterChip("Any",     isActive: implants == nil)   { implants = nil;   onApply() }
                         filterChip("Fake",    isActive: implants == true)  { implants = true;  onApply() }
                         filterChip("Natural", isActive: implants == false) { implants = false; onApply() }

@@ -20,6 +20,8 @@ struct PerformerDetailView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var fullPerformer: Performer?
     @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getDetailSortOption(for: "performer_detail") ?? "") ?? .dateDesc
+    @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
+    @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var isChangingSort = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
@@ -27,6 +29,10 @@ struct PerformerDetailView: View {
     enum DetailTab: String, CaseIterable {
         case scenes = "Scenes"
         case galleries = "Galleries"
+        case studios = "Studios"
+        case tags = "Tags"
+        case groups = "Groups"
+        case images = "Images"
     }
     @State private var selectedDetailTab: DetailTab = .scenes
 
@@ -40,15 +46,25 @@ struct PerformerDetailView: View {
             viewModel.refreshRandomSeed()
         }
         selectedSortOption = newOption
-        
-        // Save to TabManager (Session)
         TabManager.shared.setDetailSortOption(for: "performer_detail", option: newOption.rawValue)
-        
-        // Force view refresh
         refreshTrigger = UUID()
-        
-        // Fetch new data immediately
         viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: newOption, isInitialLoad: true)
+    }
+
+    private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
+        if newOption == .random && selectedGallerySortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedGallerySortOption = newOption
+        viewModel.fetchPerformerGalleries(performerId: performer.id, sortBy: newOption, isInitialLoad: true)
+    }
+
+    private func changeImageSortOption(to newOption: StashDBViewModel.ImageSortOption) {
+        if newOption == .random && selectedImageSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedImageSortOption = newOption
+        viewModel.fetchDetailImages(performerId: performer.id, sortBy: newOption, isInitialLoad: true)
     }
     
     @Environment(\.verticalSizeClass) var verticalSizeClass
@@ -89,8 +105,19 @@ struct PerformerDetailView: View {
         max(viewModel.totalPerformerGalleries, displayPerformer.galleryCount ?? 0)
     }
     
+    private var availableTabs: [DetailTab] {
+        var tabs: [DetailTab] = []
+        if effectiveScenes > 0 { tabs.append(.scenes) }
+        if effectiveGalleries > 0 { tabs.append(.galleries) }
+        if viewModel.totalDetailStudios > 0 { tabs.append(.studios) }
+        if viewModel.totalDetailTags > 0 { tabs.append(.tags) }
+        if viewModel.totalDetailGroups > 0 { tabs.append(.groups) }
+        if viewModel.totalDetailImages > 0 { tabs.append(.images) }
+        return tabs
+    }
+
     private var showTabSwitcher: Bool {
-        effectiveScenes > 0 && effectiveGalleries > 0
+        availableTabs.count > 1
     }
 
     var body: some View {
@@ -109,7 +136,7 @@ struct PerformerDetailView: View {
                     } else {
                         Text("No scenes found").foregroundColor(.secondary).padding(.top, 40)
                     }
-                } else {
+                } else if selectedDetailTab == .galleries {
                     if !viewModel.performerGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingPerformerGalleries {
@@ -120,6 +147,14 @@ struct PerformerDetailView: View {
                     } else {
                         Text("No galleries found").foregroundColor(.secondary).padding(.top, 40)
                     }
+                } else if selectedDetailTab == .studios {
+                    studioGrid
+                } else if selectedDetailTab == .tags {
+                    tagGrid
+                } else if selectedDetailTab == .groups {
+                    groupGrid
+                } else if selectedDetailTab == .images {
+                    imageGrid
                 }
             }
             .padding(16)
@@ -164,46 +199,76 @@ struct PerformerDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
+                Text(displayPerformer.name)
+                    .font(.headline)
+                    .lineLimit(1)
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
                 if showTabSwitcher {
-                    Picker("View", selection: $selectedDetailTab) {
-                        Text("Scenes").tag(DetailTab.scenes)
-                        Text("Galleries").tag(DetailTab.galleries)
+                    Menu {
+                        ForEach(availableTabs, id: \.self) { tab in
+                            Button(action: { 
+                                withAnimation(DesignTokens.Animation.quick) {
+                                    selectedDetailTab = tab 
+                                }
+                            }) {
+                                HStack {
+                                    Text(tab.rawValue)
+                                    if selectedDetailTab == tab {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(selectedDetailTab.rawValue)
+                                .font(.system(size: 14, weight: .semibold))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(appearanceManager.tintColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(appearanceManager.tintColor.opacity(0.1))
+                        .clipShape(Capsule())
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                } else {
-                    Text(displayPerformer.name)
-                        .font(.headline)
-                        .lineLimit(1)
                 }
             }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
-                     Button {
-                         guard !isUpdatingFavorite else { return }
-                         HapticManager.light()
-                         isUpdatingFavorite = true
-                         let newState = !isFavorite
-                         withAnimation(DesignTokens.Animation.quick) { isFavorite = newState }
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                Button {
+                    guard !isUpdatingFavorite else { return }
+                    HapticManager.light()
+                    isUpdatingFavorite = true
+                    let newState = !isFavorite
+                    withAnimation(DesignTokens.Animation.quick) { isFavorite = newState }
 
-                         viewModel.togglePerformerFavorite(performerId: performer.id, favorite: newState) { success in
-                             DispatchQueue.main.async {
-                                 if !success {
-                                     isFavorite = !newState
-                                     ToastManager.shared.show("Failed to update favorite", icon: "exclamationmark.triangle", style: .error)
-                                 }
-                                 isUpdatingFavorite = false
-                             }
-                         }
-                     } label: {
-                         Image(systemName: isFavorite ? "heart.fill" : "heart")
-                             .foregroundColor(isFavorite ? .red : Color.pillAccent)
-                     }
-
-                    if selectedDetailTab == .scenes {
-                        sceneSortMenu
+                    viewModel.togglePerformerFavorite(performerId: performer.id, favorite: newState) { success in
+                        DispatchQueue.main.async {
+                            if !success {
+                                isFavorite = !newState
+                                ToastManager.shared.show("Failed to update favorite", icon: "exclamationmark.triangle", style: .error)
+                            }
+                            isUpdatingFavorite = false
+                        }
                     }
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .foregroundColor(isFavorite ? .red : appearanceManager.tintColor)
+                }
+                .frame(maxWidth: .infinity)
+
+                if selectedDetailTab == .scenes {
+                    sceneSortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .galleries {
+                    gallerySortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .images {
+                    imageSortMenu
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -216,19 +281,32 @@ struct PerformerDetailView: View {
             viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: selectedSortOption, isInitialLoad: true)
         }
         if viewModel.performerGalleries.isEmpty && !viewModel.isLoadingPerformerGalleries {
-            viewModel.fetchPerformerGalleries(performerId: performer.id, isInitialLoad: true)
+            viewModel.fetchPerformerGalleries(performerId: performer.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
         }
         
-        // Only load metadata if we don't have enough details (like gender/ethnicity)
-        if displayPerformer.gender == nil || displayPerformer.ethnicity == nil {
-            loadPerformerMetadata()
+        // Fetch extended content reliably
+        if viewModel.detailImages.isEmpty && !viewModel.isLoadingDetailImages {
+            viewModel.fetchDetailImages(performerId: performer.id, sortBy: selectedImageSortOption, isInitialLoad: true)
         }
+        if viewModel.detailStudios.isEmpty && !viewModel.isLoadingDetailStudios {
+            viewModel.fetchDetailStudios(performerId: performer.id)
+        }
+        if viewModel.detailTags.isEmpty && !viewModel.isLoadingDetailTags {
+            viewModel.fetchDetailTags(performerId: performer.id)
+        }
+        if viewModel.detailGroups.isEmpty && !viewModel.isLoadingDetailGroups {
+            viewModel.fetchDetailGroups(performerId: performer.id)
+        }
+        
+        // Always load full metadata to ensure we have counts and details
+        loadPerformerMetadata()
     }
     
     private func loadPerformerMetadata() {
         viewModel.fetchPerformer(performerId: performer.id) { fetchedPerformer in
              if let p = fetchedPerformer {
                  self.fullPerformer = p
+                 self.isFavorite = p.favorite ?? false
              }
         }
     }
@@ -271,6 +349,226 @@ struct PerformerDetailView: View {
              } else if viewModel.hasMorePerformerGalleries {
                  Color.clear.frame(height: 1).onAppear { viewModel.loadMorePerformerGalleries(performerId: performer.id) }
              }
+        }
+    }
+    
+    private var studioGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailStudios) { studio in
+                NavigationLink(destination: StudioDetailView(studio: studio)) {
+                    StudioCardView(studio: studio)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailStudios { ProgressView().padding() }
+            else if viewModel.hasMoreDetailStudios {
+                Color.clear.onAppear { viewModel.fetchDetailStudios(performerId: performer.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var tagGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailTags) { tag in
+                NavigationLink(destination: TagsView()) {
+                    TagCardView(tag: tag)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailTags { ProgressView().padding() }
+            else if viewModel.hasMoreDetailTags {
+                Color.clear.onAppear { viewModel.fetchDetailTags(performerId: performer.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var groupGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailGroups) { group in
+                NavigationLink(destination: GroupDetailView(selectedGroup: group)) {
+                    GroupCardView(group: group)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailGroups { ProgressView().padding() }
+            else if viewModel.hasMoreDetailGroups {
+                Color.clear.onAppear { viewModel.fetchDetailGroups(performerId: performer.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var imageGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailImages) { image in
+                NavigationLink(destination: FullScreenImageView(images: .constant(viewModel.detailImages), selectedImageId: image.id)) {
+                    ImageThumbnailCard(image: image)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailImages { ProgressView().padding() }
+            else if viewModel.hasMoreDetailImages {
+                Color.clear.onAppear { viewModel.fetchDetailImages(performerId: performer.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var gallerySortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeGallerySortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedGallerySortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Name
+            Menu {
+                Button(action: { changeGallerySortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedGallerySortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Name")
+                    if selectedGallerySortOption == .titleAsc || selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeGallerySortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedGallerySortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedGallerySortOption == .dateDesc || selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeGallerySortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedGallerySortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedGallerySortOption == .ratingDesc || selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+    
+    private var imageSortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeImageSortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedImageSortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Title
+            Menu {
+                Button(action: { changeImageSortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedImageSortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Title")
+                    if selectedImageSortOption == .titleAsc || selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeImageSortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedImageSortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedImageSortOption == .dateDesc || selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeImageSortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedImageSortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedImageSortOption == .ratingDesc || selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
         }
     }
     
@@ -391,7 +689,8 @@ struct PerformerDetailView: View {
                 }
             }
         } label: {
-             Image(systemName: "arrow.up.arrow.down").foregroundColor(Color.pillAccent)
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
         }
     }
 
@@ -438,38 +737,23 @@ struct PerformerDetailView: View {
                     
                     Spacer()
                     
-                    // Stats Badges (Top Right)
-                    HStack(spacing: 4) {
-                        // StashTok Button
-                        if tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true {
-                            Button(action: {
-                                let sp = ScenePerformer(id: displayPerformer.id, name: displayPerformer.name, birthdate: displayPerformer.birthdate, sceneCount: displayPerformer.sceneCount, galleryCount: displayPerformer.galleryCount, oCounter: displayPerformer.oCounter, updatedAt: nil)
-                                coordinator.navigateToReels(performer: sp)
-                            }) {
-                                Image(systemName: "play.rectangle.on.rectangle")
+                    // Social Button (Top Right)
+                    if tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true {
+                        Button(action: {
+                            let sp = ScenePerformer(id: displayPerformer.id, name: displayPerformer.name, birthdate: displayPerformer.birthdate, sceneCount: displayPerformer.sceneCount, galleryCount: displayPerformer.galleryCount, oCounter: displayPerformer.oCounter, updatedAt: nil)
+                            coordinator.navigateToReels(performer: sp, mode: nil)
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "sparkles.tv")
                                     .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(Color.pillAccent)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(appearanceManager.tintColor.opacity(0.15))
-                                    .clipShape(Capsule())
+                                Text("Social")
+                                    .font(.system(size: 11, weight: .bold))
                             }
-                        }
-
-                        // StashLine Button
-                        if tabManager.tabs.first(where: { $0.id == .stashline })?.isVisible ?? true {
-                            Button(action: {
-                                let gp = GalleryPerformer(id: displayPerformer.id, name: displayPerformer.name, image_path: displayPerformer.imagePath)
-                                coordinator.navigateToStashLine(performer: gp)
-                            }) {
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(Color.pillAccent)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(appearanceManager.tintColor.opacity(0.15))
-                                    .clipShape(Capsule())
-                            }
+                            .foregroundColor(Color.pillAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(appearanceManager.tintColor.opacity(0.15))
+                            .clipShape(Capsule())
                         }
                     }
                 }
@@ -582,7 +866,17 @@ struct PerformerDetailView: View {
         }
         
         if let val = p.gender, !val.isEmpty { list.append((label: "GENDER", value: val)) }
-        if let val = p.fakeTits, !val.isEmpty { list.append((label: "Tits", value: val)) }
+        
+        let gender = p.gender?.uppercased() ?? ""
+        if gender.contains("FEMALE") {
+            if let val = p.fakeTits, !val.isEmpty { list.append((label: "Tits", value: val)) }
+        } else if gender.contains("MALE") || gender == "MAN" {
+            if let val = p.penis_length, val > 0 { list.append((label: "Penis", value: "\(val) cm")) }
+        } else {
+            // For other genders (Non-binary, etc.), show whatever data is available
+            if let val = p.fakeTits, !val.isEmpty { list.append((label: "Tits", value: val)) }
+            if let val = p.penis_length, val > 0 { list.append((label: "Penis", value: "\(val) cm")) }
+        }
         if let val = p.birthdate, !val.isEmpty { list.append((label: "BORN", value: val)) }
         if let val = p.country, !val.isEmpty { list.append((label: "COUNTRY", value: val)) }
         if let val = p.ethnicity, !val.isEmpty { list.append((label: "ETHNICITY", value: val)) }
@@ -625,6 +919,7 @@ struct PerformerDetailView: View {
         weight: 55,
         measurements: "34-24-34",
         fakeTits: "No",
+        penis_length: nil,
         careerLength: "5 years",
         tattoos: "None",
         piercings: "Navel",

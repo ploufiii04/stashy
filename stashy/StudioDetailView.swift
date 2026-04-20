@@ -16,6 +16,9 @@ struct StudioDetailView: View {
     @State private var refreshTrigger = UUID()
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getDetailSortOption(for: "studio_detail") ?? "") ?? .dateDesc
+    @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
+    @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
+    @State private var selectedPerformerSortOption: StashDBViewModel.PerformerSortOption = .nameAsc
     @State private var isChangingSort = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
@@ -24,6 +27,11 @@ struct StudioDetailView: View {
     enum DetailTab: String, CaseIterable {
         case scenes = "Scenes"
         case galleries = "Galleries"
+        case studios = "Studios"
+        case performers = "Performers"
+        case tags = "Tags"
+        case groups = "Groups"
+        case images = "Images"
     }
     @State private var selectedDetailTab: DetailTab = .scenes
     
@@ -36,8 +44,20 @@ struct StudioDetailView: View {
         max(viewModel.totalStudioGalleries, studio.galleryCount ?? 0)
     }
     
+    private var availableTabs: [DetailTab] {
+        var tabs: [DetailTab] = []
+        if effectiveScenesCount > 0 { tabs.append(.scenes) }
+        if effectiveGalleriesCount > 0 { tabs.append(.galleries) }
+        if viewModel.totalDetailStudios > 0 { tabs.append(.studios) }
+        if viewModel.totalDetailPerformers > 0 { tabs.append(.performers) }
+        if viewModel.totalDetailTags > 0 { tabs.append(.tags) }
+        if viewModel.totalDetailGroups > 0 { tabs.append(.groups) }
+        if viewModel.totalDetailImages > 0 { tabs.append(.images) }
+        return tabs
+    }
+
     private var showTabSwitcher: Bool {
-        effectiveScenesCount > 0 && effectiveGalleriesCount > 0
+        availableTabs.count > 1
     }
 
     // Safe sort change function
@@ -55,6 +75,30 @@ struct StudioDetailView: View {
 
         // Fetch new data immediately
         viewModel.fetchStudioScenes(studioId: studio.id, sortBy: newOption, isInitialLoad: true)
+    }
+
+    private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
+        if newOption == .random && selectedGallerySortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedGallerySortOption = newOption
+        viewModel.fetchStudioGalleries(studioId: studio.id, sortBy: newOption, isInitialLoad: true)
+    }
+
+    private func changeImageSortOption(to newOption: StashDBViewModel.ImageSortOption) {
+        if newOption == .random && selectedImageSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedImageSortOption = newOption
+        viewModel.fetchDetailImages(studioId: studio.id, sortBy: newOption, isInitialLoad: true)
+    }
+    
+    private func changePerformerSortOption(to newOption: StashDBViewModel.PerformerSortOption) {
+        if newOption == .random && selectedPerformerSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedPerformerSortOption = newOption
+        viewModel.fetchDetailPerformers(studioId: studio.id, sortBy: newOption, isInitialLoad: true)
     }
     
     @Environment(\.verticalSizeClass) var verticalSizeClass
@@ -97,7 +141,7 @@ struct StudioDetailView: View {
                     } else {
                         emptyView(message: "No scenes found", icon: "film")
                     }
-                } else {
+                } else if selectedDetailTab == .galleries {
                     if !viewModel.studioGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingStudioGalleries {
@@ -105,6 +149,16 @@ struct StudioDetailView: View {
                     } else {
                         emptyView(message: "No galleries found", icon: "photo.on.rectangle")
                     }
+                } else if selectedDetailTab == .studios {
+                    studioGrid
+                } else if selectedDetailTab == .performers {
+                    performerGrid
+                } else if selectedDetailTab == .tags {
+                    tagGrid
+                } else if selectedDetailTab == .groups {
+                    groupGrid
+                } else if selectedDetailTab == .images {
+                    imageGrid
                 }
             }
             .padding(16)
@@ -153,46 +207,80 @@ struct StudioDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                if showTabSwitcher {
-                    Picker("View", selection: $selectedDetailTab) {
-                        Text("Scenes").tag(DetailTab.scenes)
-                        Text("Galleries").tag(DetailTab.galleries)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                } else {
-                    Text(studio.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                }
+                Text(studio.name)
+                    .font(.headline)
+                    .lineLimit(1)
             }
             
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
-                     Button {
-                         guard !isUpdatingFavorite else { return }
-                         HapticManager.light()
-                         isUpdatingFavorite = true
-                         let newState = !isFavorite
-                         withAnimation(DesignTokens.Animation.quick) { isFavorite = newState }
-
-                         viewModel.toggleStudioFavorite(studioId: studio.id, favorite: newState) { success in
-                             DispatchQueue.main.async {
-                                 if !success {
-                                     isFavorite = !newState
-                                     ToastManager.shared.show("Failed to update favorite", icon: "exclamationmark.triangle", style: .error)
-                                 }
-                                 isUpdatingFavorite = false
-                             }
-                         }
-                     } label: {
-                         Image(systemName: isFavorite ? "heart.fill" : "heart")
-                             .foregroundColor(isFavorite ? .red : Color.pillAccent)
-                     }
-
-                    if selectedDetailTab == .scenes {
-                        sortMenu
+                if showTabSwitcher {
+                    Menu {
+                        ForEach(availableTabs, id: \.self) { tab in
+                            Button(action: { 
+                                withAnimation(DesignTokens.Animation.quick) {
+                                    selectedDetailTab = tab 
+                                }
+                            }) {
+                                HStack {
+                                    Text(tab.rawValue)
+                                    if selectedDetailTab == tab {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(selectedDetailTab.rawValue)
+                                .font(.system(size: 14, weight: .semibold))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(appearanceManager.tintColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(appearanceManager.tintColor.opacity(0.1))
+                        .clipShape(Capsule())
                     }
+                }
+            }
+        }
+        .floatingActionBar {
+            HStack(spacing: 0) {
+                Button {
+                    guard !isUpdatingFavorite else { return }
+                    HapticManager.light()
+                    isUpdatingFavorite = true
+                    let newState = !isFavorite
+                    withAnimation(DesignTokens.Animation.quick) { isFavorite = newState }
+
+                    viewModel.toggleStudioFavorite(studioId: studio.id, favorite: newState) { success in
+                        DispatchQueue.main.async {
+                            if !success {
+                                isFavorite = !newState
+                                ToastManager.shared.show("Failed to update favorite", icon: "exclamationmark.triangle", style: .error)
+                            }
+                            isUpdatingFavorite = false
+                        }
+                    }
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .foregroundColor(isFavorite ? .red : appearanceManager.tintColor)
+                }
+                .frame(maxWidth: .infinity)
+
+                if selectedDetailTab == .scenes {
+                    sortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .galleries {
+                    gallerySortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .performers {
+                    performerSortMenu
+                        .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .images {
+                    imageSortMenu
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -401,6 +489,267 @@ struct StudioDetailView: View {
         }
     }
     
+    private var gallerySortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeGallerySortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedGallerySortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Name
+            Menu {
+                Button(action: { changeGallerySortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedGallerySortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Name")
+                    if selectedGallerySortOption == .titleAsc || selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeGallerySortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedGallerySortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedGallerySortOption == .dateDesc || selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeGallerySortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedGallerySortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeGallerySortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedGallerySortOption == .ratingDesc || selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+    
+    private var imageSortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changeImageSortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedImageSortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Title
+            Menu {
+                Button(action: { changeImageSortOption(to: .titleAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedImageSortOption == .titleAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .titleDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Title")
+                    if selectedImageSortOption == .titleAsc || selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Date
+            Menu {
+                Button(action: { changeImageSortOption(to: .dateDesc) }) {
+                    HStack {
+                        Text("Newest First")
+                        if selectedImageSortOption == .dateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .dateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedImageSortOption == .dateDesc || selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Rating
+            Menu {
+                Button(action: { changeImageSortOption(to: .ratingDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedImageSortOption == .ratingDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changeImageSortOption(to: .ratingAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Rating")
+                    if selectedImageSortOption == .ratingDesc || selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+
+    private var performerSortMenu: some View {
+        Menu {
+            // Random
+            Button(action: { changePerformerSortOption(to: .random) }) {
+                HStack {
+                    Text("Random")
+                    if selectedPerformerSortOption == .random { Image(systemName: "checkmark") }
+                }
+            }
+            
+            Divider()
+
+            // Name
+            Menu {
+                Button(action: { changePerformerSortOption(to: .nameAsc) }) {
+                    HStack {
+                        Text("A → Z")
+                        if selectedPerformerSortOption == .nameAsc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changePerformerSortOption(to: .nameDesc) }) {
+                    HStack {
+                        Text("Z → A")
+                        if selectedPerformerSortOption == .nameDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Name")
+                    if selectedPerformerSortOption == .nameAsc || selectedPerformerSortOption == .nameDesc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Scene Count
+            Menu {
+                Button(action: { changePerformerSortOption(to: .sceneCountDesc) }) {
+                    HStack {
+                        Text("High → Low")
+                        if selectedPerformerSortOption == .sceneCountDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changePerformerSortOption(to: .sceneCountAsc) }) {
+                    HStack {
+                        Text("Low → High")
+                        if selectedPerformerSortOption == .sceneCountAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Scenes")
+                    if selectedPerformerSortOption == .sceneCountDesc || selectedPerformerSortOption == .sceneCountAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Birthday
+            Menu {
+                Button(action: { changePerformerSortOption(to: .birthdateDesc) }) {
+                    HStack {
+                        Text("Youngest First")
+                        if selectedPerformerSortOption == .birthdateDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changePerformerSortOption(to: .birthdateAsc) }) {
+                    HStack {
+                        Text("Oldest First")
+                        if selectedPerformerSortOption == .birthdateAsc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Birthday")
+                    if selectedPerformerSortOption == .birthdateDesc || selectedPerformerSortOption == .birthdateAsc { Image(systemName: "checkmark") }
+                }
+            }
+
+            // Created/Updated
+            Menu {
+                Button(action: { changePerformerSortOption(to: .createdAtDesc) }) {
+                    HStack {
+                        Text("Newest First (Created)")
+                        if selectedPerformerSortOption == .createdAtDesc { Image(systemName: "checkmark") }
+                    }
+                }
+                Button(action: { changePerformerSortOption(to: .updatedAtDesc) }) {
+                    HStack {
+                        Text("Newest First (Updated)")
+                        if selectedPerformerSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text("Date")
+                    if selectedPerformerSortOption == .createdAtDesc || selectedPerformerSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
+        }
+    }
+    
     private var sortMenu: some View {
         Menu {
             // Random
@@ -518,8 +867,8 @@ struct StudioDetailView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .foregroundColor(Color.pillAccent)
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .foregroundColor(appearanceManager.tintColor)
         }
     }
     
@@ -553,11 +902,99 @@ struct StudioDetailView: View {
     
     private func loadData() {
         if viewModel.studioGalleries.isEmpty && !viewModel.isLoadingStudioGalleries {
-            viewModel.fetchStudioGalleries(studioId: studio.id, isInitialLoad: true)
+            viewModel.fetchStudioGalleries(studioId: studio.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
         }
         
         if viewModel.studioScenes.isEmpty && !viewModel.isLoadingStudioScenes {
             viewModel.fetchStudioScenes(studioId: studio.id, sortBy: selectedSortOption, isInitialLoad: true)
+        }
+        
+        // Fetch extended content
+        viewModel.fetchDetailStudios(parentStudioId: studio.id)
+        viewModel.fetchDetailPerformers(studioId: studio.id)
+        viewModel.fetchDetailTags(studioId: studio.id)
+        viewModel.fetchDetailGroups(studioId: studio.id)
+        viewModel.fetchDetailImages(studioId: studio.id, sortBy: selectedImageSortOption)
+    }
+    
+    private var studioGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailStudios) { subStudio in
+                NavigationLink(destination: StudioDetailView(studio: subStudio)) {
+                    StudioCardView(studio: subStudio)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailStudios { ProgressView().padding() }
+            else if viewModel.hasMoreDetailStudios {
+                Color.clear.onAppear { viewModel.fetchDetailStudios(parentStudioId: studio.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var performerGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailPerformers) { performer in
+                NavigationLink(destination: PerformerDetailView(performer: performer)) {
+                    PerformerCardView(performer: performer)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailPerformers {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Loading more performers...").font(.caption).foregroundColor(.secondary)
+                }.padding(.vertical, 20)
+            } else if viewModel.hasMoreDetailPerformers {
+                Color.clear.frame(height: 1).onAppear { 
+                    viewModel.fetchDetailPerformers(studioId: studio.id, sortBy: selectedPerformerSortOption, isInitialLoad: false) 
+                }
+            }
+        }
+    }
+    
+    private var tagGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailTags) { tag in
+                NavigationLink(destination: TagsView()) {
+                    TagCardView(tag: tag)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailTags { ProgressView().padding() }
+            else if viewModel.hasMoreDetailTags {
+                Color.clear.onAppear { viewModel.fetchDetailTags(studioId: studio.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var groupGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailGroups) { group in
+                NavigationLink(destination: GroupDetailView(selectedGroup: group)) {
+                    GroupCardView(group: group)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailGroups { ProgressView().padding() }
+            else if viewModel.hasMoreDetailGroups {
+                Color.clear.onAppear { viewModel.fetchDetailGroups(studioId: studio.id, isInitialLoad: false) }
+            }
+        }
+    }
+    
+    private var imageGrid: some View {
+        LazyVGrid(columns: galleryColumns, spacing: 12) {
+            ForEach(viewModel.detailImages) { image in
+                NavigationLink(destination: FullScreenImageView(images: .constant(viewModel.detailImages), selectedImageId: image.id)) {
+                    ImageThumbnailCard(image: image)
+                }
+                .buttonStyle(.plain)
+            }
+            if viewModel.isLoadingDetailImages { ProgressView().padding() }
+            else if viewModel.hasMoreDetailImages {
+                Color.clear.onAppear { viewModel.fetchDetailImages(studioId: studio.id, isInitialLoad: false) }
+            }
         }
     }
 }

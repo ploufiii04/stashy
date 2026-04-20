@@ -64,6 +64,33 @@ struct UniversalSearchView: View {
                     performSearch()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
+                if let targetId = notification.userInfo?["performerId"] as? String,
+                   let newPath = notification.userInfo?["newImagePath"] as? String {
+                    
+                    // 1. Update main performers list
+                    for i in 0..<performers.count {
+                        if performers[i].id == targetId {
+                            performers[i].imagePath = newPath
+                        }
+                    }
+                    
+                    // 2. Update performers inside scenes (ScenePerformer doesn't have imagePath, it uses id-based URL)
+                    // We don't need to update it here as the URL is stable or uses updatedAt.
+                    
+                    // 3. Update performers inside galleries
+                    for i in 0..<galleries.count {
+                        if var mutablePerformers = galleries[i].performers,
+                           let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId }) {
+                            mutablePerformers[pIndex].image_path = newPath
+                            galleries[i].performers = mutablePerformers
+                        }
+                    }
+
+                    // 4. Update performers inside markers' scenes
+                    // MarkerScene uses ScenePerformer which doesn't have imagePath.
+                }
+            }
         }
     }
     

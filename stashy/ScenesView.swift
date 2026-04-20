@@ -28,11 +28,13 @@ struct ScenesView: View {
     @State private var liveFilterInteractive: Bool? = nil // nil = any
     @State private var liveFilterOrientation: String? = nil // nil = any, "LANDSCAPE"/"PORTRAIT"/"SQUARE"
     @State private var liveFilterPerformerCount: Int? = nil // nil = any, 1/2/3 (3 = 3+)
+    @State private var liveFilterResolution: String? = nil // nil = any, "VERY_LOW"/"LOW"/"R360P"/... (Stash enum)
     var hideTitle: Bool = false
 
     private var isLiveFilterActive: Bool {
         liveFilterMinRating > 0 || liveFilterOrganized != nil
         || liveFilterInteractive != nil || liveFilterOrientation != nil || liveFilterPerformerCount != nil
+        || liveFilterResolution != nil
     }
 
     private var activeLiveFilterDict: [String: Any] {
@@ -56,6 +58,9 @@ struct ScenesView: View {
             } else {
                 dict["performer_count"] = ["value": count, "modifier": "EQUALS"]
             }
+        }
+        if let resolution = liveFilterResolution {
+            dict["resolution"] = ["value": resolution, "modifier": "EQUALS"]
         }
         return dict
     }
@@ -414,6 +419,7 @@ struct ScenesView: View {
                 interactive: $liveFilterInteractive,
                 orientation: $liveFilterOrientation,
                 performerCount: $liveFilterPerformerCount,
+                resolution: $liveFilterResolution,
                 onApply: { applyLiveFilter() },
                 onReset: {
                     liveFilterMinRating = 0
@@ -421,6 +427,7 @@ struct ScenesView: View {
                     liveFilterInteractive = nil
                     liveFilterOrientation = nil
                     liveFilterPerformerCount = nil
+                    liveFilterResolution = nil
                     applyLiveFilter()
                 }
             )
@@ -637,6 +644,7 @@ struct SceneLiveFilterSheet: View {
     @Binding var interactive: Bool?
     @Binding var orientation: String?
     @Binding var performerCount: Int?
+    @Binding var resolution: String?
     var onApply: () -> Void
     var onReset: () -> Void
 
@@ -677,6 +685,17 @@ struct SceneLiveFilterSheet: View {
                         filterChip("1",   isActive: performerCount == 1)   { performerCount = 1;   onApply() }
                         filterChip("2",   isActive: performerCount == 2)   { performerCount = 2;   onApply() }
                         filterChip("3+",  isActive: performerCount == 3)   { performerCount = 3;   onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Resolution") {
+                        filterChip("Any", isActive: resolution == nil) { resolution = nil; onApply() }
+                        // Descending order (high → low)
+                        filterChip("4K",    isActive: resolution == "FOUR_K")      { resolution = "FOUR_K";      onApply() }
+                        filterChip("1440p", isActive: resolution == "QUAD_HD")     { resolution = "QUAD_HD";     onApply() }
+                        filterChip("1080p", isActive: resolution == "FULL_HD")     { resolution = "FULL_HD";     onApply() }
+                        filterChip("720p",  isActive: resolution == "STANDARD_HD") { resolution = "STANDARD_HD"; onApply() }
+                        filterChip("540p",  isActive: resolution == "WEB_HD")      { resolution = "WEB_HD";      onApply() }
+                        filterChip("480p",  isActive: resolution == "STANDARD")    { resolution = "STANDARD";    onApply() }
                     }
                 }
                 .background(Color.secondaryAppBackground)

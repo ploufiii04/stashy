@@ -19,11 +19,7 @@ struct ContentSettingsSection: View {
             }
 
             NavigationLink(destination: ReelsModeSettingsView()) {
-                Label("StashTok", systemImage: "play.rectangle.on.rectangle")
-            }
-
-            NavigationLink(destination: StashLineSettingsView()) {
-                Label("StashLine", systemImage: "camera.fill")
+                Label("Feeds", systemImage: "play.rectangle.on.rectangle")
             }
 
             NavigationLink(destination: TabSettingsView()) {

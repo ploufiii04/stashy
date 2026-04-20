@@ -6,18 +6,26 @@
 import SwiftUI
 
 struct StashLineView: View {
-    @State var performerFilter: GalleryPerformer?
+    let externalPerformerFilter: GalleryPerformer?
+    @State private var performerFilter: GalleryPerformer?
+    let isEmbedded: Bool
+    var onPerformerTap: ((GalleryPerformer) -> Void)? = nil
 
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var configManager = ServerConfigManager.shared
     @Environment(\.dismiss) private var dismiss
 
+    @EnvironmentObject private var coordinator: NavigationCoordinator
     @State private var selectedSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
-
-    init(performerFilter: GalleryPerformer? = nil) {
+    @State private var scrollPositionId: String?
+    @State private var pendingRestoreId: String?
+    init(performerFilter: GalleryPerformer? = nil, isEmbedded: Bool = false, onPerformerTap: ((GalleryPerformer) -> Void)? = nil) {
+        self.externalPerformerFilter = performerFilter
         _performerFilter = State(initialValue: performerFilter)
+        self.isEmbedded = isEmbedded
+        self.onPerformerTap = onPerformerTap
     }
 
     private func performSearch() {
@@ -54,34 +62,36 @@ struct StashLineView: View {
             }
         }
         .navigationBarHidden(true)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    if performerFilter != nil {
-                        Button(action: { dismiss() }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 17, weight: .semibold))
+        .if(!isEmbedded) { view in
+            view.safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        if performerFilter != nil {
+                            Button(action: { dismiss() }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 17, weight: .semibold))
+                                }
+                                .foregroundColor(appearanceManager.tintColor)
                             }
-                            .foregroundColor(appearanceManager.tintColor)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        Text(performerFilter?.name ?? "StashLine")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Text(performerFilter?.name ?? "StashLine")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 32)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 32)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
 
-                Divider().overlay(Color.white.opacity(0.15))
+                    Divider().overlay(Color.white.opacity(0.15))
+                }
+                .background(.bar)
+                .colorScheme(.dark)
             }
-            .background(.bar)
-            .colorScheme(.dark)
         }
         .floatingActionBar {
             HStack(spacing: 0) {
@@ -167,6 +177,12 @@ struct StashLineView: View {
                 }
             }
             viewModel.fetchSavedFilters()
+            let savedId = performerFilter.flatMap { coordinator.picsPerformerScrollIds[$0.id] } ?? coordinator.picsGlobalScrollId
+            if !viewModel.allImages.isEmpty {
+                if let id = savedId { scrollPositionId = id }
+            } else {
+                pendingRestoreId = savedId
+            }
         }
         .onChange(of: viewModel.savedFilters) { _, newValue in
             if selectedFilter == nil {
@@ -186,6 +202,13 @@ struct StashLineView: View {
                 if viewModel.allImages.isEmpty && !viewModel.isLoadingImages && selectedFilter == nil {
                     performSearch()
                 }
+            }
+        }
+        .onChange(of: viewModel.isLoadingImages) { wasLoading, isLoading in
+            print("🔄 isLoadingImages \(wasLoading)→\(isLoading) | pendingRestore=\(pendingRestoreId ?? "nil")")
+            if wasLoading && !isLoading, let id = pendingRestoreId {
+                pendingRestoreId = nil
+                DispatchQueue.main.async { scrollPositionId = id }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
@@ -208,6 +231,36 @@ struct StashLineView: View {
                     }
                 }
             }
+        }
+        .onChange(of: scrollPositionId) { _, newId in
+            print("📍 scrollPositionId changed → \(newId ?? "nil") | pendingRestore=\(pendingRestoreId ?? "nil") | performer=\(performerFilter?.name ?? "global")")
+            guard pendingRestoreId == nil, let id = newId else { return }
+            if let pid = performerFilter?.id {
+                coordinator.picsPerformerScrollIds[pid] = id
+            } else {
+                coordinator.picsGlobalScrollId = id
+            }
+        }
+        .onChange(of: performerFilter) { oldPerformer, newPerformer in
+            print("🎭 performerFilter changed \(oldPerformer?.name ?? "global") → \(newPerformer?.name ?? "global") | scrollId=\(scrollPositionId ?? "nil") | globalSaved=\(coordinator.picsGlobalScrollId ?? "nil")")
+            // Save current position for performer views being left
+            if let pid = oldPerformer?.id, let id = scrollPositionId {
+                coordinator.picsPerformerScrollIds[pid] = id
+            }
+            // Global position is saved continuously by onChange(of: scrollPositionId)
+            // and explicitly by performer tap — don't overwrite here
+            // Clear scroll position so stale ID doesn't confuse the new dataset
+            scrollPositionId = nil
+            // Queue restore for the new filter
+            if let newPid = newPerformer?.id {
+                pendingRestoreId = coordinator.picsPerformerScrollIds[newPid]
+            } else {
+                pendingRestoreId = coordinator.picsGlobalScrollId
+            }
+            performSearch()
+        }
+        .onChange(of: externalPerformerFilter) { _, newValue in
+            performerFilter = newValue
         }
     }
 
@@ -345,16 +398,19 @@ struct StashLineView: View {
     private var feedContent: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if let performer = performerFilter {
+                if let performer = performerFilter, !isEmbedded {
                     profileHeader(performer: performer)
                 }
                 ForEach(groupedPosts) { post in
-                    StashLinePostView(post: post, viewModel: viewModel)
-                        .onAppear {
-                            if post.id == groupedPosts.last?.id {
-                                viewModel.loadMoreImages()
-                            }
+                    StashLinePostView(post: post, viewModel: viewModel, onPerformerTap: onPerformerTap != nil ? { performer in
+                        coordinator.picsGlobalScrollId = post.id
+                        onPerformerTap?(performer)
+                    } : nil)
+                    .onAppear {
+                        if post.id == groupedPosts.last?.id {
+                            viewModel.loadMoreImages()
                         }
+                    }
                 }
 
                 if viewModel.isLoadingImages {
@@ -366,7 +422,9 @@ struct StashLineView: View {
                         .onAppear { viewModel.loadMoreImages() }
                 }
             }
+            .scrollTargetLayout()
         }
+        .scrollPosition(id: $scrollPositionId, anchor: .center)
         .refreshable { performSearch() }
     }
 }
@@ -434,6 +492,7 @@ struct StashLinePostView: View {
     let post: StashLinePost
     @ObservedObject var viewModel: StashDBViewModel
     @ObservedObject var appearanceManager = AppearanceManager.shared
+    var onPerformerTap: ((GalleryPerformer) -> Void)? = nil
 
     @State private var showHeartAnimation = false
     @State private var heartScale: CGFloat = 0
@@ -453,9 +512,10 @@ struct StashLinePostView: View {
     var localOCounter: Int { oCounters[image.id] ?? image.o_counter ?? 0 }
     var localRating: Int { ratings[image.id] ?? image.rating100 ?? 0 }
 
-    init(post: StashLinePost, viewModel: StashDBViewModel) {
+    init(post: StashLinePost, viewModel: StashDBViewModel, onPerformerTap: ((GalleryPerformer) -> Void)? = nil) {
         self.post = post
         self.viewModel = viewModel
+        self.onPerformerTap = onPerformerTap
         self._oCounters = State(initialValue: [:])
         self._ratings = State(initialValue: [:])
     }
@@ -568,10 +628,17 @@ struct StashLinePostView: View {
             // Performers
             HStack(spacing: 0) {
                 ForEach(Array(performers.enumerated()), id: \.element.id) { idx, performer in
-                    NavigationLink(destination: StashLineView(performerFilter: performer).applyAppBackground()) {
-                        performerAvatar(performer, offset: idx)
+                    if let onPerformerTap = onPerformerTap {
+                        Button(action: { onPerformerTap(performer) }) {
+                            performerAvatar(performer, offset: idx)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink(destination: StashLineView(performerFilter: performer).applyAppBackground()) {
+                            performerAvatar(performer, offset: idx)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 if performers.isEmpty {
                     Circle()
@@ -594,23 +661,44 @@ struct StashLinePostView: View {
                         .font(.subheadline).fontWeight(.semibold)
                         .foregroundColor(.primary)
                 } else if performers.count == 1 {
-                    NavigationLink(destination: StashLineView(performerFilter: performers[0]).applyAppBackground()) {
-                        Text(performers[0].name)
-                            .font(.subheadline).fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
+                    let performer = performers[0]
+                    if let onPerformerTap = onPerformerTap {
+                        Button(action: { onPerformerTap(performer) }) {
+                            Text(performer.name)
+                                .font(.subheadline).fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink(destination: StashLineView(performerFilter: performer).applyAppBackground()) {
+                            Text(performer.name)
+                                .font(.subheadline).fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 } else {
                     HStack(spacing: 4) {
                         ForEach(Array(performers.enumerated()), id: \.element.id) { idx, performer in
-                            NavigationLink(destination: StashLineView(performerFilter: performer).applyAppBackground()) {
-                                Text(performer.name)
-                                    .font(.subheadline).fontWeight(.semibold)
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
+                            if let onPerformerTap = onPerformerTap {
+                                Button(action: { onPerformerTap(performer) }) {
+                                    Text(performer.name)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                NavigationLink(destination: StashLineView(performerFilter: performer).applyAppBackground()) {
+                                    Text(performer.name)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                             if idx < performers.count - 1 {
                                 Text("&")
                                     .font(.subheadline)

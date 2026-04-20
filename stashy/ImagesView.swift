@@ -13,6 +13,7 @@ struct ImagesView: View {
     
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var appearanceManager = AppearanceManager.shared
+    @ObservedObject var configManager = ServerConfigManager.shared
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
     
     @State private var selectedSortOption: StashDBViewModel.ImageSortOption = .dateDesc
@@ -61,16 +62,56 @@ struct ImagesView: View {
     }
 
     var body: some View {
-        ScrollView {
-            gridContent
-                .padding(16)
-                .padding(.bottom, isSelectionMode ? 80 : 0) // Add padding for floating bar
-        }
-        .refreshable {
-            if let gallery = gallery {
-                viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
+        Group {
+            if configManager.activeConfig == nil {
+                ConnectionErrorView { 
+                    if let gallery = gallery {
+                        viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
+                    } else {
+                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
+                    }
+                }
+            } else if (viewModel.isLoadingImages || viewModel.isLoadingGalleryImages) && displayedImages.isEmpty {
+                VStack {
+                    Spacer()
+                    ProgressView("Loading images...")
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else if displayedImages.isEmpty && viewModel.errorMessage != nil {
+                ConnectionErrorView {
+                    if let gallery = gallery {
+                        viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
+                    } else {
+                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
+                    }
+                }
+            } else if displayedImages.isEmpty {
+                SharedEmptyStateView(
+                    icon: "camera.fill",
+                    title: "No images found",
+                    buttonText: "Reload",
+                    onRetry: {
+                        if let gallery = gallery {
+                            viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
+                        } else {
+                            viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
+                        }
+                    }
+                )
             } else {
-                viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
+                ScrollView {
+                    gridContent
+                        .padding(16)
+                        .padding(.bottom, isSelectionMode ? 80 : 0) // Add padding for floating bar
+                }
+                .refreshable {
+                    if let gallery = gallery {
+                        viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
+                    } else {
+                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
+                    }
+                }
             }
         }
         .navigationTitle(gallery?.title ?? "Images")
