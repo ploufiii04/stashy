@@ -5,6 +5,7 @@ struct TVGenericDetailView<Item: TVDetailItem, Info: View, Content: View>: View 
     let isLoading: Bool
     let heroAspectRatio: CGFloat
     let placeholderSystemImage: String
+    let heroImageOverride: AnyView?
     
     // Scenes related
     let scenes: [Scene]
@@ -22,6 +23,34 @@ struct TVGenericDetailView<Item: TVDetailItem, Info: View, Content: View>: View 
         GridItem(.fixed(410), spacing: 40),
         GridItem(.fixed(410), spacing: 40)
     ]
+
+    init(
+        item: Item?,
+        isLoading: Bool,
+        heroAspectRatio: CGFloat,
+        placeholderSystemImage: String,
+        heroImageOverride: AnyView? = nil,
+        scenes: [Scene],
+        isLoadingScenes: Bool,
+        totalScenes: Int,
+        hasMoreScenes: Bool,
+        loadMoreScenes: @escaping () -> Void,
+        @ViewBuilder infoGrid: @escaping (Item) -> Info,
+        @ViewBuilder additionalContent: @escaping () -> Content
+    ) {
+        self.item = item
+        self.isLoading = isLoading
+        self.heroAspectRatio = heroAspectRatio
+        self.placeholderSystemImage = placeholderSystemImage
+        self.heroImageOverride = heroImageOverride
+        self.scenes = scenes
+        self.isLoadingScenes = isLoadingScenes
+        self.totalScenes = totalScenes
+        self.hasMoreScenes = hasMoreScenes
+        self.loadMoreScenes = loadMoreScenes
+        self.infoGrid = infoGrid
+        self.additionalContent = additionalContent
+    }
 
     var body: some View {
         ScrollView {
@@ -143,6 +172,9 @@ struct TVGenericDetailView<Item: TVDetailItem, Info: View, Content: View>: View 
         Button {
             // Focusable hero image
         } label: {
+            if let heroImageOverride {
+                heroImageOverride
+            } else
             if let thumbnailURL = item?.thumbnailURL {
                 AsyncImage(url: thumbnailURL) { phase in
                     switch phase {

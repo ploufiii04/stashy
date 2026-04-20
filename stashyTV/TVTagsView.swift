@@ -237,6 +237,8 @@ struct TVTagDetailView: View {
     let tagName: String
 
     @StateObject private var viewModel = StashDBViewModel()
+    @State private var loadedTag: Tag?
+    @State private var isLoadingTag: Bool = false
 
     private var tagColor: Color {
         let hash = abs(tagName.hashValue)
@@ -253,7 +255,7 @@ struct TVTagDetailView: View {
 
     var body: some View {
         Group {
-            if let tag = viewModel.tags.first(where: { $0.id == tagId }) {
+            if let tag = loadedTag {
                 renderDetail(item: tag)
             } else {
                 renderDetail(item: StubTagDetailItem(id: tagId, name: tagName))
@@ -265,7 +267,7 @@ struct TVTagDetailView: View {
     private func renderDetail<T: TVDetailItem>(item: T) -> some View {
         TVGenericDetailView(
             item: item,
-            isLoading: viewModel.isLoadingTags && viewModel.tags.isEmpty,
+            isLoading: isLoadingTag || (viewModel.isLoadingTags && viewModel.tags.isEmpty),
             heroAspectRatio: 16/9,
             placeholderSystemImage: "tag.fill",
             scenes: viewModel.tagScenes,
@@ -287,6 +289,15 @@ struct TVTagDetailView: View {
             additionalContent: { EmptyView() }
         )
         .onAppear {
+            if loadedTag == nil && !isLoadingTag {
+                isLoadingTag = true
+                viewModel.fetchTag(tagId: tagId) { fetched in
+                    DispatchQueue.main.async {
+                        self.loadedTag = fetched
+                        self.isLoadingTag = false
+                    }
+                }
+            }
             viewModel.fetchTagScenes(tagId: tagId, isInitialLoad: true)
         }
     }

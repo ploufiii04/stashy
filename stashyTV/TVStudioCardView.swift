@@ -65,23 +65,14 @@ struct TVStudioCardView: View {
 
     @ViewBuilder
     private var thumbnailView: some View {
-        if let thumbnailURL = studio.thumbnailURL {
-            AsyncImage(url: thumbnailURL) { phase in
-                switch phase {
-                case .empty:
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.08))
-                        .overlay(ProgressView().scaleEffect(0.8))
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    placeholderView
-                @unknown default:
-                    placeholderView
-                }
-            }
-        } else {
-            placeholderView
+        // Match iOS behaviour: show the full studio image (no crop),
+        // with subtle padding inside a neutral background.
+        ZStack {
+            Rectangle()
+                .fill(Color.gray.opacity(0.08))
+
+            TVStudioImageView(studioId: studio.id, studioName: studio.name, contentMode: .fit)
+                .padding(24)
         }
     }
 

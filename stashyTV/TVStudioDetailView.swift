@@ -29,6 +29,9 @@ struct TVStudioDetailView: View {
             isLoading: isLoadingStudio,
             heroAspectRatio: 16/9,
             placeholderSystemImage: "building.2.fill",
+            heroImageOverride: AnyView(
+                TVStudioImageView(studioId: studioId, studioName: studioName, contentMode: .fit)
+            ),
             scenes: viewModel.studioScenes,
             isLoadingScenes: viewModel.isLoadingStudioScenes,
             totalScenes: viewModel.totalStudioScenes,

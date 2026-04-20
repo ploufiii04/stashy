@@ -561,20 +561,8 @@ struct TVSceneDetailView: View {
             NavigationLink(value: TVStudioLink(id: studio.id, name: studio.name)) {
                 VStack(alignment: .leading, spacing: 12) {
                     ZStack {
-                        if let url = studio.thumbnailURL {
-                            CustomAsyncImage(url: url) { loader in
-                                if let image = loader.image {
-                                    image
-                                        .resizable()
-                                        .scaledToFit()
-                                        .padding(25)
-                                } else {
-                                    studioPlaceholder
-                                }
-                            }
-                        } else {
-                            studioPlaceholder
-                        }
+                        TVStudioImageView(studioId: studio.id, studioName: studio.name, contentMode: .fit)
+                            .padding(25)
                     }
                     .frame(width: 320, height: 180)
 
