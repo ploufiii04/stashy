@@ -160,9 +160,28 @@ class StashVideoSyncManager: ObservableObject {
     // MARK: - Audio Tap (MTAudioProcessingTap + AGC)
 
     private func setupAudioTap(for playerItem: AVPlayerItem) {
-        let audioTracks = playerItem.asset.tracks(withMediaType: .audio)
-        guard let audioTrack = audioTracks.first else { return }
+        let asset = playerItem.asset
+        if #available(iOS 16.0, *) {
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let tracks = try await asset.loadTracks(withMediaType: .audio)
+                    guard let audioTrack = tracks.first else { return }
+                    await MainActor.run {
+                        self.installAudioTap(on: playerItem, audioTrack: audioTrack)
+                    }
+                } catch {
+                    // If track loading fails, skip audio tap gracefully
+                }
+            }
+        } else {
+            let tracks = asset.tracks(withMediaType: .audio)
+            guard let audioTrack = tracks.first else { return }
+            installAudioTap(on: playerItem, audioTrack: audioTrack)
+        }
+    }
 
+    private func installAudioTap(on playerItem: AVPlayerItem, audioTrack: AVAssetTrack) {
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(self).toOpaque()),

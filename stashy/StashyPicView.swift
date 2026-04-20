@@ -350,30 +350,52 @@ struct StashLineView: View {
     // Non-consecutive grouping: all images sharing a key are merged regardless of position.
     // Order of first appearance determines post order in feed.
     private var groupedPosts: [StashLinePost] {
-        var keyOrder: [String] = []
         var groups: [String: [StashImage]] = [:]
 
         for image in viewModel.allImages {
             if let key = StashLinePost.groupKey(for: image) {
                 if groups[key] == nil {
-                    keyOrder.append(key)
                     groups[key] = []
                 }
                 groups[key]!.append(image)
             } else {
                 // No groupable key → single post, use image id as unique key
                 let fallback = "solo-\(image.id)"
-                keyOrder.append(fallback)
                 groups[fallback] = [image]
             }
         }
 
-        // Hold back last group while more pages may load — it could grow
-        let lastKey = keyOrder.last
-        let posts = keyOrder.compactMap { key -> StashLinePost? in
-            guard let images = groups[key] else { return nil }
-            // If last group is incomplete (still loading), skip unless multi-image
-            if key == lastKey && viewModel.hasMoreImages && images.count == 1
+        // Deterministic group ordering (so global vs performer views match)
+        // Key formats:
+        // - grouped: performerId|date|galleryIds|sessionKey|orientation
+        // - solo: solo-<imageId>
+        let sortedKeys: [String] = groups.keys.sorted { a, b in
+            let aa = StashLinePost.groupSortComponents(fromKey: a)
+            let bb = StashLinePost.groupSortComponents(fromKey: b)
+            // Descending by date/session (newer first), then performer, then rest
+            if aa.date != bb.date { return aa.date > bb.date }
+            if aa.session != bb.session { return aa.session > bb.session }
+            if aa.performer != bb.performer { return aa.performer > bb.performer }
+            if aa.gallery != bb.gallery { return aa.gallery > bb.gallery }
+            if aa.orientation != bb.orientation { return aa.orientation > bb.orientation }
+            return a > b
+        }
+
+        // Hold back newest group while more pages may load — it could grow
+        let firstKey = sortedKeys.first
+        let posts = sortedKeys.compactMap { key -> StashLinePost? in
+            guard var images = groups[key] else { return nil }
+
+            // Stable ordering within a group (based on filename index suffix)
+            images.sort { lhs, rhs in
+                let li = StashLinePost.imageOrderIndex(lhs)
+                let ri = StashLinePost.imageOrderIndex(rhs)
+                if li != ri { return li < ri }
+                return lhs.id < rhs.id
+            }
+
+            // If newest group is incomplete (still loading), skip unless multi-image
+            if key == firstKey && viewModel.hasMoreImages && images.count == 1
                 && StashLinePost.groupKey(for: images[0]) != nil {
                 return nil
             }
@@ -452,11 +474,14 @@ struct StashLinePost: Identifiable {
     //   e.g. "042_-_2026-01-12_12-39-43_0.jpg" → "2026-01-12_12-39-43"
     //   if not present (no _-_ pattern), falls back to empty string
     static func groupKey(for image: StashImage) -> String? {
-        guard let performers = image.performers, !performers.isEmpty,
-              let date = image.date, !date.isEmpty else { return nil }
+        // Grouping should always be per single performer.
+        // If there are 0 or multiple performers (collabs), do not group.
+        guard let performers = image.performers, performers.count == 1 else { return nil }
+        let performerKey = performers[0].id
 
-        let performerKey = performers.map(\.id).sorted().joined(separator: ",")
         let galleryKey = image.galleries?.map(\.id).sorted().joined(separator: ",") ?? ""
+        
+        guard let date = image.date, !date.isEmpty else { return nil }
 
         // Extract session timestamp from filename: part between _-_ and trailing _<digits>
         let sessionKey: String
@@ -470,6 +495,9 @@ struct StashLinePost: Identifiable {
         } else {
             sessionKey = ""
         }
+        
+        // Only group when we have a reliable session timestamp.
+        guard !sessionKey.isEmpty else { return nil }
 
         // Orientation: portrait vs landscape — mixed orientations get separate groups
         let orientation: String
@@ -480,6 +508,34 @@ struct StashLinePost: Identifiable {
         }
 
         return "\(performerKey)|\(date)|\(galleryKey)|\(sessionKey)|\(orientation)"
+    }
+
+    static func groupSortComponents(fromKey key: String) -> (performer: String, date: String, gallery: String, session: String, orientation: String) {
+        if key.hasPrefix("solo-") {
+            // Put solos at the end, but keep deterministic ordering
+            return (performer: "", date: "", gallery: "", session: "", orientation: "")
+        }
+        let parts = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        // performer|date|gallery|session|orientation
+        return (
+            performer: parts.count > 0 ? parts[0] : "",
+            date: parts.count > 1 ? parts[1] : "",
+            gallery: parts.count > 2 ? parts[2] : "",
+            session: parts.count > 3 ? parts[3] : "",
+            orientation: parts.count > 4 ? parts[4] : ""
+        )
+    }
+
+    static func imageOrderIndex(_ image: StashImage) -> Int {
+        // Try to parse trailing _<digits> from filename (e.g. ..._0.jpg, ..._12.jpg)
+        if let path = image.visual_files?.first?.path ?? image.paths?.image {
+            let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            if let match = filename.range(of: #"_\d+$"#, options: .regularExpression) {
+                let s = filename[match].dropFirst()
+                return Int(s) ?? 0
+            }
+        }
+        return 0
     }
 }
 
@@ -602,20 +658,13 @@ struct StashLinePostView: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .padding(.bottom, 4)
-            .background(
-                NavigationLink(
-                    destination: Group {
-                        if let performer = performerDetailTarget {
-                            PerformerDetailView(performer: performer.toPerformer())
-                        } else {
-                            EmptyView()
-                        }
-                    },
-                    isActive: $showPerformerDetail,
-                    label: { EmptyView() }
-                )
-                .hidden()
-            )
+            .navigationDestination(isPresented: $showPerformerDetail) {
+                if let performer = performerDetailTarget {
+                    PerformerDetailView(performer: performer.toPerformer())
+                } else {
+                    EmptyView()
+                }
+            }
 
             if let tags = image.tags, !tags.isEmpty {
                 tagLine(tags: tags)

@@ -10,6 +10,34 @@ import SwiftUI
 import AVKit
 import AVFoundation
 
+private extension Notification.Name {
+    static let reelsPauseAllPlayers = Notification.Name("ReelsPauseAllPlayers")
+}
+
+private enum ReelsPlayerRegistry {
+    private static let players = NSHashTable<AVPlayer>.weakObjects()
+    private static let lock = NSLock()
+
+    static func register(_ player: AVPlayer) {
+        lock.lock()
+        players.add(player)
+        lock.unlock()
+    }
+
+    static func unregister(_ player: AVPlayer) {
+        lock.lock()
+        players.remove(player)
+        lock.unlock()
+    }
+
+    static func pauseAll() {
+        lock.lock()
+        let all = players.allObjects
+        lock.unlock()
+        all.forEach { $0.pause() }
+    }
+}
+
 struct ReelsView: View {
     @ObservedObject private var appearanceManager = AppearanceManager.shared
     @ObservedObject private var tabManager = TabManager.shared
@@ -32,6 +60,7 @@ struct ReelsView: View {
     @State private var isMediaZoomed = false
     @State private var isRotating = false
     @State private var isUIVisible = true
+    @State private var isUserScrollingReels = false
     @State private var lastMainListPosition: String?
     @State private var currentItemIsPlaying = true
     @State private var currentItemShowRatingOverlay = false
@@ -39,6 +68,120 @@ struct ReelsView: View {
     @State private var scrubberState = ScrubberState()
     @State private var isInitialized = false
     @State private var playTrigger = 0  // Incremented when first item should autoplay
+
+    // MARK: - Session-persisted sort/filter (per server + mode)
+    private func reelsSessionSortKey(for mode: ReelsMode) -> String {
+        let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
+        return "reels_session_sort_\(serverID)_\(mode.rawValue)"
+    }
+
+    private func reelsSessionFilterKey(for mode: ReelsMode) -> String {
+        let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
+        return "reels_session_filter_\(serverID)_\(mode.rawValue)"
+    }
+
+    private func sessionSortRaw(for mode: ReelsMode) -> String? {
+        UserDefaults.standard.string(forKey: reelsSessionSortKey(for: mode))
+    }
+
+    private func sessionFilterId(for mode: ReelsMode) -> String? {
+        UserDefaults.standard.string(forKey: reelsSessionFilterKey(for: mode))
+    }
+
+    private func saveSessionState(for mode: ReelsMode) {
+        // Sort
+        let sortRaw: String? = {
+            switch mode {
+            case .scenes: return selectedSortOption.rawValue
+            case .markers: return selectedMarkerSortOption.rawValue
+            case .clips: return selectedClipSortOption.rawValue
+            case .previews: return selectedSortOption.rawValue
+            case .pics: return nil
+            }
+        }()
+        if let raw = sortRaw {
+            UserDefaults.standard.set(raw, forKey: reelsSessionSortKey(for: mode))
+        }
+
+        // Filter
+        let filterId: String? = {
+            switch mode {
+            case .scenes, .markers:
+                return selectedFilter?.id
+            case .clips:
+                return selectedClipFilter?.id
+            case .previews:
+                return selectedPreviewFilter?.id
+            case .pics:
+                return nil
+            }
+        }()
+        if let id = filterId, !id.isEmpty {
+            UserDefaults.standard.set(id, forKey: reelsSessionFilterKey(for: mode))
+        } else {
+            UserDefaults.standard.removeObject(forKey: reelsSessionFilterKey(for: mode))
+        }
+    }
+
+    private func reelsSessionRandomSeedKey() -> String {
+        let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
+        return "reels_session_random_seed_\(serverID)"
+    }
+
+    private func restoreSessionRandomSeedIfAvailable() {
+        let seed = UserDefaults.standard.integer(forKey: reelsSessionRandomSeedKey())
+        if seed > 0 {
+            viewModel.setRandomSeed(seed)
+        }
+    }
+
+    private func persistSessionRandomSeed() {
+        UserDefaults.standard.set(viewModel.getRandomSeed(), forKey: reelsSessionRandomSeedKey())
+    }
+
+    private func reelsPositionKey(for mode: ReelsMode) -> String {
+        let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
+        return "reels_last_visible_\(serverID)_\(mode.rawValue)"
+    }
+
+    private func expectedPrefix(for mode: ReelsMode) -> String? {
+        switch mode {
+        case .scenes: return "scene"
+        case .markers: return "marker"
+        case .clips: return "clip"
+        case .previews: return "preview"
+        case .pics: return nil
+        }
+    }
+
+    private func savedPosition(for mode: ReelsMode) -> String? {
+        UserDefaults.standard.string(forKey: reelsPositionKey(for: mode))
+    }
+
+    private func savePosition(_ id: String, for mode: ReelsMode) {
+        UserDefaults.standard.set(id, forKey: reelsPositionKey(for: mode))
+    }
+
+    private func saveCurrentPositionIfPossible(for mode: ReelsMode) {
+        guard let prefix = expectedPrefix(for: mode) else { return }
+        guard let id = currentVisibleSceneId, id.hasPrefix("\(prefix)-") else { return }
+        savePosition(id, for: mode)
+    }
+
+    private func restorePositionIfAvailable(for mode: ReelsMode, forceIfPrefixMismatch: Bool) {
+        let currentPrefix = currentVisibleSceneId?.split(separator: "-").first.map(String.init)
+        let expected = expectedPrefix(for: mode)
+
+        if forceIfPrefixMismatch {
+            if let expected, currentPrefix == expected { return }
+        } else {
+            guard currentVisibleSceneId == nil else { return }
+        }
+
+        if let saved = savedPosition(for: mode), !saved.isEmpty {
+            currentVisibleSceneId = saved
+        }
+    }
 
     // Extracted binding to help the Swift compiler with type-checking
     // Native scroll binding
@@ -105,11 +248,39 @@ struct ReelsView: View {
         }
         
         var title: String? {
+            func nonEmpty(_ s: String?) -> String? {
+                guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+                return t
+            }
+            func fileNameFromPath(_ path: String?) -> String? {
+                guard let p = nonEmpty(path) else { return nil }
+                let clean = p.components(separatedBy: "?").first ?? p
+                return URL(fileURLWithPath: clean).lastPathComponent
+            }
+
             switch self {
-            case .scene(let s): return s.title
-            case .marker(let m): return m.scene?.title
-            case .clip(let c): return c.title
-            case .preview(let s): return s.title
+            case .scene(let s):
+                if let t = nonEmpty(s.title) { return t }
+                // Fallback: use filename if title is missing
+                if let name = fileNameFromPath(s.files?.first?.path) { return name }
+                if let name = fileNameFromPath(s.paths?.stream) { return name }
+                return nil
+            case .marker(let m):
+                if let t = nonEmpty(m.scene?.title) { return t }
+                if let name = fileNameFromPath(m.scene?.files?.first?.path) { return name }
+                if let name = fileNameFromPath(m.scene?.paths?.stream) { return name }
+                return nil
+            case .clip(let c):
+                if let t = nonEmpty(c.title) { return t }
+                // Fallback: show filename when no title is present
+                if let name = fileNameFromPath(c.visual_files?.first?.path) { return name }
+                if let name = fileNameFromPath(c.paths?.image) { return name }
+                return nil
+            case .preview(let s):
+                if let t = nonEmpty(s.title) { return t }
+                if let name = fileNameFromPath(s.files?.first?.path) { return name }
+                if let name = fileNameFromPath(s.paths?.stream) { return name }
+                return nil
             }
         }
         
@@ -306,7 +477,7 @@ struct ReelsView: View {
 
     
 
-    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, previewSortBy: StashDBViewModel.SceneSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, previewFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false, clearPreviewFilter: Bool = false) {
+    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, previewSortBy: StashDBViewModel.SceneSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, previewFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false, clearPreviewFilter: Bool = false, rerollRandom: Bool = false) {
         let currentMode = mode ?? reelsMode
         if let providedMode = mode { reelsMode = providedMode }
 
@@ -339,35 +510,39 @@ struct ReelsView: View {
             }
         }
 
-        // Update local state and handle random re-roll
+        // Update local state and handle random re-roll (only when explicitly requested)
         // Don't override a just-restored position with nil
         if let sortBy = sortBy {
-            if sortBy == .random && selectedSortOption == .random && reelsMode == .scenes {
+            if rerollRandom && sortBy == .random && selectedSortOption == .random && reelsMode == .scenes {
                 viewModel.refreshRandomSeed()
+                persistSessionRandomSeed()
             }
             selectedSortOption = sortBy
             if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         if let markerSortBy = markerSortBy {
-            if markerSortBy == .random && selectedMarkerSortOption == .random && reelsMode == .markers {
+            if rerollRandom && markerSortBy == .random && selectedMarkerSortOption == .random && reelsMode == .markers {
                 viewModel.refreshRandomSeed()
+                persistSessionRandomSeed()
             }
             selectedMarkerSortOption = markerSortBy
             if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         if let clipSortBy = clipSortBy {
-            if clipSortBy == .random && selectedClipSortOption == .random && reelsMode == .clips {
+            if rerollRandom && clipSortBy == .random && selectedClipSortOption == .random && reelsMode == .clips {
                 viewModel.refreshRandomSeed()
+                persistSessionRandomSeed()
             }
             selectedClipSortOption = clipSortBy
             if restoredPosition == nil { currentVisibleSceneId = nil }
         }
 
         if let previewSortBy = previewSortBy {
-            if previewSortBy == .random && selectedSortOption == .random && reelsMode == .previews {
+            if rerollRandom && previewSortBy == .random && selectedSortOption == .random && reelsMode == .previews {
                 viewModel.refreshRandomSeed()
+                persistSessionRandomSeed()
             }
             // Previews use standard selectedSortOption since they are scenes
             selectedSortOption = previewSortBy
@@ -420,19 +595,17 @@ struct ReelsView: View {
         case .pics:
             break
         }
+
+        // Persist sort/filter for this session (per mode)
+        saveSessionState(for: currentMode)
     }
     
     private func autoSelectFirstItem() {
+        // Don't override a restored position while the list is still loading.
+        guard !currentReelItems.isEmpty else { return }
         // Only auto-select if nothing is selected OR if the selected ID belongs to another mode
         let currentPrefix = currentVisibleSceneId?.split(separator: "-").first.map(String.init)
-        let expectedPrefix: String
-        switch reelsMode {
-        case .scenes: expectedPrefix = "scene"
-        case .markers: expectedPrefix = "marker"
-        case .clips: expectedPrefix = "clip"
-        case .previews: expectedPrefix = "preview"
-        case .pics: return
-        }
+        guard let expectedPrefix = expectedPrefix(for: reelsMode) else { return }
 
         // Check if current ID still exists in the list; if not, select first item
         let currentIdExists: Bool = {
@@ -441,6 +614,14 @@ struct ReelsView: View {
         }()
 
         if !currentIdExists || currentPrefix != expectedPrefix {
+            // Prefer restoring saved position for this mode (prevents snapping to start on mode switches)
+            if let saved = savedPosition(for: reelsMode),
+               currentReelItems.contains(where: { $0.id == saved }) {
+                currentVisibleSceneId = saved
+                playTrigger += 1
+                return
+            }
+
             var newId: String?
             switch reelsMode {
             case .scenes:
@@ -794,7 +975,7 @@ struct ReelsView: View {
                     .presentationDragIndicator(.visible)
                 #endif
             }
-            .onChange(of: reelsMode) { _, newValue in handleModeChange(newValue) }
+            .onChange(of: reelsMode) { oldValue, newValue in handleModeChange(from: oldValue, to: newValue) }
             .onChange(of: currentVisibleSceneId) { _, _ in
                 isMenuOpen = false
                 currentItemIsPlaying = true
@@ -803,6 +984,7 @@ struct ReelsView: View {
                 scrubberState.duration = 1.0
                 scrubberState.seeking = false
                 scrubberState.seekTarget = nil
+                saveCurrentPositionIfPossible(for: reelsMode)
             }
             .onChange(of: viewModel.scenes.first?.id) { _, _ in autoSelectFirstItem() }
             .onChange(of: viewModel.sceneMarkers.first?.id) { _, _ in autoSelectFirstItem() }
@@ -980,8 +1162,45 @@ struct ReelsView: View {
         if viewModel.savedFilters.isEmpty {
             viewModel.fetchSavedFilters()
         }
-        
+
+        restoreSessionRandomSeedIfAvailable()
+
+        restorePositionIfAvailable(for: reelsMode, forceIfPrefixMismatch: false)
         autoSelectFirstItem()
+
+        // Restore session sort/filter for the current mode (prevents resetting to defaults on tab return)
+        switch reelsMode {
+        case .scenes:
+            if let raw = sessionSortRaw(for: .scenes), let opt = StashDBViewModel.SceneSortOption(rawValue: raw) {
+                selectedSortOption = opt
+            }
+            if let fid = sessionFilterId(for: .scenes) {
+                selectedFilter = viewModel.savedFilters[fid]
+            }
+        case .markers:
+            if let raw = sessionSortRaw(for: .markers), let opt = StashDBViewModel.SceneMarkerSortOption(rawValue: raw) {
+                selectedMarkerSortOption = opt
+            }
+            if let fid = sessionFilterId(for: .markers) {
+                selectedFilter = viewModel.savedFilters[fid]
+            }
+        case .clips:
+            if let raw = sessionSortRaw(for: .clips), let opt = StashDBViewModel.ImageSortOption(rawValue: raw) {
+                selectedClipSortOption = opt
+            }
+            if let fid = sessionFilterId(for: .clips) {
+                selectedClipFilter = viewModel.savedFilters[fid]
+            }
+        case .previews:
+            if let raw = sessionSortRaw(for: .previews), let opt = StashDBViewModel.SceneSortOption(rawValue: raw) {
+                selectedSortOption = opt
+            }
+            if let fid = sessionFilterId(for: .previews) {
+                selectedPreviewFilter = viewModel.savedFilters[fid]
+            }
+        case .pics:
+            break
+        }
         
         // 1. Initialize reelsMode ONLY if current mode is disabled in settings
         let enabledTypes = tabManager.enabledReelsModes
@@ -1125,38 +1344,61 @@ struct ReelsView: View {
         isInitialized = true
     }
 
-    private func handleModeChange(_ newValue: ReelsMode) {
+    private func handleModeChange(from oldValue: ReelsMode, to newValue: ReelsMode) {
+        // When switching sub-tabs (Scenes/Markers/Clips/Previews/Pics) always pause the
+        // currently playing item immediately. Autoplay for the new mode is handled by
+        // autoSelectFirstItem -> currentVisibleSceneId change (which resets isPlaying).
+        currentItemIsPlaying = false
+        // Some mode switches may not trigger a scrollPosition/currentVisibleSceneId change
+        // (e.g. when the list is already populated). Ensure we resume playback intent
+        // shortly after the mode switch so the active item can start playing again.
+        if newValue != .pics {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                self.currentItemIsPlaying = true
+            }
+        }
+
+        // Persist old mode position, then restore the last known position for the new mode.
+        saveCurrentPositionIfPossible(for: oldValue)
+        restorePositionIfAvailable(for: newValue, forceIfPrefixMismatch: true)
+
+        // Restore session sort/filter (prefer session over defaults)
+        switch newValue {
+        case .scenes:
+            let sortRaw = sessionSortRaw(for: .scenes) ?? TabManager.shared.getReelsDefaultSort(for: .scenes) ?? ""
+            selectedSortOption = StashDBViewModel.SceneSortOption(rawValue: sortRaw) ?? selectedSortOption
+            let fid = sessionFilterId(for: .scenes) ?? TabManager.shared.getDefaultFilterId(for: .reels)
+            let f = fid != nil ? viewModel.savedFilters[fid!] : nil
+            selectedFilter = f
+        case .markers:
+            let sortRaw = sessionSortRaw(for: .markers) ?? TabManager.shared.getReelsDefaultSort(for: .markers) ?? ""
+            selectedMarkerSortOption = StashDBViewModel.SceneMarkerSortOption(rawValue: sortRaw) ?? selectedMarkerSortOption
+            let fid = sessionFilterId(for: .markers) ?? TabManager.shared.getDefaultMarkerFilterId(for: .reels)
+            let f = fid != nil ? viewModel.savedFilters[fid!] : nil
+            selectedFilter = f
+        case .clips:
+            let sortRaw = sessionSortRaw(for: .clips) ?? TabManager.shared.getReelsDefaultSort(for: .clips) ?? ""
+            selectedClipSortOption = StashDBViewModel.ImageSortOption(rawValue: sortRaw) ?? selectedClipSortOption
+            let fid = sessionFilterId(for: .clips) ?? TabManager.shared.getDefaultClipFilterId(for: .reels)
+            selectedClipFilter = (fid != nil ? viewModel.savedFilters[fid!] : nil)
+        case .previews:
+            let sortRaw = sessionSortRaw(for: .previews) ?? TabManager.shared.getReelsDefaultSort(for: .previews) ?? ""
+            selectedSortOption = StashDBViewModel.SceneSortOption(rawValue: sortRaw) ?? selectedSortOption
+            let fid = sessionFilterId(for: .previews) ?? TabManager.shared.getDefaultPreviewFilterId(for: .reels)
+            selectedPreviewFilter = (fid != nil ? viewModel.savedFilters[fid!] : nil)
+        case .pics:
+            break
+        }
+
         switch newValue {
         case .markers:
-            if let defaultId = TabManager.shared.getDefaultMarkerFilterId(for: .reels),
-               let filter = viewModel.savedFilters[defaultId] {
-                applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            } else {
-                applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            }
+            applySettings(markerSortBy: selectedMarkerSortOption, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
         case .scenes:
-            if let defaultId = TabManager.shared.getDefaultFilterId(for: .reels),
-               let filter = viewModel.savedFilters[defaultId] {
-                applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            } else {
-                applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            }
+            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
         case .clips:
-            if let defaultId = TabManager.shared.getDefaultClipFilterId(for: .reels),
-               let filter = viewModel.savedFilters[defaultId] {
-                applySettings(filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            } else {
-                // Maintain current selectedClipFilter when switching modes if no default
-                applySettings(filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            }
+            applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
         case .previews:
-            let savedPreviewSort = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? .random
-            if let defaultId = TabManager.shared.getDefaultPreviewFilterId(for: .reels),
-               let filter = viewModel.savedFilters[defaultId] {
-                applySettings(previewSortBy: savedPreviewSort, filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            } else {
-                applySettings(previewSortBy: savedPreviewSort, filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-            }
+            applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
         case .pics:
             break
         }
@@ -1203,6 +1445,7 @@ struct ReelsView: View {
             isMuted: $isMuted,
             isUIVisible: $isUIVisible,
             isPlaying: $currentItemIsPlaying,
+            isUserScrolling: $isUserScrollingReels,
             showRatingOverlay: $currentItemShowRatingOverlay,
             scrubberState: scrubberState,
             onPerformerTap: { performer in
@@ -1275,7 +1518,15 @@ struct ReelsView: View {
         .scrollPosition(id: scrollPositionBinding)
         .scrollContentBackground(.hidden)
         .background(Color.black)
-        .onScrollPhaseChange { _, _ in }
+        .onScrollPhaseChange { _, newPhase in
+            // Pause immediately while the user swipes the reel out of view.
+            isUserScrollingReels = (newPhase != .idle)
+            if newPhase != .idle {
+                currentItemIsPlaying = false
+                ReelsPlayerRegistry.pauseAll()
+                NotificationCenter.default.post(name: .reelsPauseAllPlayers, object: nil)
+            }
+        }
         .background(Color.black)
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             // Just update state for UI adjustments, no force rebuilds
@@ -1494,8 +1745,13 @@ struct ReelsView: View {
     @ViewBuilder
     private var reelsScrubberBar: some View {
         let currentItem = currentReelItems.first(where: { $0.id == currentVisibleSceneId })
-        if let item = currentItem, !item.isAnimated {
-            IsolatedScrubberBar(state: scrubberState, isUIVisible: isUIVisible)
+        if let item = currentItem {
+            if item.isAnimated {
+                // GIFs don't have a scrubber; don't reserve scrubber space (it pushed the overlay too high).
+                EmptyView()
+            } else {
+                IsolatedScrubberBar(state: scrubberState, isUIVisible: isUIVisible)
+            }
         }
     }
 
@@ -1544,35 +1800,40 @@ struct ReelsView: View {
 
                     // Hashtags
                     let tags = item.tags
-                    if !tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(tags) { tag in
-                                    Button(action: {
-                                        var newTags = selectedTags
-                                        if newTags.contains(where: { $0.id == tag.id }) {
-                                            newTags.removeAll { $0.id == tag.id }
-                                        } else {
-                                            newTags.append(tag)
+                    Group {
+                        if !tags.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(tags) { tag in
+                                        Button(action: {
+                                            var newTags = selectedTags
+                                            if newTags.contains(where: { $0.id == tag.id }) {
+                                                newTags.removeAll { $0.id == tag.id }
+                                            } else {
+                                                newTags.append(tag)
+                                            }
+                                            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+                                        }) {
+                                            Text("#\(tag.name)")
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 3)
+                                                .background(Color.black.opacity(0.3))
+                                                .clipShape(Capsule())
+                                                .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
                                         }
-                                        applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
-                                    }) {
-                                        Text("#\(tag.name)")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundColor(.white.opacity(0.8))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.black.opacity(0.3))
-                                            .clipShape(Capsule())
-                                            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
                                 }
+                                .padding(.horizontal, 20)
                             }
-                            .padding(.horizontal, 20)
+                        } else {
+                            // Reserve space so the title row doesn't drop for items without tags (e.g. Clips/GIFs).
+                            Color.clear.opacity(0)
                         }
-                        .frame(height: 20)
                     }
+                    .frame(height: 20)
                 }
 
 
@@ -1710,7 +1971,15 @@ struct ReelsView: View {
     @ViewBuilder
     private var sceneSortOptions: some View {
         // Random
-        Button(action: { applySettings(sortBy: .random, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
+        Button(action: {
+            applySettings(
+                sortBy: .random,
+                filter: selectedFilter,
+                performer: selectedPerformer,
+                tags: selectedTags,
+                rerollRandom: selectedSortOption == .random
+            )
+        }) {
             HStack {
                 Text("Random")
                 if selectedSortOption == .random { Image(systemName: "checkmark") }
@@ -1891,7 +2160,15 @@ struct ReelsView: View {
     @ViewBuilder
     private var markerSortOptions: some View {
         // Random
-        Button(action: { applySettings(markerSortBy: .random, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
+        Button(action: {
+            applySettings(
+                markerSortBy: .random,
+                filter: selectedFilter,
+                performer: selectedPerformer,
+                tags: selectedTags,
+                rerollRandom: selectedMarkerSortOption == .random
+            )
+        }) {
             HStack {
                 Text("Random")
                 if selectedMarkerSortOption == .random { Image(systemName: "checkmark") }
@@ -1967,7 +2244,16 @@ struct ReelsView: View {
     @ViewBuilder
     private var previewSortOptions: some View {
         // Previews are scenes — same sort options as sceneSortOptions
-        Button(action: { applySettings(previewSortBy: .random, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
+        Button(action: {
+            applySettings(
+                previewSortBy: .random,
+                filter: selectedFilter,
+                previewFilter: selectedPreviewFilter,
+                performer: selectedPerformer,
+                tags: selectedTags,
+                rerollRandom: selectedSortOption == .random
+            )
+        }) {
             HStack {
                 Text("Random")
                 if selectedSortOption == .random { Image(systemName: "checkmark") }
@@ -2127,7 +2413,16 @@ struct ReelsView: View {
     @ViewBuilder
     private var clipSortOptions: some View {
         // Random
-        Button(action: { applySettings(clipSortBy: .random, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
+        Button(action: {
+            applySettings(
+                clipSortBy: .random,
+                filter: nil,
+                clipFilter: selectedClipFilter,
+                performer: selectedPerformer,
+                tags: selectedTags,
+                rerollRandom: selectedClipSortOption == .random
+            )
+        }) {
             HStack {
                 Text("Random")
                 if selectedClipSortOption == .random { Image(systemName: "checkmark") }
@@ -2304,6 +2599,7 @@ struct ReelItemView: View {
     @Binding var isMuted: Bool
     @Binding var isUIVisible: Bool
     @Binding var isPlaying: Bool
+    @Binding var isUserScrolling: Bool
     @Binding var showRatingOverlay: Bool
     let scrubberState: ScrubberState
     var onPerformerTap: (ScenePerformer) -> Void
@@ -2395,6 +2691,11 @@ extension ReelItemView {
             .onDisappear {
                 cleanupPlayer()
                 cancelAnimationAdvanceTimer()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .reelsPauseAllPlayers)) { _ in
+                // Robust pause: when paging/scrolling starts, pause immediately even if
+                // `currentVisibleSceneId` (and thus `isActive`) hasn't updated yet.
+                player?.pause()
             }
             .onChange(of: isMuted) { _, newValue in
                 player?.isMuted = newValue
@@ -2596,7 +2897,7 @@ extension ReelItemView {
 
     @ViewBuilder
     private var playButtonOverlay: some View {
-        if !item.isAnimated && !isPlaying && isUIVisible {
+        if !item.isAnimated && !isPlaying && isUIVisible && !isUserScrolling {
             CenterPlayButton {
                 isPlaying = true
                 if !isRotating { player?.play() }
@@ -2811,6 +3112,7 @@ extension ReelItemView {
         }
         
         guard let player = self.player else { return }
+        ReelsPlayerRegistry.register(player)
         
         player.isMuted = isMuted
         if isPlaying && isActive && !isRotating { 
@@ -2892,7 +3194,10 @@ extension ReelItemView {
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
         
         // Aggressively release resources
-        player?.replaceCurrentItem(with: nil)
+        if let p = player {
+            ReelsPlayerRegistry.unregister(p)
+            p.replaceCurrentItem(with: nil)
+        }
         player = nil
         print("🎬 Reels: Player cleaned up for item \(item.id)")
     }
@@ -3091,7 +3396,8 @@ struct IsolatedScrubberBar: View {
                 state.seeking = editing
             }
         )
-        .padding(.bottom, 6)
+        // Keep a bit more space below the scrubber so it sits ~5px higher.
+        .padding(.bottom, 11)
         .colorScheme(.dark)
         .opacity(isUIVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.2), value: isUIVisible)

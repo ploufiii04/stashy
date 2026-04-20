@@ -21,87 +21,55 @@ struct SettingsView: View {
     @State private var scanAlertMessage: String = ""
     @State private var showingAddServerSheet = false
     @State private var editingServer: ServerConfig?
+    @State private var selectedSection: SettingsSection = .main
     
     // IAP
     @StateObject private var storeManager = StoreManager()
 
+    enum SettingsSection: String, CaseIterable, Identifiable {
+        case main = "Main"
+        case playback = "Playback"
+        case design = "Design"
+        case devices = "Devices"
+        
+        var id: String { rawValue }
+        
+        var icon: String {
+            switch self {
+            case .main: return "gearshape"
+            case .playback: return "play.circle"
+            case .design: return "paintbrush"
+            case .devices: return "bolt.horizontal"
+            }
+        }
+    }
+
     var body: some View {
         Form {
-            // MARK: - App Store (TestFlight only)
-            if isTestFlightBuild() {
-                Section {
-                    appStoreBanner
-                }
+            switch selectedSection {
+            case .main:
+                mainSettings
+            case .playback:
+                playbackSettings
+            case .design:
+                designSettings
+            case .devices:
+                devicesSettings
             }
-
-            // MARK: - Server
-            ServerListSection(
-                viewModel: viewModel,
-                isScanningLibrary: $isScanningLibrary,
-                showingAddServerSheet: $showingAddServerSheet,
-                editingServer: $editingServer,
-                onScan: { startLibraryScan() }
-            )
-
-            // MARK: - Playback
-            if configManager.activeConfig != nil {
-                PlaybackSettingsSection()
-            }
-            
-            Section(header: Text("Security")) {
-                NavigationLink(destination: SecuritySettingsView()) {
-                    Label("Security", systemImage: "lock.shield")
-                }
-            }
-            .listRowBackground(Color.secondaryAppBackground)
-            
-            Section(header: Text("Appearance")) {
-                NavigationLink(destination: AppearanceSettingsView()) {
-                    Label("Appearance", systemImage: "paintbrush")
-                }
-                NavigationLink(destination: EditModeSettingsView()) {
-                    Label("Editing", systemImage: "pencil.circle")
-                }
-            }
-            .listRowBackground(Color.secondaryAppBackground)
-
-
-            // MARK: - Content & Tabs
-            if configManager.activeConfig != nil {
-                ContentSettingsSection()
-            }
-
-            // MARK: - Default Settings
-            if configManager.activeConfig != nil {
-                Section("Default Settings") {
-                    NavigationLink(destination: DefaultSortView()) {
-                        Label("Sorting", systemImage: "arrow.up.arrow.down")
-                    }
-
-                    NavigationLink(destination: DefaultFilterView()) {
-                        Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
-                    }
-                }
-                .listRowBackground(Color.secondaryAppBackground)
-            }
-
-            // MARK: - About
-            interactiveDevicesSection
-
-            Section(header: Text("StashyPremium")) {
-                NavigationLink(destination: StashSyncSettingsView()) {
-                    Label("StashSync", systemImage: "bolt.fill")
-                }
-            }
-            .listRowBackground(Color.secondaryAppBackground)
-
-            tipSection
-            aboutSection
-
         }
         .applyAppBackground()
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarHidden(true)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                settingsTopRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+
+                Divider().overlay(Color.white.opacity(0.15))
+            }
+            .background(.bar)
+            .colorScheme(.dark)
+        }
         .sheet(isPresented: $showingAddServerSheet) {
             NavigationView {
                 ServerFormViewNew(configToEdit: nil) { newConfig in
@@ -138,6 +106,135 @@ struct SettingsView: View {
         } message: {
             Text(scanAlertMessage)
         }
+    }
+
+    private var settingsTopRow: some View {
+        HStack(spacing: 8) {
+            Text("Settings")
+                .font(.system(size: 18, weight: .semibold))
+                .lineLimit(1)
+                .frame(width: 120, alignment: .leading)
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                ForEach(SettingsSection.allCases) { section in
+                    let isActive = section == selectedSection
+                    Button(action: {
+                        withAnimation(DesignTokens.Animation.quick) { selectedSection = section }
+                    }) {
+                        VStack(spacing: 2) {
+                            Image(systemName: section.icon)
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(section.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(isActive ? .white : .primary)
+                        .frame(width: 64, height: 36)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9)
+                                .fill(isActive ? appearanceManager.tintColor : Color.clear)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(section.rawValue)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Section Content
+
+    @ViewBuilder
+    private var mainSettings: some View {
+        // 1. Main: Beta Hinweis, Server, Tipp, Link
+        if isTestFlightBuild() {
+            Section {
+                appStoreBanner
+            }
+        }
+
+        ServerListSection(
+            viewModel: viewModel,
+            isScanningLibrary: $isScanningLibrary,
+            showingAddServerSheet: $showingAddServerSheet,
+            editingServer: $editingServer,
+            onScan: { startLibraryScan() }
+        )
+
+        tipSection
+        aboutSection
+    }
+
+    @ViewBuilder
+    private var playbackSettings: some View {
+        // 2. Playback
+        if configManager.activeConfig != nil {
+            PlaybackSettingsSection()
+        } else {
+            Section {
+                Text("Playback settings require an active server.")
+                    .foregroundColor(.secondary)
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+        }
+    }
+
+    @ViewBuilder
+    private var designSettings: some View {
+        // 3. Design: Appearance, Securtity, Content & Tabs, Default Settings
+        Section(header: Text("Appearance")) {
+            NavigationLink(destination: AppearanceSettingsView()) {
+                Label("Appearance", systemImage: "paintbrush")
+            }
+            NavigationLink(destination: EditModeSettingsView()) {
+                Label("Editing", systemImage: "pencil.circle")
+            }
+        }
+        .listRowBackground(Color.secondaryAppBackground)
+
+        Section(header: Text("Security")) {
+            NavigationLink(destination: SecuritySettingsView()) {
+                Label("Security", systemImage: "lock.shield")
+            }
+        }
+        .listRowBackground(Color.secondaryAppBackground)
+
+        if configManager.activeConfig != nil {
+            ContentSettingsSection()
+
+            Section("Default Settings") {
+                NavigationLink(destination: DefaultSortView()) {
+                    Label("Sorting", systemImage: "arrow.up.arrow.down")
+                }
+
+                NavigationLink(destination: DefaultFilterView()) {
+                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
+                }
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+        } else {
+            Section {
+                Text("Content & default settings require an active server.")
+                    .foregroundColor(.secondary)
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+        }
+    }
+
+    @ViewBuilder
+    private var devicesSettings: some View {
+        // 4. Devices: Device Syncronistation, StashyPremium
+        interactiveDevicesSection
+
+        Section(header: Text("StashyPremium")) {
+            NavigationLink(destination: StashSyncSettingsView()) {
+                Label("StashSync", systemImage: "bolt.fill")
+            }
+        }
+        .listRowBackground(Color.secondaryAppBackground)
     }
 
     // MARK: - App Store Banner

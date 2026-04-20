@@ -120,6 +120,14 @@ class StashDBViewModel: ObservableObject {
         randomSeed = Int.random(in: 1...1_000_000)
     }
 
+    func setRandomSeed(_ seed: Int) {
+        randomSeed = seed
+    }
+
+    func getRandomSeed() -> Int {
+        randomSeed
+    }
+
     enum FilterMode: String, Codable {
         case scenes = "SCENES"
         case performers = "PERFORMERS"
@@ -242,6 +250,12 @@ class StashDBViewModel: ObservableObject {
 
     // Data properties
     @Published var statistics: Statistics?
+    @Published var performerGenderCounts: [String: Int] = [:]
+    @Published var isLoadingPerformerGenderCounts: Bool = false
+    @Published var performerAggregates: PerformerAggregates?
+    @Published var isLoadingPerformerAggregates: Bool = false
+    @Published var sceneAggregates: SceneAggregates?
+    @Published var isLoadingSceneAggregates: Bool = false
     @Published var scenes: [Scene] = []
     // Detailed Content for DetailViews (Tag, Performer, Studio)
     @Published var detailStudios: [Studio] = []
@@ -1198,7 +1212,7 @@ class StashDBViewModel: ObservableObject {
         errorMessage = nil // Clear error when starting
         let statisticsQuery = """
         {
-          "query": "{ stats { scene_count scenes_size scenes_duration image_count images_size gallery_count performer_count studio_count movie_count tag_count } }"
+          "query": "{ stats { scene_count scenes_size scenes_duration image_count images_size gallery_count performer_count studio_count group_count tag_count total_o_count total_play_duration total_play_count scenes_played movie_count } }"
         }
         """
 
@@ -1223,6 +1237,296 @@ class StashDBViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Performer Statistics
+
+    /// Counts performers by gender (only genders with count > 0 are returned).
+    /// Uses paging to fetch all performers and aggregates locally.
+    func fetchPerformerGenderCounts() {
+        guard ServerConfigManager.shared.activeConfig != nil else {
+            DispatchQueue.main.async {
+                self.performerGenderCounts = [:]
+                self.isLoadingPerformerGenderCounts = false
+            }
+            return
+        }
+
+        if isLoadingPerformerGenderCounts { return }
+        isLoadingPerformerGenderCounts = true
+
+        let query = GraphQLQueries.queryWithFragments("findPerformers")
+        let perPage = 500
+
+        var page = 1
+        var counts: [String: Int] = [:]
+        var totalCount: Int?
+
+        func normalizeGenderKey(_ raw: String?) -> String? {
+            guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+            return s.uppercased()
+        }
+
+        func loadNextPage() {
+            let filterDict: [String: Any] = [
+                "page": page,
+                "per_page": perPage,
+                "sort": "name",
+                "direction": "ASC"
+            ]
+
+            let variables: [String: Any] = [
+                "filter": filterDict
+            ]
+
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+                  let bodyString = String(data: bodyData, encoding: .utf8) else {
+                DispatchQueue.main.async { self.isLoadingPerformerGenderCounts = false }
+                return
+            }
+
+            performGraphQLQuery(query: bodyString) { (response: PerformerGenderCountsResponse?) in
+                guard let result = response?.data?.findPerformers else {
+                    DispatchQueue.main.async { self.isLoadingPerformerGenderCounts = false }
+                    return
+                }
+
+                if totalCount == nil { totalCount = result.count }
+
+                for p in result.performers {
+                    if let gender = normalizeGenderKey(p.gender) {
+                        counts[gender, default: 0] += 1
+                    }
+                }
+
+                let loadedSoFar = page * perPage
+                if let total = totalCount, loadedSoFar >= total || result.performers.isEmpty {
+                    DispatchQueue.main.async {
+                        self.performerGenderCounts = counts.filter { $0.value > 0 }
+                        self.isLoadingPerformerGenderCounts = false
+                    }
+                } else {
+                    page += 1
+                    loadNextPage()
+                }
+            }
+        }
+
+        loadNextPage()
+    }
+
+    func fetchPerformerAggregates() {
+        guard ServerConfigManager.shared.activeConfig != nil else {
+            DispatchQueue.main.async {
+                self.performerAggregates = nil
+                self.isLoadingPerformerAggregates = false
+            }
+            return
+        }
+
+        if isLoadingPerformerAggregates { return }
+        isLoadingPerformerAggregates = true
+
+        let query = GraphQLQueries.queryWithFragments("findPerformers")
+        let perPage = 500
+
+        var page = 1
+        var totalCount: Int?
+
+        var ratedCount = 0
+        var ratingSum = 0
+        var ratingMin: Int?
+        var ratingMax: Int?
+
+        var oCountCount = 0
+        var oCountSum = 0
+        var oCountMax: Int = 0
+
+        func loadNextPage() {
+            let filterDict: [String: Any] = [
+                "page": page,
+                "per_page": perPage,
+                "sort": "name",
+                "direction": "ASC"
+            ]
+
+            let variables: [String: Any] = ["filter": filterDict]
+
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+                  let bodyString = String(data: bodyData, encoding: .utf8) else {
+                DispatchQueue.main.async { self.isLoadingPerformerAggregates = false }
+                return
+            }
+
+            performGraphQLQuery(query: bodyString) { (response: PerformerAggregatesResponse?) in
+                guard let result = response?.data?.findPerformers else {
+                    DispatchQueue.main.async { self.isLoadingPerformerAggregates = false }
+                    return
+                }
+
+                if totalCount == nil { totalCount = result.count }
+
+                for p in result.performers {
+                    if let r = p.rating100 {
+                        ratedCount += 1
+                        ratingSum += r
+                        ratingMin = min(ratingMin ?? r, r)
+                        ratingMax = max(ratingMax ?? r, r)
+                    }
+                    if let o = p.oCounter {
+                        oCountCount += 1
+                        oCountSum += o
+                        oCountMax = max(oCountMax, o)
+                    }
+                }
+
+                let loadedSoFar = page * perPage
+                if let total = totalCount, loadedSoFar >= total || result.performers.isEmpty {
+                    let avgRating = ratedCount > 0 ? Double(ratingSum) / Double(ratedCount) : nil
+                    let avgOCounter = oCountCount > 0 ? Double(oCountSum) / Double(oCountCount) : nil
+
+                    DispatchQueue.main.async {
+                        self.performerAggregates = PerformerAggregates(
+                            totalCount: totalCount ?? 0,
+                            ratedCount: ratedCount,
+                            averageRating100: avgRating,
+                            minRating100: ratingMin,
+                            maxRating100: ratingMax,
+                            oCounterCount: oCountCount,
+                            averageOCounter: avgOCounter,
+                            maxOCounter: oCountMax
+                        )
+                        self.isLoadingPerformerAggregates = false
+                    }
+                } else {
+                    page += 1
+                    loadNextPage()
+                }
+            }
+        }
+
+        loadNextPage()
+    }
+
+    func fetchSceneAggregates() {
+        guard ServerConfigManager.shared.activeConfig != nil else {
+            DispatchQueue.main.async {
+                self.sceneAggregates = nil
+                self.isLoadingSceneAggregates = false
+            }
+            return
+        }
+
+        if isLoadingSceneAggregates { return }
+        isLoadingSceneAggregates = true
+
+        let query = GraphQLQueries.loadQuery(named: "findScenesCompact")
+        let perPage = 200
+
+        var page = 1
+        var totalCount: Int?
+
+        var ratedCount = 0
+        var ratingSum = 0
+        var ratingMin: Int?
+        var ratingMax: Int?
+
+        var oCountCount = 0
+        var oCountSum = 0
+        var oCountMax: Int = 0
+
+        var playCountCount = 0
+        var playCountSum = 0
+        var playCountMax: Int = 0
+
+        var durationCount = 0
+        var durationSum: Double = 0
+        var durationMax: Double = 0
+
+        func loadNextPage() {
+            let filterDict: [String: Any] = [
+                "page": page,
+                "per_page": perPage,
+                "sort": "date",
+                "direction": "DESC"
+            ]
+
+            let variables: [String: Any] = [
+                "filter": filterDict
+            ]
+
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+                  let bodyString = String(data: bodyData, encoding: .utf8) else {
+                DispatchQueue.main.async { self.isLoadingSceneAggregates = false }
+                return
+            }
+
+            performGraphQLQuery(query: bodyString) { (response: SceneAggregatesResponse?) in
+                guard let result = response?.data?.findScenes else {
+                    DispatchQueue.main.async { self.isLoadingSceneAggregates = false }
+                    return
+                }
+
+                if totalCount == nil { totalCount = result.count }
+
+                for s in result.scenes {
+                    if let r = s.rating100 {
+                        ratedCount += 1
+                        ratingSum += r
+                        ratingMin = min(ratingMin ?? r, r)
+                        ratingMax = max(ratingMax ?? r, r)
+                    }
+                    if let o = s.oCounter {
+                        oCountCount += 1
+                        oCountSum += o
+                        oCountMax = max(oCountMax, o)
+                    }
+                    if let p = s.playCount {
+                        playCountCount += 1
+                        playCountSum += p
+                        playCountMax = max(playCountMax, p)
+                    }
+                    if let d = s.duration, d > 0 {
+                        durationCount += 1
+                        durationSum += d
+                        durationMax = max(durationMax, d)
+                    }
+                }
+
+                let loadedSoFar = page * perPage
+                if let total = totalCount, loadedSoFar >= total || result.scenes.isEmpty {
+                    let avgRating = ratedCount > 0 ? Double(ratingSum) / Double(ratedCount) : nil
+                    let avgOCounter = oCountCount > 0 ? Double(oCountSum) / Double(oCountCount) : nil
+                    let avgPlayCount = playCountCount > 0 ? Double(playCountSum) / Double(playCountCount) : nil
+                    let avgDuration = durationCount > 0 ? durationSum / Double(durationCount) : nil
+
+                    DispatchQueue.main.async {
+                        self.sceneAggregates = SceneAggregates(
+                            totalCount: totalCount ?? 0,
+                            ratedCount: ratedCount,
+                            averageRating100: avgRating,
+                            minRating100: ratingMin,
+                            maxRating100: ratingMax,
+                            oCounterCount: oCountCount,
+                            averageOCounter: avgOCounter,
+                            maxOCounter: oCountMax,
+                            playCountCount: playCountCount,
+                            averagePlayCount: avgPlayCount,
+                            maxPlayCount: playCountMax,
+                            durationCount: durationCount,
+                            averageDurationSeconds: avgDuration,
+                            maxDurationSeconds: durationMax
+                        )
+                        self.isLoadingSceneAggregates = false
+                    }
+                } else {
+                    page += 1
+                    loadNextPage()
+                }
+            }
+        }
+
+        loadNextPage()
+    }
+
     private var cachedMarkerCountKey: String {
         let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
         return "cachedMarkerCount_\(serverID)"
@@ -1243,8 +1547,13 @@ class StashDBViewModel: ObservableObject {
                     galleryCount: current.galleryCount,
                     performerCount: current.performerCount,
                     studioCount: current.studioCount,
+                    groupCount: current.groupCount,
                     movieCount: current.movieCount,
                     tagCount: current.tagCount,
+                    totalOCount: current.totalOCount,
+                    totalPlayDuration: current.totalPlayDuration,
+                    totalPlayCount: current.totalPlayCount,
+                    scenesPlayed: current.scenesPlayed,
                     sceneMarkerCount: cached
                 )
             }
@@ -1269,8 +1578,13 @@ class StashDBViewModel: ObservableObject {
                     galleryCount: current.galleryCount,
                     performerCount: current.performerCount,
                     studioCount: current.studioCount,
+                    groupCount: current.groupCount,
                     movieCount: current.movieCount,
                     tagCount: current.tagCount,
+                    totalOCount: current.totalOCount,
+                    totalPlayDuration: current.totalPlayDuration,
+                    totalPlayCount: current.totalPlayCount,
+                    scenesPlayed: current.scenesPlayed,
                     sceneMarkerCount: count
                 )
             }
@@ -4995,15 +5309,20 @@ struct StatisticsData: Codable {
 
 struct Statistics: Codable {
     let sceneCount: Int
-    let scenesSize: Int64
-    let scenesDuration: Float
+    let scenesSize: Double
+    let scenesDuration: Double
     let imageCount: Int
-    let imagesSize: Int64
+    let imagesSize: Double
     let galleryCount: Int
     let performerCount: Int
     let studioCount: Int
+    let groupCount: Int
     let movieCount: Int
     let tagCount: Int
+    let totalOCount: Int
+    let totalPlayDuration: Double
+    let totalPlayCount: Int
+    let scenesPlayed: Int
     let sceneMarkerCount: Int?
     
     enum CodingKeys: String, CodingKey {
@@ -5015,8 +5334,13 @@ struct Statistics: Codable {
         case galleryCount = "gallery_count"
         case performerCount = "performer_count"
         case studioCount = "studio_count"
+        case groupCount = "group_count"
         case movieCount = "movie_count"
         case tagCount = "tag_count"
+        case totalOCount = "total_o_count"
+        case totalPlayDuration = "total_play_duration"
+        case totalPlayCount = "total_play_count"
+        case scenesPlayed = "scenes_played"
         case sceneMarkerCount = "scene_marker_count"
     }
 }
@@ -5944,6 +6268,104 @@ struct PerformersData: Codable {
 struct FindPerformersResult: Codable {
     let count: Int
     let performers: [Performer]
+}
+
+// MARK: - Performer Gender Stats (lightweight decode)
+struct PerformerGenderCountsResponse: Codable {
+    let data: PerformerGenderCountsData?
+}
+
+struct PerformerGenderCountsData: Codable {
+    let findPerformers: PerformerGenderCountsResult
+}
+
+struct PerformerGenderCountsResult: Codable {
+    let count: Int
+    let performers: [PerformerGenderCountsPerformer]
+}
+
+struct PerformerGenderCountsPerformer: Codable {
+    let gender: String?
+}
+
+// MARK: - Performer Aggregates (lightweight decode)
+struct PerformerAggregatesResponse: Codable {
+    let data: PerformerAggregatesData?
+}
+
+struct PerformerAggregatesData: Codable {
+    let findPerformers: PerformerAggregatesResult
+}
+
+struct PerformerAggregatesResult: Codable {
+    let count: Int
+    let performers: [PerformerAggregatesPerformer]
+}
+
+struct PerformerAggregatesPerformer: Codable {
+    let rating100: Int?
+    let oCounter: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case rating100
+        case oCounter = "o_counter"
+    }
+}
+
+struct PerformerAggregates: Equatable {
+    let totalCount: Int
+    let ratedCount: Int
+    let averageRating100: Double?
+    let minRating100: Int?
+    let maxRating100: Int?
+    let oCounterCount: Int
+    let averageOCounter: Double?
+    let maxOCounter: Int
+}
+
+// MARK: - Scene Aggregates (lightweight decode)
+struct SceneAggregatesResponse: Codable {
+    let data: SceneAggregatesData?
+}
+
+struct SceneAggregatesData: Codable {
+    let findScenes: SceneAggregatesResult
+}
+
+struct SceneAggregatesResult: Codable {
+    let count: Int
+    let scenes: [SceneAggregatesScene]
+}
+
+struct SceneAggregatesScene: Codable {
+    let rating100: Int?
+    let oCounter: Int?
+    let playCount: Int?
+    let duration: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case rating100
+        case oCounter = "o_counter"
+        case playCount = "play_count"
+        case duration
+    }
+}
+
+struct SceneAggregates: Equatable {
+    let totalCount: Int
+    let ratedCount: Int
+    let averageRating100: Double?
+    let minRating100: Int?
+    let maxRating100: Int?
+    let oCounterCount: Int
+    let averageOCounter: Double?
+    let maxOCounter: Int
+    let playCountCount: Int
+    let averagePlayCount: Double?
+    let maxPlayCount: Int
+    let durationCount: Int
+    let averageDurationSeconds: Double?
+    let maxDurationSeconds: Double
 }
 
 struct SinglePerformerResponse: Codable {

@@ -15,6 +15,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
     case media
     case catalogue
     case downloads
+    case tools
     case reels
     case search
     case settings
@@ -37,6 +38,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .media: return "Media"
         case .catalogue: return "Home"
         case .downloads: return "Downloads"
+        case .tools: return "Tools"
         case .reels: return "Feeds"
         case .search: return "Search"
         case .settings: return "Settings"
@@ -48,7 +50,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
 
     var icon: String {
         switch self {
-        case .dashboard: return "chart.bar.fill"
+        case .dashboard: return "house.fill"
         case .studios: return "building.2"
         case .performers: return "person.3"
         case .scenes: return "film"
@@ -58,6 +60,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .media: return "play.square.stack"
         case .catalogue: return "square.grid.2x2.fill"
         case .downloads: return "square.and.arrow.down"
+        case .tools: return "wand.and.stars"
         case .reels: return "play.rectangle.on.rectangle"
         case .search: return "magnifyingglass"
         case .settings: return "gear"
@@ -235,6 +238,38 @@ struct ReelsModeConfig: Codable, Identifiable, Equatable {
     var defaultSortOption: String?
 }
 
+// MARK: - Tools Configuration
+
+enum ToolsItem: String, Codable, CaseIterable, Identifiable {
+    case server
+    case downloads
+    case statistics
+    
+    var id: String { rawValue }
+    
+    var title: String {
+        switch self {
+        case .server: return "Server"
+        case .downloads: return "Downloads"
+        case .statistics: return "Statistics"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .server: return "server.rack"
+        case .downloads: return "square.and.arrow.down"
+        case .statistics: return "chart.bar.fill"
+        }
+    }
+}
+
+struct ToolsItemConfig: Codable, Identifiable, Equatable {
+    let id: ToolsItem
+    var isEnabled: Bool
+    var sortOrder: Int
+}
+
 
 class TabManager: ObservableObject {
     static let shared = TabManager()
@@ -243,6 +278,7 @@ class TabManager: ObservableObject {
     @Published var detailViews: [DetailViewConfig] = []
     @Published var homeRows: [HomeRowConfig] = []
     @Published var reelsModes: [ReelsModeConfig] = []
+    @Published var tools: [ToolsItemConfig] = []
     @Published var reelsFillHeight: Bool = true {
         didSet {
             UserDefaults.standard.set(reelsFillHeight, forKey: reelsFillHeightKey)
@@ -287,6 +323,7 @@ class TabManager: ObservableObject {
     private let detailSortKey = "DetailViewsSortConfig"
     private let homeRowsKey = "HomeRowsConfig"
     private let reelsModesKey = "ReelsModesConfig"
+    private let toolsKey = "ToolsConfig"
     private let reelsFillHeightKey = "ReelsFillHeight"
     private let reelsContinuousPlayKey = "ReelsContinuousPlay"
     private let isPiPEnabledKey = "isPiPEnabled"
@@ -313,6 +350,7 @@ class TabManager: ObservableObject {
         loadDetailConfigs()
         loadHomeRows()
         loadReelsModes()
+        loadTools()
         self.reelsFillHeight = UserDefaults.standard.object(forKey: reelsFillHeightKey) as? Bool ?? true
         self.reelsContinuousPlay = UserDefaults.standard.bool(forKey: reelsContinuousPlayKey)
         self.isPiPEnabled = UserDefaults.standard.object(forKey: isPiPEnabledKey) as? Bool ?? true
@@ -338,10 +376,10 @@ class TabManager: ObservableObject {
         // Fixed order: Home, Feeds (optional), StashLine (optional), Settings
         // Dashboard, Studios, Tags, Performers, Scenes, Galleries are now sub-tabs of Home
         let reelsVisible = tabs.first(where: { $0.id == .reels })?.isVisible ?? true
-        let downloadsVisible = tabs.first(where: { $0.id == .downloads })?.isVisible ?? true
+        let toolsVisible = tabs.first(where: { $0.id == .tools })?.isVisible ?? true
         var result: [AppTab] = [.catalogue]
         if reelsVisible { result.append(.reels) }
-        if downloadsVisible { result.append(.downloads) }
+        if toolsVisible { result.append(.tools) }
         result.append(.settings)
         return result
     }
@@ -388,8 +426,18 @@ class TabManager: ObservableObject {
             // Ensure the decoded tabs are sorted
             var decodedTabs = decoded.sorted { $0.sortOrder < $1.sortOrder }
             
-            // Migration: Fix legacy sort option values that don't match enum rawValues
             var needsSave = false
+            
+            // Migration: Downloads is no longer a top-level tab (moved under Tools)
+            if let idx = decodedTabs.firstIndex(where: { $0.id == .downloads }) {
+                if decodedTabs[idx].isVisible {
+                    decodedTabs[idx].isVisible = false
+                    decodedTabs[idx].sortOrder = max(decodedTabs.map(\.sortOrder).max() ?? 0, 100)
+                    needsSave = true
+                }
+            }
+
+            // Migration: Fix legacy sort option values that don't match enum rawValues
             let sortOptionMigrations: [String: String] = [
                 "scenes_count": "sceneCountDesc",
                 "name": "nameAsc",
@@ -428,7 +476,8 @@ class TabManager: ObservableObject {
                 TabConfig(id: .tags, isVisible: true, sortOrder: 6, defaultSortOption: "sceneCountDesc"),
                 TabConfig(id: .media, isVisible: true, sortOrder: 6, defaultSortOption: nil),
                 TabConfig(id: .catalogue, isVisible: true, sortOrder: 7, defaultSortOption: nil),
-                TabConfig(id: .downloads, isVisible: true, sortOrder: 8, defaultSortOption: nil),
+                TabConfig(id: .downloads, isVisible: false, sortOrder: 100, defaultSortOption: nil),
+                TabConfig(id: .tools, isVisible: true, sortOrder: 8, defaultSortOption: nil),
                 TabConfig(id: .reels, isVisible: true, sortOrder: 10, defaultSortOption: "random"),
                 TabConfig(id: .settings, isVisible: true, sortOrder: 9, defaultSortOption: nil),
                 TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil),
@@ -461,7 +510,8 @@ class TabManager: ObservableObject {
                 TabConfig(id: .tags, isVisible: true, sortOrder: 6, defaultSortOption: "sceneCountDesc"),
                 TabConfig(id: .media, isVisible: true, sortOrder: 6, defaultSortOption: nil),
                 TabConfig(id: .catalogue, isVisible: true, sortOrder: 7, defaultSortOption: nil),
-                TabConfig(id: .downloads, isVisible: true, sortOrder: 8, defaultSortOption: nil),
+                TabConfig(id: .downloads, isVisible: false, sortOrder: 100, defaultSortOption: nil),
+                TabConfig(id: .tools, isVisible: true, sortOrder: 8, defaultSortOption: nil),
                 TabConfig(id: .reels, isVisible: true, sortOrder: 10, defaultSortOption: "random"),
                 TabConfig(id: .settings, isVisible: true, sortOrder: 9, defaultSortOption: nil),
                 TabConfig(id: .groups, isVisible: true, sortOrder: 11, defaultSortOption: "nameAsc", defaultFilterId: nil, defaultFilterName: nil),
@@ -722,6 +772,112 @@ class TabManager: ObservableObject {
         }
     }
     
+    // MARK: - Tools
+
+    func loadTools() {
+        let suffix = currentServerSuffix
+        let serverSpecificKey = "\(toolsKey)\(suffix)"
+        
+        var data = UserDefaults.standard.data(forKey: serverSpecificKey)
+        
+        // Migration
+        if data == nil && !suffix.isEmpty {
+            data = UserDefaults.standard.data(forKey: toolsKey)
+            if let legacyData = data {
+                UserDefaults.standard.set(legacyData, forKey: serverSpecificKey)
+            }
+        }
+        
+        if let data = data,
+           let decoded = try? JSONDecoder().decode([ToolsItemConfig].self, from: data) {
+            var result = decoded.sorted { $0.sortOrder < $1.sortOrder }
+            
+            // Ensure all tools exist (migration for new tools)
+            var hasChanges = false
+            for item in ToolsItem.allCases {
+                if !result.contains(where: { $0.id == item }) {
+                    result.append(ToolsItemConfig(id: item, isEnabled: true, sortOrder: result.count))
+                    hasChanges = true
+                }
+            }
+            
+            self.tools = result.sorted { $0.sortOrder < $1.sortOrder }
+            
+            // Enforce: Downloads is always enabled and anchored first
+            enforceFixedTools()
+            if hasChanges { saveTools() }
+        } else {
+            // Default tools
+            self.tools = [
+                ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0),
+                ToolsItemConfig(id: .server, isEnabled: true, sortOrder: 1),
+                ToolsItemConfig(id: .statistics, isEnabled: true, sortOrder: 2)
+            ]
+            enforceFixedTools()
+            saveTools()
+        }
+    }
+    
+    func saveTools() {
+        enforceFixedTools()
+        if let encoded = try? JSONEncoder().encode(tools) {
+            let key = "\(toolsKey)\(currentServerSuffix)"
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+    
+    var enabledTools: [ToolsItem] {
+        let sorted = tools.sorted { $0.sortOrder < $1.sortOrder }
+        let enabledNonFixed = sorted.filter { $0.id != .downloads && $0.isEnabled }.map(\.id)
+        return [.downloads] + enabledNonFixed
+    }
+    
+    func toggleTool(_ item: ToolsItem) {
+        guard item != .downloads else { return } // fixed
+        if let index = tools.firstIndex(where: { $0.id == item }) {
+            tools[index].isEnabled.toggle()
+            saveTools()
+            objectWillChange.send()
+        }
+    }
+    
+    /// Reorder only non-fixed tools; Downloads stays anchored.
+    func moveTools(from source: IndexSet, to destination: Int) {
+        var movable = tools
+            .filter { $0.id != .downloads }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        movable.move(fromOffsets: source, toOffset: destination)
+        
+        // Rebuild with downloads anchored first
+        var rebuilt: [ToolsItemConfig] = []
+        rebuilt.append(ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0))
+        for (i, item) in movable.enumerated() {
+            rebuilt.append(ToolsItemConfig(id: item.id, isEnabled: item.isEnabled, sortOrder: i + 1))
+        }
+        tools = rebuilt
+        saveTools()
+        objectWillChange.send()
+    }
+    
+    private func enforceFixedTools() {
+        // Ensure downloads exists, enabled, and anchored at sortOrder 0
+        if let idx = tools.firstIndex(where: { $0.id == .downloads }) {
+            tools[idx].isEnabled = true
+        } else {
+            tools.append(ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0))
+        }
+        
+        // Reassign sort orders: downloads = 0, rest increasing
+        let nonFixed = tools
+            .filter { $0.id != .downloads }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        
+        tools = [ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0)]
+            + nonFixed.enumerated().map { i, item in
+                ToolsItemConfig(id: item.id, isEnabled: item.isEnabled, sortOrder: i + 1)
+            }
+    }
+
     func saveReelsModes() {
         if let encoded = try? JSONEncoder().encode(reelsModes) {
             let key = "\(reelsModesKey)\(currentServerSuffix)"

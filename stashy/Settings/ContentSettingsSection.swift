@@ -22,11 +22,75 @@ struct ContentSettingsSection: View {
                 Label("Feeds", systemImage: "play.rectangle.on.rectangle")
             }
 
+            NavigationLink(destination: ToolsSettingsView()) {
+                Label("Tools", systemImage: "wand.and.stars")
+            }
+
             NavigationLink(destination: TabSettingsView()) {
                 Label("Tabs", systemImage: "square.grid.2x2")
             }
         }
         .listRowBackground(Color.secondaryAppBackground)
+    }
+}
+
+struct ToolsSettingsView: View {
+    @ObservedObject var tabManager = TabManager.shared
+    @ObservedObject var appearanceManager = AppearanceManager.shared
+
+    private var toolsTabIsVisible: Bool {
+        tabManager.tabs.first(where: { $0.id == .tools })?.isVisible ?? true
+    }
+    
+    private var movableTools: [ToolsItemConfig] {
+        tabManager.tools
+            .filter { $0.id != .downloads }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var body: some View {
+        List {
+            Section("Tools Tab") {
+                Toggle(isOn: Binding(
+                    get: { toolsTabIsVisible },
+                    set: { _ in tabManager.toggle(.tools) }
+                )) {
+                    Text("Show Tools Tab")
+                }
+                .tint(appearanceManager.tintColor)
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+
+            Section("Tools Order") {
+                // Anchored Downloads
+                HStack {
+                    Label("Downloads", systemImage: ToolsItem.downloads.icon)
+                    Spacer()
+                    Text("Always Included")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                ForEach(movableTools) { tool in
+                    Toggle(isOn: Binding(
+                        get: { tool.isEnabled },
+                        set: { _ in tabManager.toggleTool(tool.id) }
+                    )) {
+                        Label(tool.id.title, systemImage: tool.id.icon)
+                    }
+                    .tint(appearanceManager.tintColor)
+                }
+                .onMove { indices, newOffset in
+                    tabManager.moveTools(from: indices, to: newOffset)
+                }
+            }
+            .listRowBackground(Color.secondaryAppBackground)
+        }
+        .listStyle(.insetGrouped)
+        .environment(\.editMode, .constant(.active))
+        .navigationTitle("Tools")
+        .applyAppBackground()
+        .scrollContentBackground(.hidden)
     }
 }
 

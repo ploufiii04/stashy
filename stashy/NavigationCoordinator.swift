@@ -36,6 +36,7 @@ class NavigationCoordinator: ObservableObject {
     @Published var studiosTabID = UUID()
     @Published var catalogueTabID = UUID()
     @Published var downloadsTabID = UUID()
+    @Published var toolsTabID = UUID()
     @Published var reelsTabID = UUID()
     @Published var stashlineTabID = UUID()
     @Published var settingsTabID = UUID()
@@ -43,6 +44,7 @@ class NavigationCoordinator: ObservableObject {
     
     // Sub-tab control for Combined Tabs
     @Published var catalogueSubTab: String = ""
+    @Published var toolsSubTab: String = ""
     
     // Remote state injection for deep links
     @Published var activeSortOption: String?
@@ -180,6 +182,7 @@ class NavigationCoordinator: ObservableObject {
         studiosTabID = UUID()
         catalogueTabID = UUID()
         downloadsTabID = UUID()
+        toolsTabID = UUID()
         reelsTabID = UUID()
         stashlineTabID = UUID()
         stashlinePath = NavigationPath()
