@@ -246,7 +246,6 @@ struct TVSettingsView: View {
                     Text("About")
                 }
             }
-            .navigationTitle("Settings")
             .sheet(isPresented: $showingAddServer) {
                 TVServerFormView(server: nil) { newServer in
                     configManager.addOrUpdateServer(newServer)
@@ -254,7 +253,7 @@ struct TVSettingsView: View {
                     showingAddServer = false
                 }
             }
-            .sheet(isPresented: $showingSetPasscode) {
+            .fullScreenCover(isPresented: $showingSetPasscode) {
                 TVPasscodeSetupView(isPresented: $showingSetPasscode)
             }
             .sheet(item: $editingServer) { server in
@@ -269,6 +268,7 @@ struct TVSettingsView: View {
             .onAppear {
                 filterViewModel.fetchSavedFilters()
             }
+            .background(Color.appBackground)
     }
 
     private func switchToServer(_ server: ServerConfig) {

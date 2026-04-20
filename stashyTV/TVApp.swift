@@ -18,21 +18,16 @@ struct TVApp: App {
 
     var body: some SwiftUI.Scene {
         WindowGroup {
-            ZStack {
+            Group {
                 if configManager.activeConfig?.hasValidConfig == true {
                     TVMainTabView()
                 } else {
                     TVServerSetupView()
                 }
-
-                // App Lock overlay (PIN). Shown on launch and whenever returning to foreground.
-                if securityManager.isAppLocked {
-                    TVPasscodeEntryView()
-                        .transition(.opacity)
-                        .zIndex(100)
-                }
             }
-            .animation(.snappy(duration: 0.25, extraBounce: 0), value: securityManager.isAppLocked)
+            .fullScreenCover(isPresented: $securityManager.isAppLocked) {
+                TVPasscodeEntryView()
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 defer { lastScenePhase = newPhase }
 
@@ -134,6 +129,7 @@ struct TVPasscodeEntryView: View {
     @State private var pin: String = ""
     @State private var errorMessage: String?
     @State private var shakeTrigger: Bool = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -168,8 +164,17 @@ struct TVPasscodeEntryView: View {
 
             Spacer()
 
-            keypad
-                .padding(.bottom, 60)
+            TVPinPad(
+                onDigit: { digit in
+                    if pin.count < 4 { pin.append(digit) }
+                },
+                onDelete: {
+                    if !pin.isEmpty { pin.removeLast() }
+                },
+                onCancel: nil,
+                isFocused: $isFocused
+            )
+            .padding(.bottom, 60)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 80)
@@ -190,48 +195,8 @@ struct TVPasscodeEntryView: View {
         .onAppear {
             // Ensure the lock is actually active when shown.
             securityManager.lock()
+            isFocused = true
         }
-    }
-
-    private var keypad: some View {
-        VStack(spacing: 18) {
-            ForEach(0..<3, id: \.self) { row in
-                HStack(spacing: 18) {
-                    ForEach(1..<4, id: \.self) { col in
-                        let number = row * 3 + col
-                        keyButton("\(number)")
-                    }
-                }
-            }
-            HStack(spacing: 18) {
-                Button {
-                    if !pin.isEmpty { pin.removeLast() }
-                } label: {
-                    Image(systemName: "delete.left")
-                        .font(.title2)
-                        .frame(width: 140, height: 80)
-                }
-                .buttonStyle(.bordered)
-
-                keyButton("0")
-
-                // Spacer slot to keep grid symmetric
-                Color.clear
-                    .frame(width: 140, height: 80)
-            }
-        }
-        .frame(maxWidth: 600)
-    }
-
-    private func keyButton(_ digit: String) -> some View {
-        Button {
-            if pin.count < 4 { pin.append(digit) }
-        } label: {
-            Text(digit)
-                .font(.title)
-                .frame(width: 140, height: 80)
-        }
-        .buttonStyle(.borderedProminent)
     }
 }
 
@@ -244,20 +209,25 @@ struct TVPasscodeSetupView: View {
     @State private var confirm: String = ""
     @State private var errorMessage: String?
     @State private var shakeTrigger: Bool = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                VStack(spacing: 8) {
-                    Text(step == 1 ? "Set PIN" : "Confirm PIN")
-                        .font(.largeTitle)
-                        .fontWeight(.semibold)
+        VStack(spacing: 0) {
+            VStack(spacing: 16) {
+                Spacer().frame(height: 80)
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                            .font(.title3)
-                    }
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(.primary)
+
+                Text(step == 1 ? "Set PIN" : "Confirm PIN")
+                    .font(.largeTitle)
+                    .fontWeight(.semibold)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .font(.title3)
                 }
 
                 HStack(spacing: 18) {
@@ -269,58 +239,59 @@ struct TVPasscodeSetupView: View {
                 }
                 .offset(x: shakeTrigger ? 12 : 0)
                 .animation(.default, value: shakeTrigger)
-                .padding(.bottom, 12)
+                .padding(.top, 8)
+            }
 
-                TVPinPad(
-                    onDigit: { digit in
-                        if step == 1 {
-                            if pin.count < 4 { pin.append(digit) }
-                        } else {
-                            if confirm.count < 4 { confirm.append(digit) }
-                        }
-                    },
-                    onDelete: {
-                        if step == 1 {
-                            if !pin.isEmpty { pin.removeLast() }
-                        } else {
-                            if !confirm.isEmpty { confirm.removeLast() }
-                        }
-                    }
-                )
+            Spacer()
 
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 80)
-            .padding(.top, 40)
-            .background(Color.black.ignoresSafeArea())
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { isPresented = false }
-                }
-            }
-            .onChange(of: pin) { _, v in
-                if step == 1 && v.count == 4 {
-                    step = 2
-                }
-            }
-            .onChange(of: confirm) { _, v in
-                if step == 2 && v.count == 4 {
-                    if pin == confirm {
-                        securityManager.setPin(pin)
-                        isPresented = false
+            TVPinPad(
+                onDigit: { digit in
+                    if step == 1 {
+                        if pin.count < 4 { pin.append(digit) }
                     } else {
-                        errorMessage = "PINs do not match"
-                        shakeTrigger.toggle()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            pin = ""
-                            confirm = ""
-                            step = 1
-                            errorMessage = nil
-                        }
+                        if confirm.count < 4 { confirm.append(digit) }
+                    }
+                },
+                onDelete: {
+                    if step == 1 {
+                        if !pin.isEmpty { pin.removeLast() }
+                    } else {
+                        if !confirm.isEmpty { confirm.removeLast() }
+                    }
+                },
+                onCancel: { isPresented = false },
+                isFocused: $isFocused
+            )
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 80)
+        .background(Color.black.opacity(0.95).ignoresSafeArea())
+        .onChange(of: pin) { _, v in
+            if step == 1 && v.count == 4 {
+                step = 2
+            }
+        }
+        .onChange(of: confirm) { _, v in
+            if step == 2 && v.count == 4 {
+                if pin == confirm {
+                    securityManager.setPin(pin)
+                    isPresented = false
+                } else {
+                    errorMessage = "PINs do not match"
+                    shakeTrigger.toggle()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        pin = ""
+                        confirm = ""
+                        step = 1
+                        errorMessage = nil
                     }
                 }
             }
+        }
+        .onAppear {
+            isFocused = true
         }
     }
 }
@@ -328,6 +299,8 @@ struct TVPasscodeSetupView: View {
 private struct TVPinPad: View {
     let onDigit: (String) -> Void
     let onDelete: () -> Void
+    let onCancel: (() -> Void)?
+    var isFocused: FocusState<Bool>.Binding
 
     var body: some View {
         VStack(spacing: 18) {
@@ -340,17 +313,31 @@ private struct TVPinPad: View {
                 }
             }
             HStack(spacing: 18) {
+                if let onCancel {
+                    Button(action: onCancel) {
+                        Text("Cancel")
+                            .font(.title3)
+                            .frame(width: 140, height: 80)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    // Left spacer (invisible but keeps grid)
+                    Button(action: {}) {
+                        Text("")
+                            .frame(width: 140, height: 80)
+                    }
+                    .buttonStyle(.bordered)
+                    .hidden()
+                }
+
+                digitButton("0")
+
                 Button(action: onDelete) {
                     Image(systemName: "delete.left")
                         .font(.title2)
                         .frame(width: 140, height: 80)
                 }
                 .buttonStyle(.bordered)
-
-                digitButton("0")
-
-                Color.clear
-                    .frame(width: 140, height: 80)
             }
         }
         .frame(maxWidth: 600)
@@ -365,6 +352,7 @@ private struct TVPinPad: View {
                 .frame(width: 140, height: 80)
         }
         .buttonStyle(.borderedProminent)
+        .focused(isFocused)
     }
 }
 
