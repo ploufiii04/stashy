@@ -42,7 +42,10 @@ struct ServerDetailView: View {
                     }
                 }
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
 
             if !isActive {
                 Section {
@@ -50,7 +53,10 @@ struct ServerDetailView: View {
                         connectServer()
                     }
                 }
-                .listRowBackground(Color.secondaryAppBackground)
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                        .fill(Color.secondaryAppBackground)
+                )
             }
 
             Section("Server Configuration") {
@@ -66,7 +72,10 @@ struct ServerDetailView: View {
                         .foregroundColor(appearanceManager.tintColor)
                 }
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
         }
         .navigationTitle(server.name)
         .applyAppBackground()

@@ -311,6 +311,18 @@ struct HomePerformerCardView: View {
     private var cardWidth: CGFloat  { homeCardWidth(for: config, isLarge: isLarge, screenWidth: screenWidth) }
     private var cardHeight: CGFloat { cardWidth * (isLarge ? 9.0 / 16.0 : 3.0 / 2.0) }
 
+    private var ageText: String? {
+        guard let b = performer.birthdate, !b.isEmpty else { return nil }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
+        fmt.dateFormat = "yyyy-MM-dd"
+        guard let birthDate = fmt.date(from: b) else { return nil }
+        let years = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year
+        guard let y = years, y > 0, y < 120 else { return nil }
+        return "\(y)"
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { geo in
@@ -340,6 +352,19 @@ struct HomePerformerCardView: View {
 
             VStack {
                 HStack(alignment: .top) {
+                    if let age = ageText {
+                        HStack(spacing: 2) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 8, weight: .bold))
+                            Text(age)
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
+                        .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                        .clipShape(Capsule())
+                    }
                     Spacer()
                     HStack(spacing: 2) {
                         Image(systemName: badgeType == .oCount ? appearanceManager.oCounterIcon : "film")

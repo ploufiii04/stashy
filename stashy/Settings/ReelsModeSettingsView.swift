@@ -28,7 +28,10 @@ struct ReelsModeSettingsView: View {
                 }
                 .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
 
             Section {
                 Toggle("Immersive Video Scaling", isOn: $tabManager.reelsFillHeight)
@@ -38,7 +41,10 @@ struct ReelsModeSettingsView: View {
             } footer: {
                 Text("Immersive Scaling stretches content to fill the full screen when orientation matches the video. Continuous Play automatically advances to the next video instead of looping.")
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
             
             Section {
                 ForEach(tabManager.reelsModes) { modeConfig in

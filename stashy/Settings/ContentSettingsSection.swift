@@ -30,7 +30,10 @@ struct ContentSettingsSection: View {
                 Label("Tabs", systemImage: "square.grid.2x2")
             }
         }
-        .listRowBackground(Color.secondaryAppBackground)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                .fill(Color.secondaryAppBackground)
+        )
     }
 }
 
@@ -59,7 +62,10 @@ struct ToolsSettingsView: View {
                 }
                 .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
 
             Section("Tools Order") {
                 // Anchored Downloads
@@ -84,7 +90,10 @@ struct ToolsSettingsView: View {
                     tabManager.moveTools(from: indices, to: newOffset)
                 }
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
         }
         .listStyle(.insetGrouped)
         .environment(\.editMode, .constant(.active))
@@ -136,7 +145,10 @@ struct TabSettingsView: View {
             } footer: {
                 Text("Reorder cards and toggle visibility. Dashboard is anchored at the top.")
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
         }
         .listStyle(.insetGrouped)
         .environment(\.editMode, .constant(.active))

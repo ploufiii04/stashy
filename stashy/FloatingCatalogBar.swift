@@ -64,7 +64,13 @@ struct CatalogCategoryRow: View {
                 Menu {
                     ForEach(overflowTabs, id: \.self) { tab in
                         Button(action: { selection = tab }) {
-                            Label(tab.rawValue, systemImage: tab.icon)
+                            HStack {
+                                Label(tab.rawValue, systemImage: tab.icon)
+                                Spacer()
+                                if tab == selection {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
                         }
                     }
                 } label: {

@@ -150,6 +150,7 @@ struct GroupsView: View {
     @State private var searchText = ""
     @State private var isSearchVisible = false
     @State private var selectedFilter: StashDBViewModel.SavedFilter?
+    @State private var lastOpenedGroupId: String?
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
     var hideTitle: Bool = false
     
@@ -427,6 +428,9 @@ struct GroupsView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         .id(group.id)
+                        .simultaneousGesture(TapGesture().onEnded {
+                            lastOpenedGroupId = group.id
+                        })
                     }
 
                     // Loading indicator for pagination
@@ -446,6 +450,13 @@ struct GroupsView: View {
                 .padding(16)
             }
             .refreshable { performSearch() }
+            .onAppear {
+                if let id = lastOpenedGroupId {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo(id, anchor: .top)
+                    }
+                }
+            }
         }
     }
 }

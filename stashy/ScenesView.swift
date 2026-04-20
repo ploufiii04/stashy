@@ -40,8 +40,8 @@ struct ScenesView: View {
     private var activeLiveFilterDict: [String: Any] {
         var dict: [String: Any] = [:]
         if liveFilterMinRating > 0 {
-            // Use GREATER_THAN with one star below so ">= N stars" works (Stash has no GREATER_THAN_EQUALS)
-            dict["rating100"] = ["value": (liveFilterMinRating * 20) - 1, "modifier": "GREATER_THAN"]
+            // Exact star match (e.g. 1-star means exactly 20)
+            dict["rating100"] = ["value": (liveFilterMinRating * 20), "modifier": "EQUALS"]
         }
         if let org = liveFilterOrganized {
             dict["organized"] = org

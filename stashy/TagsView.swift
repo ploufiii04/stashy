@@ -15,6 +15,7 @@ struct TagsView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var selectedSortOption: StashDBViewModel.TagSortOption = StashDBViewModel.TagSortOption(rawValue: TabManager.shared.getSortOption(for: .tags) ?? "") ?? .sceneCountDesc
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
+    @State private var lastOpenedTagId: String?
     @State private var isChangingSort = false
     @State private var searchText = ""
     @State private var isSearchVisible = false
@@ -405,32 +406,45 @@ struct TagsView: View {
     }
 
     private var tagsList: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(viewModel.tags) { tag in
-                    NavigationLink(destination: TagDetailView(selectedTag: tag)) {
-                        TagCardView(tag: tag)
-                    }
-                    .buttonStyle(.plain)
-                }
-                
-                // Loading indicator for pagination
-                if viewModel.isLoadingMoreTags {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                } else if viewModel.hasMoreTags && !viewModel.tags.isEmpty {
-                    Color.clear
-                        .frame(height: 1)
-                        .onAppear {
-                            viewModel.loadMoreTags()
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(viewModel.tags) { tag in
+                        NavigationLink(destination: TagDetailView(selectedTag: tag)) {
+                            TagCardView(tag: tag)
                         }
+                        .buttonStyle(.plain)
+                        .id(tag.id)
+                        .simultaneousGesture(TapGesture().onEnded {
+                            lastOpenedTagId = tag.id
+                        })
+                    }
+                
+                    // Loading indicator for pagination
+                    if viewModel.isLoadingMoreTags {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                    } else if viewModel.hasMoreTags && !viewModel.tags.isEmpty {
+                        Color.clear
+                            .frame(height: 1)
+                            .onAppear {
+                                viewModel.loadMoreTags()
+                            }
+                    }
+                }
+                .padding(16)
+                .padding(.bottom, 70) // Leave space for floating bar
+            }
+            .refreshable { performSearch() }
+            .onAppear {
+                if let id = lastOpenedTagId {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo(id, anchor: .top)
+                    }
                 }
             }
-            .padding(16)
-            .padding(.bottom, 70) // Leave space for floating bar
         }
-        .refreshable { performSearch() }
     }
 }
 

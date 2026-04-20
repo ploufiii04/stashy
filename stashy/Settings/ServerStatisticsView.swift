@@ -20,92 +20,29 @@ struct ServerStatisticsView: View {
             } else if viewModel.statistics != nil {
                 List {
                     if let stats = viewModel.statistics {
-                        Section("Database Statistics") {
-                            HStack {
-                                Label("Scenes", systemImage: "film")
-                                Spacer()
-                                Text("\(stats.sceneCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Markers", systemImage: "bookmark.fill")
-                                Spacer()
-                                Text("\(stats.sceneMarkerCount ?? 0)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Performers", systemImage: "person.2")
-                                Spacer()
-                                Text("\(stats.performerCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Studios", systemImage: "building.2")
-                                Spacer()
-                                Text("\(stats.studioCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Groups", systemImage: "rectangle.stack.fill")
-                                Spacer()
-                                Text("\(stats.groupCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Tags", systemImage: "tag")
-                                Spacer()
-                                Text("\(stats.tagCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Total Size", systemImage: "internaldrive")
-                                Spacer()
-                                Text(formatBytes(stats.scenesSize))
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Total Duration", systemImage: "clock")
-                                Spacer()
-                                Text(formatDuration(stats.scenesDuration))
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Total O-Count", systemImage: "flame.fill")
-                                Spacer()
-                                Text("\(stats.totalOCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Total Play Count", systemImage: "play.fill")
-                                Spacer()
-                                Text("\(stats.totalPlayCount)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Scenes Played", systemImage: "checkmark.circle.fill")
-                                Spacer()
-                                Text("\(stats.scenesPlayed)")
-                                    .foregroundColor(.secondary)
-                            }
-
-                            HStack {
-                                Label("Total Play Duration", systemImage: "timer")
-                                Spacer()
-                                Text(formatDuration(stats.totalPlayDuration))
-                                    .foregroundColor(.secondary)
-                            }
+                        Section("Catalogs") {
+                            statRow("Scenes", value: "\(stats.sceneCount)")
+                            statRow("Markers", value: "\(stats.sceneMarkerCount ?? 0)")
+                            statRow("Studios", value: "\(stats.studioCount)")
+                            statRow("Groups", value: "\(stats.groupCount)")
+                            statRow("Tags", value: "\(stats.tagCount)")
                         }
-                        .listRowBackground(Color.secondaryAppBackground)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                                .fill(Color.secondaryAppBackground)
+                        )
+
+                        Section("Usage") {
+                            statRow("Total Size", value: formatBytes(stats.scenesSize))
+                            statRow("Total Duration", value: formatDuration(stats.scenesDuration))
+                            statRow("Total O-Count", value: "\(stats.totalOCount)")
+                            statRow("Total Play Count", value: "\(stats.totalPlayCount)")
+                            statRow("Scenes Played", value: "\(stats.scenesPlayed)")
+                        }
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                                .fill(Color.secondaryAppBackground)
+                        )
 
                         Section("Performers") {
                             statRow("Total", value: "\(stats.performerCount)")
@@ -136,7 +73,10 @@ struct ServerStatisticsView: View {
                                 }
                             }
                         }
-                        .listRowBackground(Color.secondaryAppBackground)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                                .fill(Color.secondaryAppBackground)
+                        )
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -194,32 +134,6 @@ struct ServerStatisticsView: View {
             Text(value)
                 .foregroundColor(.secondary)
         }
-    }
-
-    private func formatNumber(_ value: Double?) -> String {
-        guard let v = value else { return "—" }
-        return String(format: "%.1f", v)
-    }
-
-    private func formatRating(_ value: Double?) -> String {
-        guard let v = value else { return "—" }
-        return String(format: "%.1f", v)
-    }
-
-    private func formatRange(min: Int?, max: Int?) -> String {
-        guard let min, let max else { return "—" }
-        return "\(min)–\(max)"
-    }
-
-    private func formatDurationSeconds(_ seconds: Double?) -> String {
-        guard let s = seconds, s > 0 else { return "—" }
-        let total = Int(s.rounded())
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let secs = total % 60
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        if minutes > 0 { return "\(minutes)m \(secs)s" }
-        return "\(secs)s"
     }
 
     private func formatBytes(_ bytes: Double) -> String {

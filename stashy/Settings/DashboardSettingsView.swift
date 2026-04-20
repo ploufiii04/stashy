@@ -33,7 +33,10 @@ struct DashboardSettingsView: View {
                 ))
                 .tint(appearanceManager.tintColor)
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
 
             Section("Visible Dashboard Rows") {
                 ForEach(tabManager.homeRows) { row in
@@ -49,7 +52,10 @@ struct DashboardSettingsView: View {
                     tabManager.moveHomeRow(from: indices, to: newOffset)
                 }
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
         }
         .listStyle(.insetGrouped)
         .environment(\.editMode, .constant(.active))

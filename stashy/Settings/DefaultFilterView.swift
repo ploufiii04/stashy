@@ -30,7 +30,10 @@ struct DefaultFilterView: View {
             } footer: {
                 Text("Pick a saved filter that will be applied automatically when you open the respective tab.")
             }
-            .listRowBackground(Color.secondaryAppBackground)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+                    .fill(Color.secondaryAppBackground)
+            )
 
         }
         .listStyle(.insetGrouped)

@@ -600,6 +600,18 @@ struct PerformerCardView: View {
     var badgeType: PerformerBadgeType = .sceneCount
     @ObservedObject var appearanceManager = AppearanceManager.shared
 
+    private var ageText: String? {
+        guard let b = performer.birthdate, !b.isEmpty else { return nil }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
+        fmt.dateFormat = "yyyy-MM-dd"
+        guard let birthDate = fmt.date(from: b) else { return nil }
+        let years = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year
+        guard let y = years, y > 0, y < 120 else { return nil }
+        return "\(y)"
+    }
+
     var body: some View {
 
         ZStack(alignment: .bottomLeading) {
@@ -645,6 +657,22 @@ struct PerformerCardView: View {
             // Top Badge (Single value Top Right)
             VStack {
                 HStack {
+                    // Age badge (Top Left)
+                    if let age = ageText {
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 10, weight: .bold))
+                            Text(age)
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.2), radius: 2)
+                    }
+
                     Spacer()
                     
                     // Single Badge (Top Right)

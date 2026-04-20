@@ -18,6 +18,7 @@ struct StudiosView: View {
     @State private var searchText = ""
     @State private var isSearchVisible = false
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
+    @State private var lastOpenedStudioId: String?
     var hideTitle: Bool = false
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -39,7 +40,8 @@ struct StudiosView: View {
             dict["favorite"] = fav 
         }
         if liveFilterMinRating > 0 {
-            dict["rating100"] = ["value": (liveFilterMinRating * 20) - 1, "modifier": "GREATER_THAN"]
+            // Exact star match (e.g. 1-star means exactly 20)
+            dict["rating100"] = ["value": (liveFilterMinRating * 20), "modifier": "EQUALS"]
         }
         if liveFilterScenes == "has"  { dict["scene_count"] = ["value": 0, "modifier": "GREATER_THAN"] }
         if liveFilterScenes == "none" { dict["scene_count"] = ["value": 0, "modifier": "EQUALS"] }
@@ -425,19 +427,32 @@ struct StudiosView: View {
     }
 
     private var studiosList: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(viewModel.studios) { studio in
-                    NavigationLink(destination: StudioDetailView(studio: studio)) {
-                        StudioCardView(studio: studio)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(viewModel.studios) { studio in
+                        NavigationLink(destination: StudioDetailView(studio: studio)) {
+                            StudioCardView(studio: studio)
+                        }
+                        .buttonStyle(.plain)
+                        .id(studio.id)
+                        .simultaneousGesture(TapGesture().onEnded {
+                            lastOpenedStudioId = studio.id
+                        })
                     }
-                    .buttonStyle(.plain)
+                }
+                .padding(16)
+                .padding(.bottom, 70)
+            }
+            .refreshable { performSearch() }
+            .onAppear {
+                if let id = lastOpenedStudioId {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo(id, anchor: .top)
+                    }
                 }
             }
-            .padding(16)
-            .padding(.bottom, 70)
         }
-        .refreshable { performSearch() }
     }
     
 }

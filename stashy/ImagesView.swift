@@ -18,6 +18,7 @@ struct ImagesView: View {
     
     @State private var selectedSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
+    @State private var lastOpenedImageId: String?
 
     // Multi-Select State
     @State private var isSelectionMode = false
@@ -100,10 +101,19 @@ struct ImagesView: View {
                     }
                 )
             } else {
-                ScrollView {
-                    gridContent
-                        .padding(16)
-                        .padding(.bottom, isSelectionMode ? 80 : 0) // Add padding for floating bar
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        gridContent
+                            .padding(16)
+                            .padding(.bottom, isSelectionMode ? 80 : 0) // Add padding for floating bar
+                    }
+                    .onAppear {
+                        if let id = lastOpenedImageId {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                proxy.scrollTo(id, anchor: .top)
+                            }
+                        }
+                    }
                 }
                 .refreshable {
                     if let gallery = gallery {
@@ -437,6 +447,10 @@ struct ImagesView: View {
                     ImageThumbnailCard(image: image)
                 }
                 .buttonStyle(.plain)
+                .id(image.id)
+                .simultaneousGesture(TapGesture().onEnded {
+                    lastOpenedImageId = image.id
+                })
             }
         }
         // Pagination trigger
