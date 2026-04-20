@@ -10,9 +10,13 @@ import SwiftUI
 struct TVSettingsView: View {
     @ObservedObject private var configManager = ServerConfigManager.shared
     @ObservedObject private var appearanceManager = AppearanceManager.shared
+    @ObservedObject private var tabManager = TabManager.shared
+    @StateObject private var filterViewModel = StashDBViewModel()
+    @StateObject private var securityManager = TVSecurityManager.shared
 
     @State private var showingAddServer = false
     @State private var editingServer: ServerConfig?
+    @State private var showingSetPasscode = false
 
     var body: some View {
         List {
@@ -117,6 +121,43 @@ struct TVSettingsView: View {
                     Text("Appearance")
                 }
 
+                // MARK: - Security (PIN Lock)
+                Section {
+                    Toggle(
+                        "Enable PIN Lock",
+                        isOn: Binding(
+                            get: { securityManager.isPinLockEnabled && securityManager.isPinSet },
+                            set: { enabled in
+                                if enabled {
+                                    // Start setup flow if not set yet
+                                    if !securityManager.isPinSet {
+                                        showingSetPasscode = true
+                                    } else {
+                                        securityManager.isPinLockEnabled = true
+                                    }
+                                } else {
+                                    securityManager.isPinLockEnabled = false
+                                }
+                            }
+                        )
+                    )
+                    .tint(appearanceManager.tintColor)
+
+                    if securityManager.isPinSet {
+                        Button("Change PIN") {
+                            showingSetPasscode = true
+                        }
+
+                        Button("Remove PIN", role: .destructive) {
+                            securityManager.removePin()
+                        }
+                    }
+                } header: {
+                    Text("Security")
+                } footer: {
+                    Text("The app will require your PIN each time it is opened and whenever it returns from the background.")
+                }
+
                 // MARK: - Playback
                 Section {
                     if let config = configManager.activeConfig {
@@ -149,6 +190,32 @@ struct TVSettingsView: View {
                     Text("\"Original\" streams MP4 files directly for the best seeking performance. Lower quality options use HLS transcoding.")
                 }
 
+                // MARK: - Default Sort
+                Section {
+                    sceneSortRow
+                    performerSortRow
+                    studioSortRow
+                    tagSortRow
+                    groupSortRow
+                } header: {
+                    Text("Default Sorting")
+                } footer: {
+                    Text("The sort order used when opening each tab.")
+                }
+
+                // MARK: - Default Filter
+                Section {
+                    tvFilterRow(label: "Scenes", icon: "film", tab: .scenes, mode: .scenes)
+                    tvFilterRow(label: "Performers", icon: "person.3", tab: .performers, mode: .performers)
+                    tvFilterRow(label: "Studios", icon: "building.2", tab: .studios, mode: .studios)
+                    tvFilterRow(label: "Tags", icon: "tag", tab: .tags, mode: .tags)
+                    tvFilterRow(label: "Groups", icon: "rectangle.stack", tab: .groups, mode: .groups)
+                } header: {
+                    Text("Default Filters")
+                } footer: {
+                    Text("Saved filters from your Stash server that will be applied automatically when opening each tab.")
+                }
+
                 // MARK: - About
                 Section {
                     HStack {
@@ -175,13 +242,15 @@ struct TVSettingsView: View {
                     Text("About")
                 }
             }
-            .navigationTitle("Settings")
             .sheet(isPresented: $showingAddServer) {
                 TVServerFormView(server: nil) { newServer in
                     configManager.addOrUpdateServer(newServer)
                     configManager.saveConfig(newServer)
                     showingAddServer = false
                 }
+            }
+            .fullScreenCover(isPresented: $showingSetPasscode) {
+                TVPasscodeSetupView(isPresented: $showingSetPasscode)
             }
             .sheet(item: $editingServer) { server in
                 TVServerFormView(server: server) { updatedServer in
@@ -192,6 +261,10 @@ struct TVSettingsView: View {
                     editingServer = nil
                 }
             }
+            .onAppear {
+                filterViewModel.fetchSavedFilters()
+            }
+            .background(Color.appBackground)
     }
 
     private func switchToServer(_ server: ServerConfig) {
@@ -204,6 +277,330 @@ struct TVSettingsView: View {
 
     private var buildNumber: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
+    // MARK: - Reusable Sort Row Shell
+
+    private func sortRowShell<Content: View>(
+        label: String, icon: String, current: String,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Menu {
+                content()
+            } label: {
+                Text(current)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Scenes Sort
+
+    private var sceneSortRow: some View {
+        let binding = Binding<StashDBViewModel.SceneSortOption>(
+            get: { StashDBViewModel.SceneSortOption(rawValue: tabManager.getPersistentSortOption(for: .scenes) ?? "") ?? .dateDesc },
+            set: { tabManager.setPersistentSortOption(for: .scenes, option: $0.rawValue) }
+        )
+        return sortRowShell(label: "Scenes", icon: "film", current: binding.wrappedValue.displayName) {
+            Button(action: { binding.wrappedValue = .random }) {
+                HStack { Text("Random"); if binding.wrappedValue == .random { Spacer(); Image(systemName: "checkmark") } }
+            }
+            Divider()
+            Menu("Date") {
+                Button(action: { binding.wrappedValue = .dateDesc }) {
+                    HStack { Text("Newest First"); if binding.wrappedValue == .dateDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .dateAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .dateAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Duration") {
+                Button(action: { binding.wrappedValue = .durationDesc }) {
+                    HStack { Text("Longest First"); if binding.wrappedValue == .durationDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .durationAsc }) {
+                    HStack { Text("Shortest First"); if binding.wrappedValue == .durationAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Rating") {
+                Button(action: { binding.wrappedValue = .ratingDesc }) {
+                    HStack { Text("High → Low"); if binding.wrappedValue == .ratingDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .ratingAsc }) {
+                    HStack { Text("Low → High"); if binding.wrappedValue == .ratingAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Counter") {
+                Button(action: { binding.wrappedValue = .oCounterDesc }) {
+                    HStack { Text("High → Low"); if binding.wrappedValue == .oCounterDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .oCounterAsc }) {
+                    HStack { Text("Low → High"); if binding.wrappedValue == .oCounterAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Views") {
+                Button(action: { binding.wrappedValue = .playCountDesc }) {
+                    HStack { Text("Most Viewed"); if binding.wrappedValue == .playCountDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .playCountAsc }) {
+                    HStack { Text("Least Viewed"); if binding.wrappedValue == .playCountAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Last Played") {
+                Button(action: { binding.wrappedValue = .lastPlayedAtDesc }) {
+                    HStack { Text("Recently Played"); if binding.wrappedValue == .lastPlayedAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .lastPlayedAtAsc }) {
+                    HStack { Text("Least Recently"); if binding.wrappedValue == .lastPlayedAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Created") {
+                Button(action: { binding.wrappedValue = .createdAtDesc }) {
+                    HStack { Text("Newest First"); if binding.wrappedValue == .createdAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .createdAtAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .createdAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+        }
+    }
+
+    // MARK: - Performers Sort
+
+    private var performerSortRow: some View {
+        let binding = Binding<StashDBViewModel.PerformerSortOption>(
+            get: { StashDBViewModel.PerformerSortOption(rawValue: tabManager.getPersistentSortOption(for: .performers) ?? "") ?? .nameAsc },
+            set: { tabManager.setPersistentSortOption(for: .performers, option: $0.rawValue) }
+        )
+        return sortRowShell(label: "Performers", icon: "person.3", current: binding.wrappedValue.displayName) {
+            Button(action: { binding.wrappedValue = .random }) {
+                HStack { Text("Random"); if binding.wrappedValue == .random { Spacer(); Image(systemName: "checkmark") } }
+            }
+            Divider()
+            Menu("Name") {
+                Button(action: { binding.wrappedValue = .nameAsc }) {
+                    HStack { Text("A → Z"); if binding.wrappedValue == .nameAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .nameDesc }) {
+                    HStack { Text("Z → A"); if binding.wrappedValue == .nameDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Scene Count") {
+                Button(action: { binding.wrappedValue = .sceneCountDesc }) {
+                    HStack { Text("Most Scenes"); if binding.wrappedValue == .sceneCountDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .sceneCountAsc }) {
+                    HStack { Text("Least Scenes"); if binding.wrappedValue == .sceneCountAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Counter") {
+                Button(action: { binding.wrappedValue = .oCountDesc }) {
+                    HStack { Text("High → Low"); if binding.wrappedValue == .oCountDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .oCountAsc }) {
+                    HStack { Text("Low → High"); if binding.wrappedValue == .oCountAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Birthdate") {
+                Button(action: { binding.wrappedValue = .birthdateDesc }) {
+                    HStack { Text("Youngest First"); if binding.wrappedValue == .birthdateDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .birthdateAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .birthdateAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Created") {
+                Button(action: { binding.wrappedValue = .createdAtDesc }) {
+                    HStack { Text("Newest First"); if binding.wrappedValue == .createdAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .createdAtAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .createdAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Updated") {
+                Button(action: { binding.wrappedValue = .updatedAtDesc }) {
+                    HStack { Text("Recently Updated"); if binding.wrappedValue == .updatedAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .updatedAtAsc }) {
+                    HStack { Text("Least Recently"); if binding.wrappedValue == .updatedAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+        }
+    }
+
+    // MARK: - Studios Sort
+
+    private var studioSortRow: some View {
+        let binding = Binding<StashDBViewModel.StudioSortOption>(
+            get: { StashDBViewModel.StudioSortOption(rawValue: tabManager.getPersistentSortOption(for: .studios) ?? "") ?? .nameAsc },
+            set: { tabManager.setPersistentSortOption(for: .studios, option: $0.rawValue) }
+        )
+        return sortRowShell(label: "Studios", icon: "building.2", current: binding.wrappedValue.displayName) {
+            Button(action: { binding.wrappedValue = .random }) {
+                HStack { Text("Random"); if binding.wrappedValue == .random { Spacer(); Image(systemName: "checkmark") } }
+            }
+            Divider()
+            Menu("Name") {
+                Button(action: { binding.wrappedValue = .nameAsc }) {
+                    HStack { Text("A → Z"); if binding.wrappedValue == .nameAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .nameDesc }) {
+                    HStack { Text("Z → A"); if binding.wrappedValue == .nameDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Scene Count") {
+                Button(action: { binding.wrappedValue = .sceneCountDesc }) {
+                    HStack { Text("Most Scenes"); if binding.wrappedValue == .sceneCountDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .sceneCountAsc }) {
+                    HStack { Text("Least Scenes"); if binding.wrappedValue == .sceneCountAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Created") {
+                Button(action: { binding.wrappedValue = .createdAtDesc }) {
+                    HStack { Text("Newest First"); if binding.wrappedValue == .createdAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .createdAtAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .createdAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Updated") {
+                Button(action: { binding.wrappedValue = .updatedAtDesc }) {
+                    HStack { Text("Recently Updated"); if binding.wrappedValue == .updatedAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .updatedAtAsc }) {
+                    HStack { Text("Least Recently"); if binding.wrappedValue == .updatedAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+        }
+    }
+
+    // MARK: - Tags Sort
+
+    private var tagSortRow: some View {
+        let binding = Binding<StashDBViewModel.TagSortOption>(
+            get: { StashDBViewModel.TagSortOption(rawValue: tabManager.getPersistentSortOption(for: .tags) ?? "") ?? .nameAsc },
+            set: { tabManager.setPersistentSortOption(for: .tags, option: $0.rawValue) }
+        )
+        return sortRowShell(label: "Tags", icon: "tag", current: binding.wrappedValue.displayName) {
+            Menu("Name") {
+                Button(action: { binding.wrappedValue = .nameAsc }) {
+                    HStack { Text("A → Z"); if binding.wrappedValue == .nameAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .nameDesc }) {
+                    HStack { Text("Z → A"); if binding.wrappedValue == .nameDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Scene Count") {
+                Button(action: { binding.wrappedValue = .sceneCountDesc }) {
+                    HStack { Text("Most Scenes"); if binding.wrappedValue == .sceneCountDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .sceneCountAsc }) {
+                    HStack { Text("Least Scenes"); if binding.wrappedValue == .sceneCountAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Created") {
+                Button(action: { binding.wrappedValue = .createdAtDesc }) {
+                    HStack { Text("Newest First"); if binding.wrappedValue == .createdAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .createdAtAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .createdAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Updated") {
+                Button(action: { binding.wrappedValue = .updatedAtDesc }) {
+                    HStack { Text("Recently Updated"); if binding.wrappedValue == .updatedAtDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .updatedAtAsc }) {
+                    HStack { Text("Least Recently"); if binding.wrappedValue == .updatedAtAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+        }
+    }
+
+    // MARK: - Groups Sort
+
+    private var groupSortRow: some View {
+        let binding = Binding<StashDBViewModel.GroupSortOption>(
+            get: { StashDBViewModel.GroupSortOption(rawValue: tabManager.getPersistentSortOption(for: .groups) ?? "") ?? .nameAsc },
+            set: { tabManager.setPersistentSortOption(for: .groups, option: $0.rawValue) }
+        )
+        return sortRowShell(label: "Groups", icon: "rectangle.stack", current: binding.wrappedValue.displayName) {
+            Button(action: { binding.wrappedValue = .random }) {
+                HStack { Text("Random"); if binding.wrappedValue == .random { Spacer(); Image(systemName: "checkmark") } }
+            }
+            Divider()
+            Menu("Name") {
+                Button(action: { binding.wrappedValue = .nameAsc }) {
+                    HStack { Text("A → Z"); if binding.wrappedValue == .nameAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .nameDesc }) {
+                    HStack { Text("Z → A"); if binding.wrappedValue == .nameDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Scene Count") {
+                Button(action: { binding.wrappedValue = .sceneCountDesc }) {
+                    HStack { Text("Most Scenes"); if binding.wrappedValue == .sceneCountDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .sceneCountAsc }) {
+                    HStack { Text("Least Scenes"); if binding.wrappedValue == .sceneCountAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+            Menu("Date") {
+                Button(action: { binding.wrappedValue = .dateDesc }) {
+                    HStack { Text("Newest First"); if binding.wrappedValue == .dateDesc { Spacer(); Image(systemName: "checkmark") } }
+                }
+                Button(action: { binding.wrappedValue = .dateAsc }) {
+                    HStack { Text("Oldest First"); if binding.wrappedValue == .dateAsc { Spacer(); Image(systemName: "checkmark") } }
+                }
+            }
+        }
+    }
+
+    // MARK: - Filter Row
+
+    @ViewBuilder
+    private func tvFilterRow(label: String, icon: String, tab: AppTab, mode: StashDBViewModel.FilterMode) -> some View {
+        let filters = filterViewModel.savedFilters.values
+            .filter { $0.mode == mode }
+            .sorted { $0.name < $1.name }
+
+        let currentId = tabManager.getDefaultFilterId(for: tab)
+        let currentName = tabManager.getDefaultFilterName(for: tab)
+
+        HStack {
+            Text(label)
+            Spacer()
+            Menu {
+                Button {
+                    tabManager.setDefaultFilter(for: tab, filterId: nil, filterName: nil)
+                } label: {
+                    HStack {
+                        Text("None")
+                        if currentId == nil { Spacer(); Image(systemName: "checkmark") }
+                    }
+                }
+                if !filters.isEmpty {
+                    Divider()
+                    ForEach(filters) { filter in
+                        Button {
+                            tabManager.setDefaultFilter(for: tab, filterId: filter.id, filterName: filter.name)
+                        } label: {
+                            HStack {
+                                Text(filter.name)
+                                if currentId == filter.id { Spacer(); Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(currentName ?? "None")
+                    .foregroundColor(.secondary)
+            }
+        }
     }
 }
 

@@ -491,7 +491,7 @@ class StashDBViewModel: ObservableObject {
     }
 
     // Performer sort options
-    enum PerformerSortOption: String, CaseIterable {
+    enum PerformerSortOption: String, CaseIterable, DisplayNameProvider {
         case random
         case nameAsc
         case nameDesc
@@ -545,7 +545,7 @@ class StashDBViewModel: ObservableObject {
     }
 
     // Studio sort options
-    enum StudioSortOption: String, CaseIterable {
+    enum StudioSortOption: String, CaseIterable, DisplayNameProvider {
         case random
         case nameAsc
         case nameDesc
@@ -589,7 +589,7 @@ class StashDBViewModel: ObservableObject {
     }
 
     // Scene sort options
-    enum SceneSortOption: String, CaseIterable {
+    enum SceneSortOption: String, CaseIterable, DisplayNameProvider {
         // ... (existing cases)
         case random
         case dateDesc
@@ -699,7 +699,7 @@ class StashDBViewModel: ObservableObject {
     }
 
     // Tag sort options
-    enum TagSortOption: String, CaseIterable {
+    enum TagSortOption: String, CaseIterable, DisplayNameProvider {
         case random
         case nameAsc
         case nameDesc
@@ -742,7 +742,7 @@ class StashDBViewModel: ObservableObject {
         }
     }
 
-    enum GroupSortOption: String, CaseIterable {
+    enum GroupSortOption: String, CaseIterable, DisplayNameProvider {
         case random
         case nameAsc
         case nameDesc

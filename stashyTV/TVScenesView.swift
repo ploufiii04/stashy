@@ -10,12 +10,14 @@ import SwiftUI
 struct TVScenesView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject private var appearanceManager = AppearanceManager.shared
+    @ObservedObject private var tabManager = TabManager.shared
     @State private var sortBy: StashDBViewModel.SceneSortOption
     @State private var selectedFilter: StashDBViewModel.SavedFilter?
     @FocusState private var focusedSceneID: String?
     
-    init(sortBy: StashDBViewModel.SceneSortOption = .dateDesc) {
-        _sortBy = State(initialValue: sortBy)
+    init(sortBy: StashDBViewModel.SceneSortOption? = nil) {
+        let defaultSort = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getSortOption(for: .scenes) ?? "") ?? .dateDesc
+        _sortBy = State(initialValue: sortBy ?? defaultSort)
     }
 
     private var navigationTitle: String {
@@ -67,6 +69,16 @@ struct TVScenesView: View {
         }
         .onAppear {
             viewModel.fetchSavedFilters()
+            // Apply default filter from TabManager if none selected yet
+            if selectedFilter == nil, let filterId = tabManager.getDefaultFilterId(for: .scenes) {
+                viewModel.fetchSavedFilters()
+                // Defer to allow savedFilters to populate
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let filter = viewModel.savedFilters[filterId] {
+                        selectedFilter = filter
+                    }
+                }
+            }
             if viewModel.scenes.isEmpty {
                 viewModel.fetchScenes(sortBy: sortBy, isInitialLoad: true, filter: selectedFilter)
             }

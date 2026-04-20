@@ -9,9 +9,15 @@ import SwiftUI
 
 struct TVGroupsView: View {
     @StateObject private var viewModel = StashDBViewModel()
-    @State private var sortBy: StashDBViewModel.GroupSortOption = .nameAsc
+    @ObservedObject private var tabManager = TabManager.shared
+    @State private var sortBy: StashDBViewModel.GroupSortOption
     @State private var selectedFilter: StashDBViewModel.SavedFilter?
     @FocusState private var focusedGroupID: String?
+
+    init() {
+        let defaultSort = StashDBViewModel.GroupSortOption(rawValue: TabManager.shared.getSortOption(for: .groups) ?? "") ?? .nameAsc
+        _sortBy = State(initialValue: defaultSort)
+    }
 
     private let columns = [
         GridItem(.fixed(260), spacing: 40),
@@ -46,6 +52,13 @@ struct TVGroupsView: View {
         }
         .onAppear {
             viewModel.fetchSavedFilters()
+            if selectedFilter == nil, let filterId = tabManager.getDefaultFilterId(for: .groups) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let filter = viewModel.savedFilters[filterId] {
+                        selectedFilter = filter
+                    }
+                }
+            }
             if viewModel.groups.isEmpty {
                 viewModel.fetchGroups(sortBy: sortBy, isInitialLoad: true, filter: selectedFilter)
             }

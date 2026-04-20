@@ -8,6 +8,11 @@
 import Foundation
 import AVKit
 import AVFoundation
+
+/// Protocol for types that provide a user-facing display name (used by tvOS sort picker)
+protocol DisplayNameProvider {
+    var displayName: String { get }
+}
 #if !os(tvOS)
 import WebKit
 #endif

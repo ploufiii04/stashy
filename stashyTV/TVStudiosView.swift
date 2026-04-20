@@ -9,9 +9,15 @@ import SwiftUI
 
 struct TVStudiosView: View {
     @StateObject private var viewModel = StashDBViewModel()
-    @State private var sortBy: StashDBViewModel.StudioSortOption = .nameAsc
+    @ObservedObject private var tabManager = TabManager.shared
+    @State private var sortBy: StashDBViewModel.StudioSortOption
     @State private var selectedFilter: StashDBViewModel.SavedFilter?
     @FocusState private var focusedStudioID: String?
+
+    init() {
+        let defaultSort = StashDBViewModel.StudioSortOption(rawValue: TabManager.shared.getSortOption(for: .studios) ?? "") ?? .nameAsc
+        _sortBy = State(initialValue: defaultSort)
+    }
 
     private let columns = [
         GridItem(.fixed(410), spacing: 40),
@@ -44,6 +50,13 @@ struct TVStudiosView: View {
         }
         .onAppear {
             viewModel.fetchSavedFilters()
+            if selectedFilter == nil, let filterId = tabManager.getDefaultFilterId(for: .studios) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let filter = viewModel.savedFilters[filterId] {
+                        selectedFilter = filter
+                    }
+                }
+            }
             if viewModel.studios.isEmpty {
                 viewModel.fetchStudios(sortBy: sortBy, isInitialLoad: true, filter: selectedFilter)
             }

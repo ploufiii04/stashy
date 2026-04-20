@@ -2,13 +2,15 @@
 //  TVTagCardView.swift
 //  stashyTV
 //
-//  Tag card for tvOS — Netflix style
+//  Tag card for tvOS — 16:9 landscape thumbnails
 //
 
 import SwiftUI
 
 struct TVTagCardView: View {
     let tag: Tag
+    var width: CGFloat = 400
+    var height: CGFloat = 225  // 16:9 aspect ratio
 
     private var tagColor: Color {
         let hash = abs(tag.name.hashValue)
@@ -19,7 +21,7 @@ struct TVTagCardView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             thumbnailView
-                .frame(width: 260, height: 390)
+                .frame(width: width, height: height)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 10))
 
@@ -52,7 +54,7 @@ struct TVTagCardView: View {
                     .padding(12)
             }
         }
-        .frame(width: 260, height: 390)
+        .frame(width: width, height: height)
     }
 
     @ViewBuilder

@@ -400,18 +400,42 @@ struct TVSceneDetailView: View {
         }
         
         let quality = ServerConfigManager.shared.activeConfig?.defaultQuality ?? .original
+        let compatible = ["mp4", "m4v", "mov"]
+        let fileFormat = scene.files?.first?.format?.lowercased() ?? ""
+        let isNativelyCompatible = compatible.contains(fileFormat)
         
         // Use bestStream() which respects quality settings and format compatibility.
         // For compatible formats (MP4) at Original quality, bestStream returns nil
         // → use direct stream path (much faster seeking than HLS transcoding).
         let sceneWithStreams = scene.withStreams(sceneStreams)
         if let streamURL = sceneWithStreams.bestStream(for: quality) {
-            print("📺 TV: Using quality-selected stream (\(quality.displayName))")
+            print("📺 TV: Using quality-selected stream (\(quality.displayName)) for format: \(fileFormat)")
             playerViewModel.setupPlayer(url: streamURL, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
             return
         }
         
-        // Direct stream fallback (original quality for compatible formats)
+        // Non-compatible format (MKV, AVI, WMV, etc.): force HLS even if bestStream
+        // returned nil (e.g. because sceneStreams were not loaded).
+        // Apple TV cannot play these formats via direct stream.
+        if !isNativelyCompatible {
+            // Try any available HLS stream first
+            if let hlsStream = sceneStreams.first(where: { $0.mime_type == "application/vnd.apple.mpegurl" }),
+               let url = URL(string: hlsStream.url) {
+                print("📺 TV: Non-MP4 (\(fileFormat)) — forcing HLS stream")
+                playerViewModel.setupPlayer(url: url, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
+                return
+            }
+            // Try MP4 transcode stream as fallback
+            if let mp4Stream = sceneStreams.first(where: { $0.mime_type == "video/mp4" }),
+               let url = URL(string: mp4Stream.url) {
+                print("📺 TV: Non-MP4 (\(fileFormat)) — using MP4 transcode stream")
+                playerViewModel.setupPlayer(url: url, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
+                return
+            }
+        }
+        
+        // Direct stream fallback — only safe for natively compatible formats (MP4/MOV/M4V)
+        // or when format is unknown (Stash transcodes on the fly via /stream endpoint)
         if let directPath = scene.paths?.stream {
             let fullURL: String
             if directPath.starts(with: "http://") || directPath.starts(with: "https://") {
@@ -422,7 +446,7 @@ struct TVSceneDetailView: View {
                 return
             }
             if let url = URL(string: fullURL) {
-                print("📺 TV: Using direct stream (Original quality)")
+                print("📺 TV: Using direct stream for \(isNativelyCompatible ? "compatible" : "unknown") format (\(fileFormat))")
                 playerViewModel.setupPlayer(url: url, sceneId: scene.id, viewModel: viewModel, startAt: startTime)
             }
         }

@@ -9,17 +9,21 @@ import SwiftUI
 
 struct TVTagsView: View {
     @StateObject private var viewModel = StashDBViewModel()
-    @State private var sortBy: StashDBViewModel.TagSortOption = .nameAsc
+    @ObservedObject private var tabManager = TabManager.shared
+    @State private var sortBy: StashDBViewModel.TagSortOption
     @State private var selectedFilter: StashDBViewModel.SavedFilter?
     @FocusState private var focusedTagID: String?
 
+    init() {
+        let defaultSort = StashDBViewModel.TagSortOption(rawValue: TabManager.shared.getSortOption(for: .tags) ?? "") ?? .nameAsc
+        _sortBy = State(initialValue: defaultSort)
+    }
+
     private let columns = [
-        GridItem(.fixed(260), spacing: 40),
-        GridItem(.fixed(260), spacing: 40),
-        GridItem(.fixed(260), spacing: 40),
-        GridItem(.fixed(260), spacing: 40),
-        GridItem(.fixed(260), spacing: 40),
-        GridItem(.fixed(260), spacing: 40)
+        GridItem(.fixed(400), spacing: 40),
+        GridItem(.fixed(400), spacing: 40),
+        GridItem(.fixed(400), spacing: 40),
+        GridItem(.fixed(400), spacing: 40)
     ]
 
     var body: some View {
@@ -46,6 +50,13 @@ struct TVTagsView: View {
         }
         .onAppear {
             viewModel.fetchSavedFilters()
+            if selectedFilter == nil, let filterId = tabManager.getDefaultFilterId(for: .tags) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    if let filter = viewModel.savedFilters[filterId] {
+                        selectedFilter = filter
+                    }
+                }
+            }
             if viewModel.tags.isEmpty {
                 viewModel.fetchTags(sortBy: sortBy, isInitialLoad: true, filter: selectedFilter)
             }
@@ -128,7 +139,7 @@ struct TVTagsView: View {
                         }
                         .buttonStyle(.card)
                         .focused($focusedTagID, equals: tag.id)
-                        .frame(width: 260) // Fixed width for item container
+                        .frame(width: 400) // Fixed width for item container
                         .onAppear {
                             if tag.id == viewModel.tags.last?.id && viewModel.hasMoreTags {
                                 viewModel.loadMoreTags()
