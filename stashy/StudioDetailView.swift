@@ -564,7 +564,8 @@ struct StudioDetailView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down.circle")
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appearanceManager.tintColor)
         }
     }
@@ -644,7 +645,8 @@ struct StudioDetailView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down.circle")
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appearanceManager.tintColor)
         }
     }
@@ -745,7 +747,8 @@ struct StudioDetailView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down.circle")
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appearanceManager.tintColor)
         }
     }
@@ -867,7 +870,8 @@ struct StudioDetailView: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down.circle")
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appearanceManager.tintColor)
         }
     }

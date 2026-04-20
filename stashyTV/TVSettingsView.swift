@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct TVSettingsView: View {
     @ObservedObject private var configManager = ServerConfigManager.shared
@@ -109,7 +110,10 @@ struct TVSettingsView: View {
                                     Button {
                                         appearanceManager.tintColor = preset.color
                                     } label: {
-                                        TVColorPresetButton(preset: preset, isSelected: preset.color == appearanceManager.tintColor)
+                                        TVColorPresetButton(
+                                            preset: preset,
+                                            isSelected: colorsEqual(preset.color, appearanceManager.tintColor)
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -242,6 +246,7 @@ struct TVSettingsView: View {
                     Text("About")
                 }
             }
+            .navigationTitle("Settings")
             .sheet(isPresented: $showingAddServer) {
                 TVServerFormView(server: nil) { newServer in
                     configManager.addOrUpdateServer(newServer)
@@ -249,7 +254,7 @@ struct TVSettingsView: View {
                     showingAddServer = false
                 }
             }
-            .fullScreenCover(isPresented: $showingSetPasscode) {
+            .sheet(isPresented: $showingSetPasscode) {
                 TVPasscodeSetupView(isPresented: $showingSetPasscode)
             }
             .sheet(item: $editingServer) { server in
@@ -264,11 +269,29 @@ struct TVSettingsView: View {
             .onAppear {
                 filterViewModel.fetchSavedFilters()
             }
-            .background(Color.appBackground)
     }
 
     private func switchToServer(_ server: ServerConfig) {
         configManager.saveConfig(server)
+    }
+
+    private func colorsEqual(_ a: Color, _ b: Color, tolerance: CGFloat = 0.01) -> Bool {
+        let ua = UIColor(a)
+        let ub = UIColor(b)
+
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+        var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+
+        guard ua.getRed(&ar, green: &ag, blue: &ab, alpha: &aa),
+              ub.getRed(&br, green: &bg, blue: &bb, alpha: &ba) else {
+            // Fallback: compare description if colors aren't convertible (shouldn't happen for presets)
+            return String(describing: a) == String(describing: b)
+        }
+
+        return abs(ar - br) <= tolerance
+            && abs(ag - bg) <= tolerance
+            && abs(ab - bb) <= tolerance
+            && abs(aa - ba) <= tolerance
     }
 
     private var appVersion: String {

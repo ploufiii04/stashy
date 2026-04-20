@@ -200,7 +200,8 @@ struct StudiosView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "arrow.up.arrow.down.circle")
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.primary)
                 }
                 .frame(maxWidth: .infinity)
@@ -237,7 +238,8 @@ struct StudiosView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(selectedFilter != nil ? appearance.tintColor : .primary)
                 }
                 .frame(maxWidth: .infinity)

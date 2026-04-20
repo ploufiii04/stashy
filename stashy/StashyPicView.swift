@@ -131,7 +131,8 @@ struct StashLineView: View {
                         HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
                     }
                 } label: {
-                    Image(systemName: "arrow.up.arrow.down.circle")
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.primary)
                 }
                 .frame(maxWidth: .infinity)
@@ -160,7 +161,8 @@ struct StashLineView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: selectedFilter != nil ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
                 }
                 .frame(maxWidth: .infinity)
@@ -506,11 +508,24 @@ struct StashLinePostView: View {
     @State private var activeShareWrapper: ShareWrapper?
     @State private var showSetPerformerImagePicker = false
     @State private var performerImageTargetPerformers: [GalleryPerformer] = []
+    @State private var performerDetailTarget: GalleryPerformer?
+    @State private var showPerformerDetail = false
     @AppStorage("stashline_crop_enabled") private var cropEnabled = true
+    
+    private let actionIconSize: CGFloat = 16
+    private let actionIconFrame: CGFloat = 22
 
     var image: StashImage { post.images[carouselIndex] }
     var localOCounter: Int { oCounters[image.id] ?? image.o_counter ?? 0 }
     var localRating: Int { ratings[image.id] ?? image.rating100 ?? 0 }
+    
+    private func actionIcon(_ systemName: String, tint: Color? = nil, scale: CGFloat = 1) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: actionIconSize, weight: .semibold))
+            .frame(width: actionIconFrame, height: actionIconFrame, alignment: .center)
+            .scaleEffect(scale)
+            .foregroundColor(tint ?? appearanceManager.tintColor)
+    }
 
     init(post: StashLinePost, viewModel: StashDBViewModel, onPerformerTap: ((GalleryPerformer) -> Void)? = nil) {
         self.post = post
@@ -539,6 +554,35 @@ struct StashLinePostView: View {
                 Spacer()
                 
                 HStack(spacing: 16) {
+                    if let performers = image.performers, !performers.isEmpty {
+                        if performers.count == 1, let performer = performers.first {
+                            Button {
+                                performerDetailTarget = performer
+                                showPerformerDetail = true
+                            } label: {
+                                actionIcon("person.fill", scale: 1.15)
+                            }
+                        } else {
+                            Menu {
+                                ForEach(performers) { performer in
+                                    Button(performer.name) {
+                                        performerDetailTarget = performer
+                                        showPerformerDetail = true
+                                    }
+                                }
+                            } label: {
+                                actionIcon("person.fill", scale: 1.15)
+                            }
+                        }
+                    }
+                    if let performers = image.performers, !performers.isEmpty {
+                        Button {
+                            performerImageTargetPerformers = performers
+                            showSetPerformerImagePicker = true
+                        } label: {
+                            actionIcon("person.crop.circle.badge.plus", scale: 1.15)
+                        }
+                    }
                     Button {
                         if post.isSet {
                             showShareConfirmation = true
@@ -546,29 +590,32 @@ struct StashLinePostView: View {
                             shareImage(shareWholeSet: false)
                         }
                     } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .foregroundColor(appearanceManager.tintColor)
-                    }
-                    if let performers = image.performers, !performers.isEmpty {
-                        Button {
-                            performerImageTargetPerformers = performers
-                            showSetPerformerImagePicker = true
-                        } label: {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                                .foregroundColor(appearanceManager.tintColor)
-                        }
+                        actionIcon("square.and.arrow.up")
                     }
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {
-                        Image(systemName: "trash")
-                            .foregroundColor(appearanceManager.tintColor)
+                        actionIcon("trash")
                     }
                 }
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .padding(.bottom, 4)
+            .background(
+                NavigationLink(
+                    destination: Group {
+                        if let performer = performerDetailTarget {
+                            PerformerDetailView(performer: performer.toPerformer())
+                        } else {
+                            EmptyView()
+                        }
+                    },
+                    isActive: $showPerformerDetail,
+                    label: { EmptyView() }
+                )
+                .hidden()
+            )
 
             if let tags = image.tags, !tags.isEmpty {
                 tagLine(tags: tags)

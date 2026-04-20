@@ -1701,7 +1701,8 @@ struct ReelsView: View {
                 EmptyView()
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down.circle")
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.white)
         }
     }
@@ -2279,7 +2280,8 @@ struct ReelsView: View {
             }
         } label: {
             let hasActiveFilter = (reelsMode == .clips ? selectedClipFilter != nil : selectedFilter != nil)
-            Image(systemName: hasActiveFilter ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(hasActiveFilter ? appearanceManager.tintColor : .white)
         }
     }
