@@ -7,7 +7,14 @@ struct SceneHeatmapCard: View {
     let funscriptURL: URL?
     let durationSeconds: Double
     let currentTimeSeconds: Double
+    /// Called repeatedly (throttled) while dragging so the video can follow.
     let onSeek: (Double) -> Void
+    /// Optional finalizer called once when the drag ends. If nil, `onSeek` is
+    /// used for the final commit as well.
+    var onSeekCommit: ((Double) -> Void)? = nil
+    /// Called on drag start (true) and drag end (false) so the host can
+    /// suppress side-effects while the user is actively scrubbing.
+    var onScrubStateChange: ((Bool) -> Void)? = nil
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var handyManager = HandyManager.shared
     @ObservedObject var buttplugManager = ButtplugManager.shared
@@ -15,6 +22,13 @@ struct SceneHeatmapCard: View {
 
     private let cardHeight: CGFloat = 140
     private let heatmapHeight: CGFloat = 80
+
+    // Scrub state — local, so the playhead tracks the finger at 60fps
+    // without forcing a real `seek` (and HLS transcode) per pixel.
+    @State private var isDragging: Bool = false
+    @State private var draftProgress: CGFloat = 0
+    @State private var lastSeekSent: CFAbsoluteTime = 0
+    private let seekThrottleInterval: CFAbsoluteTime = 0.15 // 150ms
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -147,8 +161,32 @@ struct SceneHeatmapCard: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            let fraction = value.location.x / width
-                            onSeek(durationSeconds * Double(min(max(fraction, 0), 1)))
+                            let fraction = min(max(value.location.x / width, 0), 1)
+                            draftProgress = fraction
+                            if !isDragging {
+                                isDragging = true
+                                onScrubStateChange?(true)
+                            }
+                            // Throttle real seeks: playhead follows the finger
+                            // locally, but we only ping the player every
+                            // `seekThrottleInterval` seconds.
+                            let now = CFAbsoluteTimeGetCurrent()
+                            if now - lastSeekSent >= seekThrottleInterval {
+                                lastSeekSent = now
+                                onSeek(durationSeconds * Double(fraction))
+                            }
+                        }
+                        .onEnded { value in
+                            let fraction = min(max(value.location.x / width, 0), 1)
+                            draftProgress = fraction
+                            let finalSeconds = durationSeconds * Double(fraction)
+                            isDragging = false
+                            onScrubStateChange?(false)
+                            if let commit = onSeekCommit {
+                                commit(finalSeconds)
+                            } else {
+                                onSeek(finalSeconds)
+                            }
                         }
                 )
             }
@@ -162,6 +200,7 @@ struct SceneHeatmapCard: View {
     }
 
     private var progress: CGFloat {
+        if isDragging { return draftProgress }
         guard durationSeconds > 0 else { return 0 }
         return CGFloat(min(max(currentTimeSeconds, 0), durationSeconds) / durationSeconds)
     }

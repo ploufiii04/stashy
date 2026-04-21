@@ -47,6 +47,7 @@ build.log
 build_detailed.log
 build_log.txt
 
+.derivedData-stashyTV
 CLAUDE.md
 # StashyMarker Training Data
 stashy/scripts/to_be_labeled/

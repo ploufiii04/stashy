@@ -122,12 +122,7 @@ struct ScenesView: View {
                 if configManager.activeConfig == nil {
                     ConnectionErrorView { performSearch() }
                 } else if viewModel.isLoading && viewModel.scenes.isEmpty {
-                    VStack {
-                        Spacer()
-                        ProgressView("Loading scenes...")
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity)
+                    StandardLoadingView(message: "Loading scenes...")
                 } else if viewModel.scenes.isEmpty && viewModel.errorMessage != nil {
                     ConnectionErrorView { performSearch() }
                 } else if viewModel.scenes.isEmpty {
@@ -141,6 +136,7 @@ struct ScenesView: View {
 
         .navigationTitle("Scenes")
         .navigationBarTitleDisplayMode(.inline)
+        .applyAppBackground()
 
         .onChange(of: searchText) { oldValue, newValue in
             // Debounce: Nur suchen wenn Nutzer aufhört zu tippen (0.5s Delay)
@@ -551,15 +547,6 @@ struct ScenesView: View {
                 }
             }
         }
-    }
-
-    private var loadingView: some View {
-        VStack {
-            Spacer()
-            ProgressView("Loading scenes...")
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyStateView: some View {

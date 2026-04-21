@@ -38,6 +38,61 @@ private enum ReelsPlayerRegistry {
     }
 }
 
+/// Reels „Session“ state: **RAM only** — survives tab switches / navigation within one app launch, **not** an app restart.
+/// One-time cleanup removes legacy `UserDefaults` keys from older builds so nothing persists across relaunch.
+private enum ReelsSessionRAM {
+    private static let lock = NSLock()
+    private static var strings: [String: String] = [:]
+    private static var ints: [String: Int] = [:]
+    private static var didClearLegacyUserDefaults = false
+
+    static func clearLegacyUserDefaultsIfNeeded() {
+        lock.lock()
+        let shouldClear = !didClearLegacyUserDefaults
+        if shouldClear { didClearLegacyUserDefaults = true }
+        lock.unlock()
+        guard shouldClear else { return }
+        let ud = UserDefaults.standard
+        let keys = Array(ud.dictionaryRepresentation().keys)
+        for key in keys {
+            if key.hasPrefix("reels_last_visible_")
+                || key.hasPrefix("reels_session_sort_")
+                || key.hasPrefix("reels_session_filter_")
+                || key.hasPrefix("reels_session_random_seed_") {
+                ud.removeObject(forKey: key)
+            }
+        }
+    }
+
+    static func string(forKey key: String) -> String? {
+        lock.lock()
+        let v = strings[key]
+        lock.unlock()
+        return v
+    }
+
+    static func setString(_ value: String?, forKey key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let value, !value.isEmpty { strings[key] = value }
+        else { strings.removeValue(forKey: key) }
+    }
+
+    static func int(forKey key: String) -> Int {
+        lock.lock()
+        let v = ints[key] ?? 0
+        lock.unlock()
+        return v
+    }
+
+    static func setInt(_ value: Int, forKey key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if value > 0 { ints[key] = value }
+        else { ints.removeValue(forKey: key) }
+    }
+}
+
 struct ReelsView: View {
     @ObservedObject private var appearanceManager = AppearanceManager.shared
     @ObservedObject private var tabManager = TabManager.shared
@@ -68,6 +123,7 @@ struct ReelsView: View {
     @State private var scrubberState = ScrubberState()
     @State private var isInitialized = false
     @State private var playTrigger = 0  // Incremented when first item should autoplay
+    @State private var pendingRestoreId: String? = nil
 
     // MARK: - Session-persisted sort/filter (per server + mode)
     private func reelsSessionSortKey(for mode: ReelsMode) -> String {
@@ -81,11 +137,11 @@ struct ReelsView: View {
     }
 
     private func sessionSortRaw(for mode: ReelsMode) -> String? {
-        UserDefaults.standard.string(forKey: reelsSessionSortKey(for: mode))
+        ReelsSessionRAM.string(forKey: reelsSessionSortKey(for: mode))
     }
 
     private func sessionFilterId(for mode: ReelsMode) -> String? {
-        UserDefaults.standard.string(forKey: reelsSessionFilterKey(for: mode))
+        ReelsSessionRAM.string(forKey: reelsSessionFilterKey(for: mode))
     }
 
     private func saveSessionState(for mode: ReelsMode) {
@@ -100,7 +156,7 @@ struct ReelsView: View {
             }
         }()
         if let raw = sortRaw {
-            UserDefaults.standard.set(raw, forKey: reelsSessionSortKey(for: mode))
+            ReelsSessionRAM.setString(raw, forKey: reelsSessionSortKey(for: mode))
         }
 
         // Filter
@@ -117,26 +173,44 @@ struct ReelsView: View {
             }
         }()
         if let id = filterId, !id.isEmpty {
-            UserDefaults.standard.set(id, forKey: reelsSessionFilterKey(for: mode))
+            ReelsSessionRAM.setString(id, forKey: reelsSessionFilterKey(for: mode))
         } else {
-            UserDefaults.standard.removeObject(forKey: reelsSessionFilterKey(for: mode))
+            ReelsSessionRAM.setString(nil, forKey: reelsSessionFilterKey(for: mode))
         }
     }
 
-    private func reelsSessionRandomSeedKey() -> String {
+    /// Maps a ReelsMode to the VM's per-kind random-seed bucket.
+    /// Pics has no random sort; returns nil.
+    private func seedKind(for mode: ReelsMode) -> StashDBViewModel.RandomSeedKind? {
+        switch mode {
+        case .scenes: return .scenes
+        case .markers: return .markers
+        case .clips: return .images   // clips are served via findImages
+        case .previews: return .previews
+        case .pics: return nil
+        }
+    }
+
+    private func reelsSessionRandomSeedKey(for mode: ReelsMode) -> String {
         let serverID = ServerConfigManager.shared.activeConfig?.id.uuidString ?? "default"
-        return "reels_session_random_seed_\(serverID)"
+        return "reels_session_random_seed_\(serverID)_\(mode.rawValue)"
     }
 
+    /// Restore per-mode session seeds so Scenes / Previews / Markers / Clips keep
+    /// independent but stable "random" orders across navigation.
     private func restoreSessionRandomSeedIfAvailable() {
-        let seed = UserDefaults.standard.integer(forKey: reelsSessionRandomSeedKey())
-        if seed > 0 {
-            viewModel.setRandomSeed(seed)
+        for mode in [ReelsMode.scenes, .markers, .clips, .previews] {
+            guard let kind = seedKind(for: mode) else { continue }
+            let seed = ReelsSessionRAM.int(forKey: reelsSessionRandomSeedKey(for: mode))
+            if seed > 0 {
+                viewModel.setRandomSeed(seed, for: kind)
+            }
         }
     }
 
-    private func persistSessionRandomSeed() {
-        UserDefaults.standard.set(viewModel.getRandomSeed(), forKey: reelsSessionRandomSeedKey())
+    private func persistSessionRandomSeed(for mode: ReelsMode) {
+        guard let kind = seedKind(for: mode) else { return }
+        ReelsSessionRAM.setInt(viewModel.getRandomSeed(for: kind), forKey: reelsSessionRandomSeedKey(for: mode))
     }
 
     private func reelsPositionKey(for mode: ReelsMode) -> String {
@@ -155,11 +229,11 @@ struct ReelsView: View {
     }
 
     private func savedPosition(for mode: ReelsMode) -> String? {
-        UserDefaults.standard.string(forKey: reelsPositionKey(for: mode))
+        ReelsSessionRAM.string(forKey: reelsPositionKey(for: mode))
     }
 
     private func savePosition(_ id: String, for mode: ReelsMode) {
-        UserDefaults.standard.set(id, forKey: reelsPositionKey(for: mode))
+        ReelsSessionRAM.setString(id, forKey: reelsPositionKey(for: mode))
     }
 
     private func saveCurrentPositionIfPossible(for mode: ReelsMode) {
@@ -178,8 +252,53 @@ struct ReelsView: View {
             guard currentVisibleSceneId == nil else { return }
         }
 
+        // Keep restore target OUTSIDE of `currentVisibleSceneId`. Setting an ID
+        // into `.scrollPosition(id:)` that isn't in the list yet causes SwiftUI
+        // to visually stall (black view) until it appears.
         if let saved = savedPosition(for: mode), !saved.isEmpty {
-            currentVisibleSceneId = saved
+            pendingRestoreId = saved
+        }
+    }
+
+    private func beginPagedRestoreIfNeeded() {
+        guard let targetId = pendingRestoreId ?? currentVisibleSceneId else {
+            pendingRestoreId = nil
+            return
+        }
+        // If it's already present, we're done.
+        if currentReelItems.contains(where: { $0.id == targetId }) {
+            pendingRestoreId = nil
+            return
+        }
+        pendingRestoreId = targetId
+        continuePagedRestoreIfNeeded()
+    }
+
+    private func continuePagedRestoreIfNeeded() {
+        guard let targetId = pendingRestoreId else { return }
+
+        // Stop when found.
+        if currentReelItems.contains(where: { $0.id == targetId }) {
+            pendingRestoreId = nil
+            return
+        }
+
+        // Load more until we either find it or run out of pages.
+        switch reelsMode {
+        case .scenes:
+            guard viewModel.hasMoreScenes, !viewModel.isLoadingMoreScenes else { return }
+            viewModel.loadMoreScenes()
+        case .markers:
+            guard viewModel.hasMoreMarkers, !viewModel.isLoadingMarkers else { return }
+            viewModel.loadMoreMarkers()
+        case .clips:
+            guard viewModel.hasMoreClips, !viewModel.isLoadingClips else { return }
+            viewModel.loadMoreClips()
+        case .previews:
+            guard viewModel.hasMorePreviews, !viewModel.isLoadingMorePreviews else { return }
+            viewModel.loadMorePreviews()
+        case .pics:
+            pendingRestoreId = nil
         }
     }
 
@@ -514,8 +633,8 @@ struct ReelsView: View {
         // Don't override a just-restored position with nil
         if let sortBy = sortBy {
             if rerollRandom && sortBy == .random && selectedSortOption == .random && reelsMode == .scenes {
-                viewModel.refreshRandomSeed()
-                persistSessionRandomSeed()
+                viewModel.refreshRandomSeed(for: .scenes)
+                persistSessionRandomSeed(for: .scenes)
             }
             selectedSortOption = sortBy
             if restoredPosition == nil { currentVisibleSceneId = nil }
@@ -523,8 +642,8 @@ struct ReelsView: View {
 
         if let markerSortBy = markerSortBy {
             if rerollRandom && markerSortBy == .random && selectedMarkerSortOption == .random && reelsMode == .markers {
-                viewModel.refreshRandomSeed()
-                persistSessionRandomSeed()
+                viewModel.refreshRandomSeed(for: .markers)
+                persistSessionRandomSeed(for: .markers)
             }
             selectedMarkerSortOption = markerSortBy
             if restoredPosition == nil { currentVisibleSceneId = nil }
@@ -532,8 +651,8 @@ struct ReelsView: View {
 
         if let clipSortBy = clipSortBy {
             if rerollRandom && clipSortBy == .random && selectedClipSortOption == .random && reelsMode == .clips {
-                viewModel.refreshRandomSeed()
-                persistSessionRandomSeed()
+                viewModel.refreshRandomSeed(for: .images)
+                persistSessionRandomSeed(for: .clips)
             }
             selectedClipSortOption = clipSortBy
             if restoredPosition == nil { currentVisibleSceneId = nil }
@@ -541,8 +660,8 @@ struct ReelsView: View {
 
         if let previewSortBy = previewSortBy {
             if rerollRandom && previewSortBy == .random && selectedSortOption == .random && reelsMode == .previews {
-                viewModel.refreshRandomSeed()
-                persistSessionRandomSeed()
+                viewModel.refreshRandomSeed(for: .previews)
+                persistSessionRandomSeed(for: .previews)
             }
             // Previews use standard selectedSortOption since they are scenes
             selectedSortOption = previewSortBy
@@ -601,23 +720,30 @@ struct ReelsView: View {
     }
     
     private func autoSelectFirstItem() {
-        // Don't override a restored position while the list is still loading.
         guard !currentReelItems.isEmpty else { return }
-        // Only auto-select if nothing is selected OR if the selected ID belongs to another mode
         let currentPrefix = currentVisibleSceneId?.split(separator: "-").first.map(String.init)
         guard let expectedPrefix = expectedPrefix(for: reelsMode) else { return }
 
-        // Check if current ID still exists in the list; if not, select first item
         let currentIdExists: Bool = {
             guard let id = currentVisibleSceneId else { return false }
             return currentReelItems.contains(where: { $0.id == id })
         }()
 
         if !currentIdExists || currentPrefix != expectedPrefix {
-            // Prefer restoring saved position for this mode (prevents snapping to start on mode switches)
+            // If the restore target is already loaded in the current page, use it.
+            // Otherwise show first item immediately — snapToPendingRestoreIfLoaded
+            // will scroll later when the target arrives via pagination.
+            if let target = pendingRestoreId,
+               currentReelItems.contains(where: { $0.id == target }) {
+                currentVisibleSceneId = target
+                pendingRestoreId = nil
+                playTrigger += 1
+                return
+            }
             if let saved = savedPosition(for: reelsMode),
                currentReelItems.contains(where: { $0.id == saved }) {
                 currentVisibleSceneId = saved
+                pendingRestoreId = nil
                 playTrigger += 1
                 return
             }
@@ -1008,9 +1134,7 @@ struct ReelsView: View {
                     )
                     .applyAppBackground()
                 } else {
-                    ProgressView("Loading...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black)
+                    StandardLoadingView(message: "Loading StashLine...")
                 }
             } else {
                 let isLoading = viewModel.isLoading && isListEmpty
@@ -1143,13 +1267,18 @@ struct ReelsView: View {
 
     private func handleOnAppear() {
         UIApplication.shared.isIdleTimerDisabled = true
+
+        ReelsSessionRAM.clearLegacyUserDefaultsIfNeeded()
         
-        // Audio Optimization: Ensure session is active once for Reels
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("🎬 Reels: Audio setup error: \(error)")
+        // Audio Optimization: Only activate audio session for video modes.
+        // Pics/StashLine has no audio and should not steal iOS audio focus.
+        if reelsMode != .pics {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                print("🎬 Reels: Audio setup error: \(error)")
+            }
         }
 
         // 0. Guard against rotation-triggered onAppear
@@ -1166,6 +1295,7 @@ struct ReelsView: View {
         restoreSessionRandomSeedIfAvailable()
 
         restorePositionIfAvailable(for: reelsMode, forceIfPrefixMismatch: false)
+        beginPagedRestoreIfNeeded()
         autoSelectFirstItem()
 
         // Restore session sort/filter for the current mode (prevents resetting to defaults on tab return)
@@ -1356,11 +1486,19 @@ struct ReelsView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 self.currentItemIsPlaying = true
             }
+        } else {
+            // Switching into Pics: release audio focus immediately.
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                print("🎬 Reels: Audio deactivation error: \(error)")
+            }
         }
 
         // Persist old mode position, then restore the last known position for the new mode.
         saveCurrentPositionIfPossible(for: oldValue)
         restorePositionIfAvailable(for: newValue, forceIfPrefixMismatch: true)
+        beginPagedRestoreIfNeeded()
 
         // Restore session sort/filter (prefer session over defaults)
         switch newValue {
@@ -1406,14 +1544,7 @@ struct ReelsView: View {
 
     @ViewBuilder
     private var loadingStateView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .tint(.white)
-            Text("Loading StashSocial...")
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        StandardLoadingView(message: "Loading feeds...")
     }
 
     @ViewBuilder
@@ -1500,9 +1631,9 @@ struct ReelsView: View {
     @ViewBuilder
     private func reelsListView() -> some View {
         let items = currentReelItems
-        
-        ScrollView(.vertical, showsIndicators: false) {
-            ScrollViewReader { proxy in
+
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         reelItemRow(index: index, item: item, itemCount: items.count)
@@ -1510,34 +1641,51 @@ struct ReelsView: View {
                 }
                 .scrollTargetLayout()
             }
-        }
-        .focusable(false)
-        .focusEffectDisabled()
-        .scrollTargetBehavior(.paging)
-        .scrollDisabled(isMenuOpen)
-        .scrollPosition(id: scrollPositionBinding)
-        .scrollContentBackground(.hidden)
-        .background(Color.black)
-        .onScrollPhaseChange { _, newPhase in
-            // Pause immediately while the user swipes the reel out of view.
-            isUserScrollingReels = (newPhase != .idle)
-            if newPhase != .idle {
-                currentItemIsPlaying = false
-                ReelsPlayerRegistry.pauseAll()
-                NotificationCenter.default.post(name: .reelsPauseAllPlayers, object: nil)
+            .focusable(false)
+            .focusEffectDisabled()
+            .scrollTargetBehavior(.paging)
+            .scrollDisabled(isMenuOpen)
+            .scrollPosition(id: scrollPositionBinding)
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
+            .onScrollPhaseChange { _, newPhase in
+                isUserScrollingReels = (newPhase != .idle)
+                if newPhase != .idle {
+                    currentItemIsPlaying = false
+                    ReelsPlayerRegistry.pauseAll()
+                    NotificationCenter.default.post(name: .reelsPauseAllPlayers, object: nil)
+                }
+            }
+            .onChange(of: items.count) { _, _ in
+                continuePagedRestoreIfNeeded()
+                snapToPendingRestoreIfLoaded(using: proxy)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                withAnimation(.easeInOut(duration: 0.3)) { isRotating = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    withAnimation { isRotating = false }
+                }
             }
         }
-        .background(Color.black)
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            // Just update state for UI adjustments, no force rebuilds
-            withAnimation(.easeInOut(duration: 0.3)) {
-                isRotating = true
+    }
+
+    /// Scrolls to pending restore target once it's present in the list. No overlay,
+    /// no blocking — UI already shows first item. Just a single scroll-snap.
+    private func snapToPendingRestoreIfLoaded(using proxy: ScrollViewProxy) {
+        guard let target = pendingRestoreId else { return }
+        guard currentReelItems.contains(where: { $0.id == target }) else { return }
+
+        pendingRestoreId = nil
+        ReelsPlayerRegistry.pauseAll()
+        currentVisibleSceneId = target
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(nil) {
+                proxy.scrollTo(target, anchor: .top)
             }
-            
-            // Allow system rotation animation to complete before un-pausing
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                withAnimation {
-                    isRotating = false
+            if self.reelsMode != .pics {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.currentItemIsPlaying = true
                 }
             }
         }
@@ -1670,12 +1818,38 @@ struct ReelsView: View {
             
             Spacer(minLength: 4)
             
-            // Stars
-            let rating = currentItem?.rating100 ?? 0
+            // Rating (popup menu like sort/filter)
             if let item = currentItem {
-                StarRatingView(rating100: rating, isInteractive: true, size: 16, spacing: 3, isVertical: false) { newRating in
-                    handleRatingChange(item: item, newRating: newRating)
+                let rating100 = item.rating100 ?? 0
+                let stars = max(0, min(5, Int(round(Double(rating100) / 20.0))))
+
+                Menu {
+                    Button(action: { handleRatingChange(item: item, newRating: 0) }) {
+                        HStack {
+                            Text("Clear Rating")
+                            if stars == 0 { Image(systemName: "checkmark") }
+                        }
+                    }
+                    Divider()
+                    ForEach(1...5, id: \.self) { s in
+                        Button(action: { handleRatingChange(item: item, newRating: s * 20) }) {
+                            HStack {
+                                Text(String(repeating: "★", count: s))
+                                if stars == s { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.white.opacity(stars > 0 ? 1.0 : 0.7))
+                        Text("\(stars)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .opacity(stars == 0 ? 0.5 : 1.0)
                 }
+                .buttonStyle(.plain)
                 .fixedSize()
             }
             
@@ -1761,80 +1935,90 @@ struct ReelsView: View {
         let currentItem = currentReelItems.first(where: { $0.id == currentVisibleSceneId })
         VStack(alignment: .leading, spacing: 0) {
             if let item = currentItem {
-                VStack(alignment: .leading, spacing: 4) {
-                    // Performer - Title
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if let performer = item.performers.first {
-                            Button(action: {
-                                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
-                            }) {
-                                Text(performer.name)
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            .buttonStyle(.plain)
-                            .layoutPriority(1)
-                            Text("-")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(.white.opacity(0.6))
+                HStack(alignment: .top, spacing: 10) {
+                    if let performer = item.performers.first {
+                        Button(action: {
+                            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
+                        }) {
+                            performerThumbnail(performer)
                         }
-                        if let title = item.title, !title.isEmpty {
-                            if let scene = item.underlyingScene {
-                                NavigationLink(destination: SceneDetailView(scene: scene)) {
+                        .buttonStyle(.plain)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Performer - Title
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if let performer = item.performers.first {
+                                Button(action: {
+                                    applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
+                                }) {
+                                    Text(performer.name)
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                .buttonStyle(.plain)
+                                .layoutPriority(1)
+                                Text("-")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            if let title = item.title, !title.isEmpty {
+                                if let scene = item.underlyingScene {
+                                    NavigationLink(destination: SceneDetailView(scene: scene)) {
+                                        Text(title)
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.85))
+                                            .lineLimit(1)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
                                     Text(title)
                                         .font(.system(size: 15, weight: .medium))
                                         .foregroundColor(.white.opacity(0.85))
                                         .lineLimit(1)
                                 }
-                                .buttonStyle(.plain)
-                            } else {
-                                Text(title)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.85))
-                                    .lineLimit(1)
                             }
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Hashtags
-                    let tags = item.tags
-                    Group {
-                        if !tags.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(tags) { tag in
-                                        Button(action: {
-                                            var newTags = selectedTags
-                                            if newTags.contains(where: { $0.id == tag.id }) {
-                                                newTags.removeAll { $0.id == tag.id }
-                                            } else {
-                                                newTags.append(tag)
+                        // Hashtags
+                        let tags = item.tags
+                        Group {
+                            if !tags.isEmpty {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(tags) { tag in
+                                            Button(action: {
+                                                var newTags = selectedTags
+                                                if newTags.contains(where: { $0.id == tag.id }) {
+                                                    newTags.removeAll { $0.id == tag.id }
+                                                } else {
+                                                    newTags.append(tag)
+                                                }
+                                                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+                                            }) {
+                                                Text("#\(tag.name)")
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundColor(.white.opacity(0.8))
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 3)
+                                                    .background(Color.black.opacity(0.3))
+                                                    .clipShape(Capsule())
+                                                    .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
                                             }
-                                            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
-                                        }) {
-                                            Text("#\(tag.name)")
-                                                .font(.system(size: 11, weight: .semibold))
-                                                .foregroundColor(.white.opacity(0.8))
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 3)
-                                                .background(Color.black.opacity(0.3))
-                                                .clipShape(Capsule())
-                                                .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                                            .buttonStyle(.plain)
                                         }
-                                        .buttonStyle(.plain)
                                     }
                                 }
-                                .padding(.horizontal, 20)
+                            } else {
+                                // Reserve space so the title row doesn't drop for items without tags (e.g. Clips/GIFs).
+                                Color.clear.opacity(0)
                             }
-                        } else {
-                            // Reserve space so the title row doesn't drop for items without tags (e.g. Clips/GIFs).
-                            Color.clear.opacity(0)
                         }
+                        .frame(height: 20)
                     }
-                    .frame(height: 20)
                 }
+                .padding(.horizontal, 12)
 
 
             }
@@ -1845,6 +2029,31 @@ struct ReelsView: View {
         .opacity(isUIVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.2), value: isUIVisible)
         .allowsHitTesting(!isMenuOpen)
+    }
+
+    @ViewBuilder
+    private func performerThumbnail(_ performer: ScenePerformer) -> some View {
+        let size: CGFloat = 36
+        Circle()
+            .fill(appearanceManager.tintColor.opacity(0.2))
+            .frame(width: size, height: size)
+            .overlay {
+                if let url = performer.thumbnailURL {
+                    CustomAsyncImage(url: url) { loader in
+                        if let img = loader.image {
+                            img.resizable().scaledToFill()
+                        } else {
+                            Image(systemName: "person.fill")
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.fill")
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+            .clipShape(Circle())
+            .overlay(Circle().stroke(appearanceManager.tintColor, lineWidth: 2))
     }
 
     @ToolbarContentBuilder

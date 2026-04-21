@@ -58,7 +58,7 @@ enum AppTab: String, CaseIterable, Codable, Identifiable {
         case .images: return "photo"
         case .tags: return "tag"
         case .media: return "play.square.stack"
-        case .catalogue: return "cube.box"
+        case .catalogue: return "square.grid.2x2.fill"
         case .downloads: return "square.and.arrow.down"
         case .tools: return "cube.box"
         case .reels: return "play.rectangle.on.rectangle"

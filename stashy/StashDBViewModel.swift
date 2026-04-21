@@ -112,20 +112,55 @@ class StashDBViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var serverStatus: String = "Nicht verbunden"
     
-    /// Stable random seed for consistent sorting during a session
-    private var randomSeed: Int = Int.random(in: 1...1_000_000)
-    
-    // Refresh the random seed periodically or on explicit request
+    /// Per-kind random seeds. Each content kind (scenes, previews, markers, ...)
+    /// maintains an independent stable seed so "Random" sort order is not shared
+    /// across types (e.g. Scenes and Previews must not coincide).
+    enum RandomSeedKind: String, CaseIterable {
+        case scenes, previews, markers, clips, images, galleries, performers, studios, tags, groups
+    }
+
+    private var randomSeeds: [RandomSeedKind: Int] = [:]
+
+    private func seed(for kind: RandomSeedKind) -> Int {
+        if let existing = randomSeeds[kind] { return existing }
+        let new = Int.random(in: 1...1_000_000)
+        randomSeeds[kind] = new
+        return new
+    }
+
+    /// Formats a "random_<seed>" sort field for the given kind.
+    private func randomSort(_ kind: RandomSeedKind) -> String {
+        "random_\(seed(for: kind))"
+    }
+
+    // MARK: Per-kind API
+    func refreshRandomSeed(for kind: RandomSeedKind) {
+        randomSeeds[kind] = Int.random(in: 1...1_000_000)
+    }
+
+    func setRandomSeed(_ seed: Int, for kind: RandomSeedKind) {
+        randomSeeds[kind] = seed
+    }
+
+    func getRandomSeed(for kind: RandomSeedKind) -> Int {
+        seed(for: kind)
+    }
+
+    // MARK: Legacy API (broadcast to all kinds for backwards compatibility)
     func refreshRandomSeed() {
-        randomSeed = Int.random(in: 1...1_000_000)
+        for kind in RandomSeedKind.allCases {
+            randomSeeds[kind] = Int.random(in: 1...1_000_000)
+        }
     }
 
     func setRandomSeed(_ seed: Int) {
-        randomSeed = seed
+        for kind in RandomSeedKind.allCases {
+            randomSeeds[kind] = seed
+        }
     }
 
     func getRandomSeed() -> Int {
-        randomSeed
+        seed(for: .scenes)
     }
 
     enum FilterMode: String, Codable {
@@ -1680,7 +1715,7 @@ class StashDBViewModel: ObservableObject {
         var filterDict: [String: Any] = [
             "page": page,
             "per_page": markersPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.markers) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         if !searchQuery.isEmpty {
@@ -1752,7 +1787,7 @@ class StashDBViewModel: ObservableObject {
         var filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(previewOnly ? .previews : .scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         if !searchQuery.isEmpty {
@@ -1967,7 +2002,7 @@ class StashDBViewModel: ObservableObject {
         let perPage = limit
         
         // Apply stable random seed if sort is random
-        let finalSortField = sortField == "random" ? "random_\(randomSeed)" : sortField
+        let finalSortField = sortField == "random" ? randomSort(.scenes) : sortField
         
         let queryVariables: [String: Any] = [
             "filter": [
@@ -2317,7 +2352,7 @@ class StashDBViewModel: ObservableObject {
         
         // Sort Logic
         let sortByToUse = isInitialLoad ? sortBy : currentPerformerGallerySortOption
-        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortField = sortByToUse.sortField == "random" ? randomSort(.galleries) : sortByToUse.sortField
         let sortDirection = sortByToUse.direction
         
         // Find galleries with performer filter
@@ -2389,7 +2424,7 @@ class StashDBViewModel: ObservableObject {
         
         // Sort Logic
         let sortByToUse = isInitialLoad ? sortBy : currentStudioGallerySortOption
-        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortField = sortByToUse.sortField == "random" ? randomSort(.galleries) : sortByToUse.sortField
         let sortDirection = sortByToUse.direction
         
         // Find galleries with studio filter
@@ -2464,7 +2499,7 @@ class StashDBViewModel: ObservableObject {
         let filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         
@@ -2714,7 +2749,7 @@ class StashDBViewModel: ObservableObject {
         }
         
         let sortByToUse = isInitialLoad ? sortBy : currentDetailPerformerSortOption
-        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortField = sortByToUse.sortField == "random" ? randomSort(.performers) : sortByToUse.sortField
         
         let variables: [String: Any] = [
             "filter": ["page": page, "per_page": 20, "sort": sortField, "direction": sortByToUse.direction],
@@ -2774,7 +2809,7 @@ class StashDBViewModel: ObservableObject {
             "filter": [
                 "page": page,
                 "per_page": 40,
-                "sort": sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField,
+                "sort": sortByToUse.sortField == "random" ? randomSort(.images) : sortByToUse.sortField,
                 "direction": sortByToUse.direction
             ],
             "image_filter": imageFilter
@@ -2843,7 +2878,7 @@ class StashDBViewModel: ObservableObject {
         let filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         
@@ -2953,7 +2988,7 @@ class StashDBViewModel: ObservableObject {
         var filterDict: [String: Any] = [
             "page": page,
             "per_page": performersPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.performers) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         if !searchQuery.isEmpty {
@@ -3109,7 +3144,7 @@ class StashDBViewModel: ObservableObject {
         var filterParams: [String: Any] = [
             "page": page,
             "per_page": studiosPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.studios) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         
@@ -3238,7 +3273,7 @@ class StashDBViewModel: ObservableObject {
             "filter": [
                 "page": page,
                 "per_page": tagsPerPage,
-                "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+                "sort": sortBy.sortField == "random" ? randomSort(.tags) : sortBy.sortField,
                 "direction": sortBy.direction
             ],
             "tag_filter": sanitizeFilter(currentTagLiveFilter.isEmpty ? tagFilter : tagFilter.merging(currentTagLiveFilter) { _, new in new })
@@ -3330,7 +3365,7 @@ class StashDBViewModel: ObservableObject {
             "filter": [
                 "page": page,
                 "per_page": groupsPerPage,
-                "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+                "sort": sortBy.sortField == "random" ? randomSort(.groups) : sortBy.sortField,
                 "direction": sortBy.direction
             ],
             "group_filter": groupFilter
@@ -3408,7 +3443,7 @@ class StashDBViewModel: ObservableObject {
             "filter": [
                 "page": page,
                 "per_page": groupDetailPerPage,
-                "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+                "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
                 "direction": sortBy.direction
             ],
             "scene_filter": sceneFilter
@@ -3460,7 +3495,7 @@ class StashDBViewModel: ObservableObject {
             "filter": [
                 "page": page,
                 "per_page": 20,
-                "sort": sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField,
+                "sort": sortByToUse.sortField == "random" ? randomSort(.galleries) : sortByToUse.sortField,
                 "direction": sortByToUse.direction
             ],
             "gallery_filter": [
@@ -3543,7 +3578,7 @@ class StashDBViewModel: ObservableObject {
         let filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         
@@ -3614,7 +3649,7 @@ class StashDBViewModel: ObservableObject {
         
         let page = isInitialLoad ? 1 : currentTagGalleryPage + 1
         let sortByToUse = isInitialLoad ? sortBy : currentTagGallerySortOption
-        let sortField = sortByToUse.sortField == "random" ? "random_\(randomSeed)" : sortByToUse.sortField
+        let sortField = sortByToUse.sortField == "random" ? randomSort(.galleries) : sortByToUse.sortField
         let sortDirection = sortByToUse.direction
         let query = GraphQLQueries.queryWithFragments("findGalleries")
         
@@ -3717,7 +3752,7 @@ class StashDBViewModel: ObservableObject {
         var filterParams: [String: Any] = [
             "page": page,
             "per_page": 20,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.galleries) : sortBy.sortField,
             "direction": sortBy.direction
         ]
         
@@ -3799,7 +3834,7 @@ class StashDBViewModel: ObservableObject {
             "filter": [
                 "page": page,
                 "per_page": 40,
-                "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+                "sort": sortBy.sortField == "random" ? randomSort(.images) : sortBy.sortField,
                 "direction": sortBy.direction
             ],
             "image_filter": [
@@ -3867,7 +3902,7 @@ class StashDBViewModel: ObservableObject {
         let filterDict: [String: Any] = [
             "page": page,
             "per_page": perPage,
-            "sort": sortBy.sortField == "random" ? "random_\(randomSeed)" : sortBy.sortField,
+            "sort": sortBy.sortField == "random" ? randomSort(.images) : sortBy.sortField,
             "direction": sortBy.direction
         ]
 
@@ -6850,6 +6885,8 @@ struct StashImage: Codable, Identifiable, Equatable {
     let o_counter: Int?
     let organized: Bool?
     let date: String?
+    let createdAt: String?
+    let updatedAt: String?
     let paths: ImagePaths?
     // let files: [ImageFile]?
     let visual_files: [ImageFile]?
@@ -6860,6 +6897,8 @@ struct StashImage: Codable, Identifiable, Equatable {
     
     enum CodingKeys: String, CodingKey {
         case id, title, rating100, o_counter, organized, date, paths, performers, studio, galleries, visual_files, tags
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
     
     var isVideo: Bool {
@@ -6910,6 +6949,8 @@ struct StashImage: Codable, Identifiable, Equatable {
             o_counter: o_counter,
             organized: organized,
             date: date,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
             paths: paths,
             visual_files: visual_files,
             performers: performers,
@@ -6927,6 +6968,8 @@ struct StashImage: Codable, Identifiable, Equatable {
             o_counter: count,
             organized: organized,
             date: date,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
             paths: paths,
             visual_files: visual_files,
             performers: performers,
@@ -7606,27 +7649,75 @@ extension StashDBViewModel {
     }
     
     func fetchSceneStreams(sceneId: String, completion: @escaping ([SceneStream]) -> Void) {
+        // RAM cache: the stream list (HLS/MP4 variants + direct stream URL) is
+        // deterministic per scene for the session, but we hit this endpoint
+        // every time the user opens a SceneDetailView (and once per Reels
+        // card). Caching shaves a full GraphQL round-trip off detail opens,
+        // which is especially noticeable on tapped-through navigation.
+        if let cached = SceneStreamsRAMCache.shared.streams(for: sceneId) {
+            DispatchQueue.main.async { completion(cached) }
+            return
+        }
+
         let query = GraphQLQueries.loadQuery(named: "sceneStreams")
         let variables = ["id": sceneId]
-        
+
         let body: [String: Any] = [
             "query": query,
             "variables": variables
         ]
-        
+
         guard let bodyData = try? JSONSerialization.data(withJSONObject: body),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
             completion([])
             return
         }
-        
+
         performGraphQLQuery(query: bodyString) { (response: SceneStreamsResponse?) in
             let streams = response?.data?.sceneStreams ?? []
             print("📺 Fetched \(streams.count) transcoded streams for scene \(sceneId)")
+            SceneStreamsRAMCache.shared.set(streams, for: sceneId)
             DispatchQueue.main.async {
                 completion(streams)
             }
         }
+    }
+}
+
+/// Session-lifetime RAM cache for scene stream metadata. Cleared only on
+/// explicit invalidation (e.g. server change) or app restart.
+final class SceneStreamsRAMCache {
+    static let shared = SceneStreamsRAMCache()
+    private let lock = NSLock()
+    private var store: [String: (streams: [SceneStream], cachedAt: Date)] = [:]
+    /// 10-minute TTL — keeps re-opens instant without pinning stale URLs
+    /// forever when the server reconfigures transcoders.
+    private let ttl: TimeInterval = 10 * 60
+    private init() {}
+
+    func streams(for sceneId: String) -> [SceneStream]? {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = store[sceneId] else { return nil }
+        if Date().timeIntervalSince(entry.cachedAt) > ttl {
+            store[sceneId] = nil
+            return nil
+        }
+        return entry.streams
+    }
+
+    func set(_ streams: [SceneStream], for sceneId: String) {
+        lock.lock(); defer { lock.unlock() }
+        store[sceneId] = (streams, Date())
+    }
+
+    func invalidate(sceneId: String) {
+        lock.lock(); defer { lock.unlock() }
+        store[sceneId] = nil
+    }
+
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        store.removeAll()
     }
 }
 

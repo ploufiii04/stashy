@@ -71,12 +71,7 @@ struct GalleriesView: View {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.isLoadingGalleries && viewModel.galleries.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading galleries...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading galleries...")
             } else if viewModel.galleries.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.galleries.isEmpty {
@@ -116,6 +111,7 @@ struct GalleriesView: View {
         }
         .navigationTitle(hideTitle ? "" : "Galleries")
         .navigationBarTitleDisplayMode(.inline)
+        .applyAppBackground()
         .conditionalSearchable(isVisible: isSearchVisible, text: $searchText, prompt: "Search galleries...")
         .onChange(of: searchText) { oldValue, newValue in
             // Debounce

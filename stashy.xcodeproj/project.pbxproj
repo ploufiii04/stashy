@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F0A11E1B0B0B0B0B0B0B0B01 /* PocketSVG in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F708192A3B4C5 /* PocketSVG */; };
+		F0A11E1B0B0B0B0B0B0B0B02 /* PocketSVG in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F708192A3B4C5 /* PocketSVG */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		02B19A59AAFE4A16B45A861F /* DownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB172F16743C007C2090 /* DownloadsView.swift */; };
 		08FB7793FE84155DC02AAC07 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FB7794FE84155DC02AAC07 /* App.swift */; };
 		08FB7797FE84155DC02AAC07 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FB7798FE84155DC02AAC07 /* MainTabView.swift */; };
@@ -229,6 +231,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F0A11E1B0B0B0B0B0B0B0B01 /* PocketSVG in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -408,6 +411,7 @@
 			buildConfigurationList = 37D3E2582F3932C500AB8FAD /* Build configuration list for PBXNativeTarget "stashyTV" */;
 			buildPhases = (
 				37D3E24A2F3932C400AB8FAD /* Sources */,
+				F0A11E1B0B0B0B0B0B0B0B03 /* Embed Frameworks */,
 				37D3E24B2F3932C400AB8FAD /* Frameworks */,
 				37D3E24C2F3932C400AB8FAD /* Resources */,
 			);
@@ -483,6 +487,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F0A11E1B0B0B0B0B0B0B0B03 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				F0A11E1B0B0B0B0B0B0B0B02 /* PocketSVG in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		DFC0E8A42F10EA1C004BBEB2 /* ShellScript */ = {

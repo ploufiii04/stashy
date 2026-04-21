@@ -164,12 +164,7 @@ struct GroupsView: View {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.isLoadingGroups && viewModel.groups.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading groups...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading groups...")
             } else if viewModel.groups.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.groups.isEmpty {
@@ -180,6 +175,7 @@ struct GroupsView: View {
         }
         .navigationTitle("Groups")
         .navigationBarTitleDisplayMode(.inline)
+        .applyAppBackground()
         .floatingActionBar {
             HStack(spacing: 0) {
                 // Search Pill (if active)

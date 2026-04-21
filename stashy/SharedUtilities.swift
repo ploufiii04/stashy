@@ -106,13 +106,18 @@ func createPlayer(for url: URL) -> AVPlayer {
     let asset = AVURLAsset(url: authenticatedURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
     let playerItem = AVPlayerItem(asset: asset)
     
-    // Performance Optimizations for scrubbing and playback
-    playerItem.preferredForwardBufferDuration = 10 // Pre-buffer 10 seconds ahead
+    // Performance Optimizations for scrubbing and playback.
+    // A small forward buffer (2s) keeps seeks snappy on HLS — a 10s buffer
+    // forces AVPlayer to download/transcode ~10s per jump before playback.
+    playerItem.preferredForwardBufferDuration = 2
     playerItem.automaticallyPreservesTimeOffsetFromLive = true
     playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
-    
+
     let player = AVPlayer(playerItem: playerItem)
-    player.automaticallyWaitsToMinimizeStalling = true // Ensure smooth playback on slow networks
+    // Scrubbing responsiveness: `automaticallyWaitsToMinimizeStalling` makes
+    // AVPlayer hold playback after every seek until a buffer threshold is met.
+    // Disabling it returns control instantly after `seek`/`play`.
+    player.automaticallyWaitsToMinimizeStalling = false
     player.allowsExternalPlayback = true
     player.preventsDisplaySleepDuringVideoPlayback = true
     return player
@@ -246,6 +251,36 @@ extension View {
 // MARK: - GIF / Zoom Components
 
 #if !os(tvOS)
+/// Full-screen loading UI shared across catalog-style screens (same idea as `PerformersView`):
+/// `Color.appBackground` + centered `ProgressView` with label.
+struct StandardLoadingView: View {
+    let message: String
+    /// When `false`, use inside `ScrollView` / lists (e.g. search) — same colors, no full-screen spacers.
+    var fillsScreen: Bool = true
+
+    var body: some View {
+        Group {
+            if fillsScreen {
+                VStack {
+                    Spacer()
+                    ProgressView(message)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HStack {
+                    Spacer()
+                    ProgressView(message)
+                    Spacer()
+                }
+                .padding(.top, 40)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .background(Color.appBackground)
+    }
+}
+
 /// A view that plays animated GIFs and WebP images using WKWebView for reliability and simple looping.
 struct AnimatedWebView: UIViewRepresentable {
     let data: Data

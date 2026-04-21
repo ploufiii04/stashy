@@ -73,12 +73,7 @@ struct ImagesView: View {
                     }
                 }
             } else if (viewModel.isLoadingImages || viewModel.isLoadingGalleryImages) && displayedImages.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading images...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading images...")
             } else if displayedImages.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView {
                     if let gallery = gallery {

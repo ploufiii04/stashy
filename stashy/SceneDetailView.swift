@@ -49,6 +49,10 @@ struct SceneDetailView: View {
     @State private var playbackSpeed: Double = 1.0
     @State private var currentPlaybackTime: Double = 0
     @State private var timeObserverToken: Any?
+    /// True while the user is actively dragging the heatmap scrubber. Used to
+    /// suppress redundant work (sync restarts, play-state side-effects) during
+    /// high-frequency seeks.
+    @State private var isScrubbing: Bool = false
     
     // Preview Video State
     @State private var previewPlayer: AVPlayer?
@@ -138,7 +142,9 @@ struct SceneDetailView: View {
                         funscriptURL: activeScene.funscriptURL,
                         durationSeconds: activeScene.sceneDuration ?? 0,
                         currentTimeSeconds: currentPlaybackTime,
-                        onSeek: { seconds in seekTo(seconds) }
+                        onSeek: { seconds in seekTo(seconds) },
+                        onSeekCommit: { seconds in commitScrub(to: seconds) },
+                        onScrubStateChange: { active in isScrubbing = active }
                     )
                 }
                 
@@ -311,7 +317,6 @@ struct SceneDetailView: View {
             onAppear: handleOnAppear,
             onDisappear: handleOnDisappear,
             onPeriodicSync: handlePeriodicSync,
-            onPlaybackUpdate: handlePlaybackMarkerUpdate,
             onRefreshMarkers: refreshSceneDetails,
             onInitialSync: initialSync,
             onEnsureAnalysis: ensureVideoAnalysis,
@@ -351,9 +356,13 @@ struct SceneDetailView: View {
             if let updated = updatedScene {
                 DispatchQueue.main.async {
                     let preservedResumeTime = self.activeScene.resumeTime
+                    let preservedStreams = self.activeScene.streams
                     var newScene = updated
                     if let resTime = preservedResumeTime, resTime > 0 {
                         newScene = newScene.withResumeTime(resTime)
+                    }
+                    if let streams = preservedStreams, !streams.isEmpty {
+                        newScene = newScene.withStreams(streams)
                     }
                     self.activeScene = newScene
                 }
@@ -387,7 +396,7 @@ struct SceneDetailView: View {
             }
         }
         
-        if activeScene.performers.isEmpty || (activeScene.tags?.isEmpty ?? true) || activeScene.groups == nil {
+        if activeScene.performers.isEmpty || (activeScene.tags?.isEmpty ?? true) || activeScene.groups == nil || activeScene.sceneMarkers == nil {
             viewModel.fetchSceneDetails(sceneId: activeScene.id) { updatedScene in
                 if let updated = updatedScene {
                     DispatchQueue.main.async {
@@ -461,18 +470,15 @@ struct SceneDetailView: View {
         }
     }
 
-    private func handlePlaybackMarkerUpdate() {
-        guard let player = player else { return }
-        let currentTime = player.currentTime().seconds
-        if currentTime >= 0 {
-            currentPlaybackTime = currentTime
-        }
-    }
-
     private func handleTimeControlStatusChange(_ status: AVPlayer.TimeControlStatus) {
         guard let player = player else { return }
+        // Scrubbing produces rapid play → waitingToPlay → playing transitions.
+        // Running the full sync-restart below each time is expensive (Bluetooth
+        // round-trips, StashSyncManager restart, video analysis). Skip while
+        // the user is actively dragging; `commitScrub` handles the resume.
+        if isScrubbing { return }
         let currentTime = player.currentTime().seconds
-        
+
         if status == .paused {
             StashSyncManager.shared.stop()
             if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
@@ -608,11 +614,17 @@ struct SceneDetailView: View {
         if !isPlaybackStarted {
             startPlayback(resume: false)
         }
-        
+
         let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
-        // Optimization: Small tolerances (0.1s) allow much smoother scrubbing 
-        // by avoiding heavy frame-exact calculations while staying visually precise.
-        player?.seek(to: targetTime, toleranceBefore: CMTime(seconds: 0.1, preferredTimescale: 600), toleranceAfter: CMTime(seconds: 0.1, preferredTimescale: 600))
+        // Keyframe-tolerant seeks are dramatically faster on HLS / transcoded
+        // streams because AVPlayer can snap to the nearest I-frame instead of
+        // forcing the server to re-encode up to the exact frame.
+        player?.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+
+        // While actively scrubbing we don't kick device-syncs on every micro-seek
+        // (that explodes network/Bluetooth traffic). Final commit happens on
+        // drag end via `commitScrub(to:)`.
+        guard !isScrubbing else { return }
         player?.play()
         if handyManager.isSyncing {
             handyManager.play(at: seconds)
@@ -623,6 +635,18 @@ struct SceneDetailView: View {
         if loveSpouseManager.isSyncing {
             loveSpouseManager.play(at: seconds)
         }
+    }
+
+    /// Called from the heatmap scrubber when the user releases the drag.
+    /// Does the final accurate seek + sync resume.
+    private func commitScrub(to seconds: Double) {
+        isScrubbing = false
+        let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+        player?.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+        player?.play()
+        if handyManager.isSyncing { handyManager.play(at: seconds) }
+        if buttplugManager.isConnected { buttplugManager.play(at: seconds) }
+        if loveSpouseManager.isSyncing { loveSpouseManager.play(at: seconds) }
     }
 
     private func infoPill(icon: String, text: String, color: Color? = nil) -> some View {
@@ -952,7 +976,6 @@ private struct SceneDetailLifecycleModifier: ViewModifier {
     let onAppear:          () -> Void
     let onDisappear:       () -> Void
     let onPeriodicSync:    () -> Void
-    let onPlaybackUpdate:  () -> Void
     let onRefreshMarkers:  () -> Void
     let onInitialSync:     () -> Void
     let onEnsureAnalysis:  (AVPlayerItem?) -> Void
@@ -967,7 +990,8 @@ private struct SceneDetailLifecycleModifier: ViewModifier {
             .onDisappear { onDisappear() }
             .onChange(of: isMuted) { _, v in player?.isMuted = v }
             .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in onPeriodicSync() }
-            .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in onPlaybackUpdate() }
+            // The 0.5s fallback timer was removed — `addPeriodicTimeObserver`
+            // (in SceneDetailView) publishes time at 0.25s already.
             .onChange(of: StashSyncManager.shared.isActive) { _, active in if active { onInitialSync() } }
             .overlay(playerOverlay)
     }

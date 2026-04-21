@@ -55,6 +55,7 @@ struct UniversalSearchView: View {
             }
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
+            .applyAppBackground()
             .searchable(text: $searchText, prompt: "Search everything...")
             .onChange(of: searchText) { oldValue, newValue in
                 let query = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -127,12 +128,7 @@ struct UniversalSearchView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 if isSearching {
-                    HStack {
-                        Spacer()
-                        ProgressView("Searching...")
-                        Spacer()
-                    }
-                    .padding(.top, 40)
+                    StandardLoadingView(message: "Searching...", fillsScreen: false)
                 } else {
                     ForEach(orderedSections, id: \.self) { section in
                         sectionView(for: section)

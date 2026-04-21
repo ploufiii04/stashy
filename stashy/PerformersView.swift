@@ -145,12 +145,7 @@ struct PerformersView: View {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.isLoading && viewModel.performers.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading performers...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading performers...")
             } else if viewModel.performers.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.performers.isEmpty {
@@ -515,14 +510,6 @@ struct PerformersView: View {
             if let performer = coordinator.performerToOpen {
                 PerformerDetailView(performer: performer)
             }
-        }
-    }
-
-    private var loadingView: some View {
-        VStack {
-            Spacer()
-            ProgressView("Loading performers...")
-            Spacer()
         }
     }
 

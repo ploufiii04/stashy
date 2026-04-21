@@ -21,6 +21,7 @@ struct StashLineView: View {
     @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
     @State private var scrollPositionId: String?
     @State private var pendingRestoreId: String?
+    @State private var cachedPosts: [StashLinePost] = []
     init(performerFilter: GalleryPerformer? = nil, isEmbedded: Bool = false, onPerformerTap: ((GalleryPerformer) -> Void)? = nil) {
         self.externalPerformerFilter = performerFilter
         _performerFilter = State(initialValue: performerFilter)
@@ -37,17 +38,16 @@ struct StashLineView: View {
         )
     }
 
+    private func rebuildGroupedPosts() {
+        cachedPosts = computeGroupedPosts()
+    }
+
     var body: some View {
         Group {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.isLoadingImages && viewModel.allImages.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading StashLine...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading StashLine...")
             } else if viewModel.allImages.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.allImages.isEmpty {
@@ -169,7 +169,7 @@ struct StashLineView: View {
             }
         }
         .onAppear {
-            let sortStr = TabManager.shared.getSortOption(for: .stashline) ?? "dateDesc"
+            let sortStr = TabManager.shared.getSortOption(for: .stashline) ?? "createdAtDesc"
             if let sort = StashDBViewModel.ImageSortOption(rawValue: sortStr) {
                 selectedSortOption = sort
             }
@@ -185,6 +185,19 @@ struct StashLineView: View {
             } else {
                 pendingRestoreId = savedId
             }
+            rebuildGroupedPosts()
+        }
+        .onChange(of: selectedSortOption) { _, _ in
+            rebuildGroupedPosts()
+        }
+        .onChange(of: viewModel.allImages.count) { _, _ in
+            rebuildGroupedPosts()
+        }
+        .onChange(of: viewModel.allImages.first?.id) { _, _ in
+            rebuildGroupedPosts()
+        }
+        .onChange(of: viewModel.allImages.last?.id) { _, _ in
+            rebuildGroupedPosts()
         }
         .onChange(of: viewModel.savedFilters) { _, newValue in
             if selectedFilter == nil {
@@ -304,7 +317,7 @@ struct StashLineView: View {
                     HStack(spacing: 0) {
                         statColumn(value: viewModel.totalImages, label: "Images")
                         Divider().frame(height: 32).padding(.horizontal, 12)
-                        statColumn(value: groupedPosts.count, label: "Sets")
+                        statColumn(value: cachedPosts.count, label: "Sets")
                         Divider().frame(height: 32).padding(.horizontal, 12)
                         statColumn(value: viewModel.allImages.reduce(0) { $0 + ($1.o_counter ?? 0) }, label: "Counter")
                     }
@@ -346,34 +359,48 @@ struct StashLineView: View {
         performSearch()
     }
 
-    // Group images by stable key (basename + performerIds + date).
+    // Group images by stable key (basename + performerIds + time anchor).
     // Non-consecutive grouping: all images sharing a key are merged regardless of position.
-    // Order of first appearance determines post order in feed.
-    private var groupedPosts: [StashLinePost] {
+    // Order of first appearance determines post order in feed (for Random).
+    private func computeGroupedPosts() -> [StashLinePost] {
         var groups: [String: [StashImage]] = [:]
+        var insertionOrder: [String] = []
+
+        let anchor: StashLinePost.TimeAnchor = {
+            switch selectedSortOption {
+            case .dateAsc, .dateDesc:
+                return .date
+            case .createdAtAsc, .createdAtDesc:
+                return .createdAt
+            default:
+                return .bestEffort
+            }
+        }()
 
         for image in viewModel.allImages {
-            if let key = StashLinePost.groupKey(for: image) {
+            if let key = StashLinePost.groupKey(for: image, anchor: anchor) {
                 if groups[key] == nil {
                     groups[key] = []
+                    insertionOrder.append(key)
                 }
                 groups[key]!.append(image)
             } else {
                 // No groupable key → single post, use image id as unique key
                 let fallback = "solo-\(image.id)"
                 groups[fallback] = [image]
+                insertionOrder.append(fallback)
             }
         }
 
         // Deterministic group ordering (so global vs performer views match)
         // Key formats:
-        // - grouped: performerId|date|galleryIds|sessionKey|orientation
+        // - grouped: performerId|timeKey|galleryIds|sessionKey|orientation
         // - solo: solo-<imageId>
         let sortedKeys: [String] = groups.keys.sorted { a, b in
             let aa = StashLinePost.groupSortComponents(fromKey: a)
             let bb = StashLinePost.groupSortComponents(fromKey: b)
-            // Descending by date/session (newer first), then performer, then rest
-            if aa.date != bb.date { return aa.date > bb.date }
+            // Descending by timeKey/session (newer first), then performer, then rest
+            if aa.timeKey != bb.timeKey { return aa.timeKey > bb.timeKey }
             if aa.session != bb.session { return aa.session > bb.session }
             if aa.performer != bb.performer { return aa.performer > bb.performer }
             if aa.gallery != bb.gallery { return aa.gallery > bb.gallery }
@@ -381,9 +408,12 @@ struct StashLineView: View {
             return a > b
         }
 
+        // Random sort: preserve server order, only group (no additional sorting here).
+        let keys: [String] = (selectedSortOption == .random) ? insertionOrder : sortedKeys
+
         // Hold back newest group while more pages may load — it could grow
-        let firstKey = sortedKeys.first
-        let posts = sortedKeys.compactMap { key -> StashLinePost? in
+        let firstKey = keys.first
+        let posts = keys.compactMap { key -> StashLinePost? in
             guard var images = groups[key] else { return nil }
 
             // Stable ordering within a group (based on filename index suffix)
@@ -396,24 +426,10 @@ struct StashLineView: View {
 
             // If newest group is incomplete (still loading), skip unless multi-image
             if key == firstKey && viewModel.hasMoreImages && images.count == 1
-                && StashLinePost.groupKey(for: images[0]) != nil {
+                && StashLinePost.groupKey(for: images[0], anchor: anchor) != nil {
                 return nil
             }
             return StashLinePost(images: images)
-        }
-
-        // Debug log
-        let context = performerFilter != nil ? "PROFILE[\(performerFilter!.name)]" : "TIMELINE"
-        print("=== StashLine groupedPosts [\(context)] total images: \(viewModel.allImages.count) → \(posts.count) posts ===")
-        for (i, post) in posts.enumerated() {
-            let key = StashLinePost.groupKey(for: post.primaryImage) ?? "solo-\(post.primaryImage.id)"
-            print("  [\(i)] \(post.images.count)x | key=\(key)")
-            for img in post.images {
-                let filename = (img.visual_files?.first?.path ?? img.paths?.image).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
-                let imgDate = img.date ?? "nil"
-                let performers = img.performers?.map(\.id).sorted().joined(separator: ",") ?? "nil"
-                print("    - id=\(img.id) file=\(filename) image.date=\(imgDate) performers=[\(performers)]")
-            }
         }
 
         return posts
@@ -425,13 +441,13 @@ struct StashLineView: View {
                 if let performer = performerFilter, !isEmbedded {
                     profileHeader(performer: performer)
                 }
-                ForEach(groupedPosts) { post in
+                ForEach(cachedPosts) { post in
                     StashLinePostView(post: post, viewModel: viewModel, onPerformerTap: onPerformerTap != nil ? { performer in
                         coordinator.picsGlobalScrollId = post.id
                         onPerformerTap?(performer)
                     } : nil)
                     .onAppear {
-                        if post.id == groupedPosts.last?.id {
+                        if post.id == cachedPosts.last?.id {
                             viewModel.loadMoreImages()
                         }
                     }
@@ -467,13 +483,37 @@ struct StashLinePost: Identifiable {
     var primaryImage: StashImage { images[0] }
     var isSet: Bool { images.count > 1 }
 
-    // Group key: performerIds | date | galleryIds | sessionTimestamp
-    // - performers + date must be present
-    // - gallery IDs separate images from different galleries on same date
+    enum TimeAnchor {
+        /// Uses `image.date` (metadata/shoot date). Strict: if missing, do not group.
+        case date
+        /// Uses `image.createdAt` (DB timestamp). Strict: if missing, do not group.
+        case createdAt
+        /// Best-effort: prefer `createdAt`, fall back to `date`.
+        case bestEffort
+    }
+
+    // Group key: performerIds | timeKey | galleryIds | sessionTimestamp
+    // - performers + timeKey must be present
+    // - gallery IDs separate images from different galleries on same bucket
     // - sessionTimestamp: extracted from filename between _-_ and last _<digits>
     //   e.g. "042_-_2026-01-12_12-39-43_0.jpg" → "2026-01-12_12-39-43"
     //   if not present (no _-_ pattern), falls back to empty string
-    static func groupKey(for image: StashImage) -> String? {
+    static func groupKey(for image: StashImage, anchor: TimeAnchor) -> String? {
+        func dayOnly(_ raw: String?) -> String? {
+            guard var s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+            // Typical formats:
+            // - "YYYY-MM-DD"
+            // - ISO-8601 "YYYY-MM-DDTHH:MM:SS+02:00"
+            if let t = s.firstIndex(of: "T") {
+                s = String(s[..<t])
+            }
+            // Safety: keep only the leading YYYY-MM-DD when present
+            if s.count >= 10 {
+                return String(s.prefix(10))
+            }
+            return s
+        }
+
         // Grouping should always be per single performer.
         // If there are 0 or multiple performers (collabs), do not group.
         guard let performers = image.performers, performers.count == 1 else { return nil }
@@ -481,7 +521,18 @@ struct StashLinePost: Identifiable {
 
         let galleryKey = image.galleries?.map(\.id).sorted().joined(separator: ",") ?? ""
         
-        guard let date = image.date, !date.isEmpty else { return nil }
+        let timeKeyRaw: String? = {
+            switch anchor {
+            case .date:
+                return (image.date?.isEmpty == false ? image.date : nil)
+            case .createdAt:
+                return (image.createdAt?.isEmpty == false ? image.createdAt : nil)
+            case .bestEffort:
+                return (image.createdAt?.isEmpty == false ? image.createdAt : (image.date?.isEmpty == false ? image.date : nil))
+            }
+        }()
+        let timeKey = dayOnly(timeKeyRaw)
+        guard let timeKey, !timeKey.isEmpty else { return nil }
 
         // Extract session timestamp from filename: part between _-_ and trailing _<digits>
         let sessionKey: String
@@ -507,19 +558,19 @@ struct StashLinePost: Identifiable {
             orientation = ""
         }
 
-        return "\(performerKey)|\(date)|\(galleryKey)|\(sessionKey)|\(orientation)"
+        return "\(performerKey)|\(timeKey)|\(galleryKey)|\(sessionKey)|\(orientation)"
     }
 
-    static func groupSortComponents(fromKey key: String) -> (performer: String, date: String, gallery: String, session: String, orientation: String) {
+    static func groupSortComponents(fromKey key: String) -> (performer: String, timeKey: String, gallery: String, session: String, orientation: String) {
         if key.hasPrefix("solo-") {
             // Put solos at the end, but keep deterministic ordering
-            return (performer: "", date: "", gallery: "", session: "", orientation: "")
+            return (performer: "", timeKey: "", gallery: "", session: "", orientation: "")
         }
         let parts = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-        // performer|date|gallery|session|orientation
+        // performer|timeKey|gallery|session|orientation
         return (
             performer: parts.count > 0 ? parts[0] : "",
-            date: parts.count > 1 ? parts[1] : "",
+            timeKey: parts.count > 1 ? parts[1] : "",
             gallery: parts.count > 2 ? parts[2] : "",
             session: parts.count > 3 ? parts[3] : "",
             orientation: parts.count > 4 ? parts[4] : ""

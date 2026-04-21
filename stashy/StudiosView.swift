@@ -83,12 +83,7 @@ struct StudiosView: View {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.isLoading && viewModel.studios.isEmpty {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading studios...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading studios...")
             } else if viewModel.studios.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.studios.isEmpty {

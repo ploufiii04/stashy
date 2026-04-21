@@ -32,12 +32,12 @@ struct TVGroupCardView: View {
 
             if group.sceneCountDisplay > 0 {
                 Text("\(group.sceneCountDisplay)")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
                     .background(Color.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .padding(12)
             }
 

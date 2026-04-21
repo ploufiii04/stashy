@@ -63,12 +63,7 @@ struct TagsView: View {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if (viewModel.isLoading && viewModel.tags.isEmpty) || (viewModel.isLoadingSavedFilters && viewModel.savedFilters.isEmpty) {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading tags...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading tags...")
             } else if viewModel.tags.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.tags.isEmpty {
@@ -385,14 +380,6 @@ struct TagsView: View {
                     performSearch()
                 }
             }
-        }
-    }
-
-    private var loadingView: some View {
-        VStack {
-            Spacer()
-            ProgressView("Loading tags...")
-            Spacer()
         }
     }
 

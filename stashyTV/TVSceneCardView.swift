@@ -36,26 +36,26 @@ struct TVSceneCardView: View {
                 HStack(alignment: .top) {
                     if let studio = scene.studio {
                         Text(studio.name.uppercased())
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .tracking(1)
                             .lineLimit(1)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                             .background(Color.black.opacity(0.6))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     
                     Spacer()
                     
                     if let duration = scene.sceneDuration ?? scene.duration, duration > 0 {
                         Text(formatDuration(duration))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                             .background(Color.black.opacity(0.6))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
                 .padding(12)

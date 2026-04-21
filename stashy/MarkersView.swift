@@ -39,12 +39,7 @@ struct MarkersView: View {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
             } else if (viewModel.isLoadingMarkers && viewModel.sceneMarkers.isEmpty) || (viewModel.isLoadingSavedFilters && viewModel.savedFilters.isEmpty) {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading markers...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading markers...")
             } else if viewModel.sceneMarkers.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView { performSearch() }
             } else if viewModel.sceneMarkers.isEmpty {
@@ -55,6 +50,7 @@ struct MarkersView: View {
         }
         .navigationTitle(hideTitle ? "" : "Markers")
         .navigationBarTitleDisplayMode(.inline)
+        .applyAppBackground()
         .conditionalSearchable(isVisible: isSearchVisible, text: $searchText, prompt: "Search markers...")
         .onChange(of: searchText) { oldValue, newValue in
             NSObject.cancelPreviousPerformRequests(withTarget: self)

@@ -72,12 +72,7 @@ struct ServerStatisticsView: View {
                 }
                 .scrollContentBackground(.hidden)
             } else if !hasAttemptedLoad || (!didFailLoad && viewModel.errorMessage == nil) {
-                VStack {
-                    Spacer()
-                    ProgressView("Loading statistics...")
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
+                StandardLoadingView(message: "Loading statistics...")
             } else {
                 ConnectionErrorView { reload() }
             }
