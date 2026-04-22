@@ -22,6 +22,9 @@ struct StashLineView: View {
     @State private var scrollPositionId: String?
     @State private var pendingRestoreId: String?
     @State private var cachedPosts: [StashLinePost] = []
+    @AppStorage("stashline_group_by_orientation") private var groupByOrientation: Bool = true
+    @State private var sessionKeyCache: [String: String] = [:] // imageId -> sessionKey ("" if absent)
+    @State private var shouldScrollToTopAfterReload: Bool = false
     init(performerFilter: GalleryPerformer? = nil, isEmbedded: Bool = false, onPerformerTap: ((GalleryPerformer) -> Void)? = nil) {
         self.externalPerformerFilter = performerFilter
         _performerFilter = State(initialValue: performerFilter)
@@ -40,6 +43,24 @@ struct StashLineView: View {
 
     private func rebuildGroupedPosts() {
         cachedPosts = computeGroupedPosts()
+    }
+
+    private func menuLabelText(_ text: String, systemImage: String, tint: Color? = nil) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .semibold))
+            Text(text)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.85)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+        }
+        .foregroundColor(tint ?? .primary)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 
     var body: some View {
@@ -131,9 +152,7 @@ struct StashLineView: View {
                         HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
                     }
                 } label: {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.primary)
+                    menuLabelText(selectedSortOption.displayName, systemImage: "arrow.up.arrow.down")
                 }
                 .frame(maxWidth: .infinity)
 
@@ -161,9 +180,11 @@ struct StashLineView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "line.3.horizontal.decrease")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
+                    menuLabelText(
+                        selectedFilter?.name ?? "Filter",
+                        systemImage: "line.3.horizontal.decrease",
+                        tint: selectedFilter != nil ? appearanceManager.tintColor : .primary
+                    )
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -225,26 +246,49 @@ struct StashLineView: View {
                 pendingRestoreId = nil
                 DispatchQueue.main.async { scrollPositionId = id }
             }
+            if wasLoading && !isLoading, shouldScrollToTopAfterReload {
+                shouldScrollToTopAfterReload = false
+                DispatchQueue.main.async {
+                    // After reload/group rebuild, jump to the first post if available.
+                    if let first = cachedPosts.first?.id {
+                        scrollPositionId = first
+                    } else {
+                        scrollPositionId = nil
+                    }
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
             selectedFilter = nil
             performSearch()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
-            if let targetId = notification.userInfo?["performerId"] as? String,
-               let newPath = notification.userInfo?["newImagePath"] as? String {
-                if performerFilter?.id == targetId {
-                    performerFilter?.image_path = newPath
+            guard let targetId = notification.userInfo?["performerId"] as? String,
+                  let newPath = notification.userInfo?["newImagePath"] as? String else { return }
+            if performerFilter?.id == targetId {
+                performerFilter?.image_path = newPath
+            }
+            // Patch allImages so future rebuilds have the correct URL.
+            for i in 0..<viewModel.allImages.count {
+                if var mutablePerformers = viewModel.allImages[i].performers,
+                   let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId }) {
+                    mutablePerformers[pIndex].image_path = newPath
+                    viewModel.allImages[i].performers = mutablePerformers
                 }
-                
-                // Update avatars in this specific view model's list
-                for i in 0..<viewModel.allImages.count {
-                    if var mutablePerformers = viewModel.allImages[i].performers, 
-                       let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId }) {
-                        mutablePerformers[pIndex].image_path = newPath
-                        viewModel.allImages[i].performers = mutablePerformers
-                    }
+            }
+            // Update cachedPosts in-place so the avatar refreshes without
+            // replacing the array (which would cause the scroll view to jump).
+            cachedPosts = cachedPosts.map { post in
+                let updatedImages = post.images.map { img -> StashImage in
+                    guard var mutablePerformers = img.performers,
+                          let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId })
+                    else { return img }
+                    var mutableImg = img
+                    mutablePerformers[pIndex].image_path = newPath
+                    mutableImg.performers = mutablePerformers
+                    return mutableImg
                 }
+                return StashLinePost(images: updatedImages)
             }
         }
         .onChange(of: scrollPositionId) { _, newId in
@@ -356,81 +400,151 @@ struct StashLineView: View {
         }
         selectedSortOption = newOption
         TabManager.shared.setSortOption(for: .stashline, option: newOption.rawValue)
+        // Reset scroll state so the list cleanly jumps to the top after the reload.
+        shouldScrollToTopAfterReload = true
+        pendingRestoreId = nil
+        scrollPositionId = nil
+        if let pid = performerFilter?.id {
+            coordinator.picsPerformerScrollIds[pid] = nil
+        } else {
+            coordinator.picsGlobalScrollId = nil
+        }
         performSearch()
     }
 
-    // Group images by stable key (basename + performerIds + time anchor).
-    // Non-consecutive grouping: all images sharing a key are merged regardless of position.
-    // Order of first appearance determines post order in feed (for Random).
     private func computeGroupedPosts() -> [StashLinePost] {
-        var groups: [String: [StashImage]] = [:]
-        var insertionOrder: [String] = []
-
-        let anchor: StashLinePost.TimeAnchor = {
+        // Future grouping rules (requested):
+        // - We only group while sorting by Date or Created.
+        // - Grouping is *consecutive*: iterate the already-sorted list and keep
+        //   appending as long as performer-set + gallery-set + orientation stay identical.
+        // - No filename/session parsing; no non-consecutive merging.
+        let shouldGroupConsecutively: Bool = {
             switch selectedSortOption {
-            case .dateAsc, .dateDesc:
-                return .date
-            case .createdAtAsc, .createdAtDesc:
-                return .createdAt
+            case .dateAsc, .dateDesc, .createdAtAsc, .createdAtDesc:
+                return true
             default:
-                return .bestEffort
+                return false
             }
         }()
 
-        for image in viewModel.allImages {
-            if let key = StashLinePost.groupKey(for: image, anchor: anchor) {
-                if groups[key] == nil {
-                    groups[key] = []
-                    insertionOrder.append(key)
+        func performerKey(_ image: StashImage) -> String {
+            let ids = (image.performers ?? []).map(\.id).sorted()
+            return ids.joined(separator: ",")
+        }
+
+        func galleryKey(_ image: StashImage) -> String {
+            // Use only the first (alphabetically) gallery ID so images that share
+            // a gallery but also belong to other galleries still group together.
+            return (image.galleries ?? []).map(\.id).sorted().first ?? ""
+        }
+
+        // Resolved orientation (independent of groupByOrientation toggle).
+        func resolvedOrientationKey(_ image: StashImage) -> String {
+            if let w = image.visual_files?.first?.width,
+               let h = image.visual_files?.first?.height, h > 0 {
+                return (w >= h) ? "L" : "P"
+            }
+            return "P" // treat unknown as portrait
+        }
+
+        func sessionKey(_ image: StashImage) -> String {
+            // Optional grouping discriminator: if the stash-generated filename contains
+            // a session timestamp between "_-_" and the trailing "_<digits>", use it.
+            // Example: "042_-_2026-01-12_12-39-43_0.jpg" -> "2026-01-12_12-39-43"
+            if let cached = sessionKeyCache[image.id] { return cached }
+            let path = image.visual_files?.first?.path ?? image.paths?.image
+            guard let path else {
+                sessionKeyCache[image.id] = ""
+                return ""
+            }
+            let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            // Fast pre-check to avoid regex unless it can possibly match.
+            guard filename.contains("_-_") else {
+                sessionKeyCache[image.id] = ""
+                return ""
+            }
+            guard let match = filename.range(of: #"(?<=_-_).+(?=_\d+$)"#, options: .regularExpression) else {
+                sessionKeyCache[image.id] = ""
+                return ""
+            }
+            let key = String(filename[match])
+            sessionKeyCache[image.id] = key
+            return key
+        }
+
+        // Extracts the trailing counter (_0, _1, _42 …) from the filename for in-group ordering.
+        func imageIndex(_ image: StashImage) -> Int {
+            let path = image.visual_files?.first?.path ?? image.paths?.image ?? ""
+            let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            guard let match = filename.range(of: #"_(\d+)$"#, options: .regularExpression) else { return 0 }
+            return Int(filename[match].dropFirst()) ?? 0
+        }
+
+        // Segment key:
+        // - Always uses performer set
+        // - Uses sessionKey when available (best discriminator for "image sets")
+        // - Falls back to primary gallery only when sessionKey is missing
+        // (Orientation never breaks the segment; it is only split inside flush()).
+        func groupKey(_ image: StashImage) -> String {
+            let session = sessionKey(image)
+            if !session.isEmpty {
+                return "\(performerKey(image))|\(galleryKey(image))|\(session)"
+            }
+            return "\(performerKey(image))|\(galleryKey(image))"
+        }
+
+        guard shouldGroupConsecutively else {
+            // No grouping in other sorts: keep the feed exactly as delivered.
+            return viewModel.allImages.map { StashLinePost(images: [$0]) }
+        }
+
+        var posts: [StashLinePost] = []
+        var currentKey: String? = nil
+        var buffer: [StashImage] = []
+
+        func flush() {
+            guard !buffer.isEmpty else { return }
+            defer { buffer.removeAll(keepingCapacity: true) }
+
+            if groupByOrientation {
+                // Split buffer into portrait and landscape sub-posts,
+                // preserving the order of first appearance of each orientation.
+                var portrait: [StashImage] = []
+                var landscape: [StashImage] = []
+                var firstOrientation: String? = nil
+                for img in buffer {
+                    let ori = resolvedOrientationKey(img)
+                    if firstOrientation == nil { firstOrientation = ori }
+                    if ori == "L" { landscape.append(img) } else { portrait.append(img) }
                 }
-                groups[key]!.append(image)
+                let groups: [[StashImage]] = (firstOrientation == "L")
+                    ? [landscape, portrait]
+                    : [portrait, landscape]
+                for group in groups where !group.isEmpty {
+                    posts.append(StashLinePost(images: group.sorted { imageIndex($0) < imageIndex($1) }))
+                }
             } else {
-                // No groupable key → single post, use image id as unique key
-                let fallback = "solo-\(image.id)"
-                groups[fallback] = [image]
-                insertionOrder.append(fallback)
+                // No orientation split – all images in one post, sorted by filename index.
+                posts.append(StashLinePost(images: buffer.sorted { imageIndex($0) < imageIndex($1) }))
             }
         }
 
-        // Deterministic group ordering (so global vs performer views match)
-        // Key formats:
-        // - grouped: performerId|timeKey|galleryIds|sessionKey|orientation
-        // - solo: solo-<imageId>
-        let sortedKeys: [String] = groups.keys.sorted { a, b in
-            let aa = StashLinePost.groupSortComponents(fromKey: a)
-            let bb = StashLinePost.groupSortComponents(fromKey: b)
-            // Descending by timeKey/session (newer first), then performer, then rest
-            if aa.timeKey != bb.timeKey { return aa.timeKey > bb.timeKey }
-            if aa.session != bb.session { return aa.session > bb.session }
-            if aa.performer != bb.performer { return aa.performer > bb.performer }
-            if aa.gallery != bb.gallery { return aa.gallery > bb.gallery }
-            if aa.orientation != bb.orientation { return aa.orientation > bb.orientation }
-            return a > b
-        }
-
-        // Random sort: preserve server order, only group (no additional sorting here).
-        let keys: [String] = (selectedSortOption == .random) ? insertionOrder : sortedKeys
-
-        // Hold back newest group while more pages may load — it could grow
-        let firstKey = keys.first
-        let posts = keys.compactMap { key -> StashLinePost? in
-            guard var images = groups[key] else { return nil }
-
-            // Stable ordering within a group (based on filename index suffix)
-            images.sort { lhs, rhs in
-                let li = StashLinePost.imageOrderIndex(lhs)
-                let ri = StashLinePost.imageOrderIndex(rhs)
-                if li != ri { return li < ri }
-                return lhs.id < rhs.id
+        for image in viewModel.allImages {
+            let key = groupKey(image)
+            if currentKey == nil {
+                currentKey = key
+                buffer = [image]
+                continue
             }
-
-            // If newest group is incomplete (still loading), skip unless multi-image
-            if key == firstKey && viewModel.hasMoreImages && images.count == 1
-                && StashLinePost.groupKey(for: images[0], anchor: anchor) != nil {
-                return nil
+            if key == currentKey {
+                buffer.append(image)
+            } else {
+                flush()
+                currentKey = key
+                buffer = [image]
             }
-            return StashLinePost(images: images)
         }
+        flush()
 
         return posts
     }
@@ -524,7 +638,9 @@ struct StashLinePost: Identifiable {
         let timeKeyRaw: String? = {
             switch anchor {
             case .date:
-                return (image.date?.isEmpty == false ? image.date : nil)
+                // When sorting/grouping by "Date", prefer the explicit shoot/metadata date,
+                // but fall back to DB timestamp so sets still group when `date` is missing.
+                return (image.date?.isEmpty == false ? image.date : (image.createdAt?.isEmpty == false ? image.createdAt : nil))
             case .createdAt:
                 return (image.createdAt?.isEmpty == false ? image.createdAt : nil)
             case .bestEffort:
@@ -618,6 +734,9 @@ struct StashLinePostView: View {
     @State private var performerDetailTarget: GalleryPerformer?
     @State private var showPerformerDetail = false
     @AppStorage("stashline_crop_enabled") private var cropEnabled = true
+    @AppStorage("stashline_group_by_orientation") private var groupByOrientation: Bool = true
+    @State private var isFullScreenPresented: Bool = false
+    @State private var fullScreenImages: [StashImage]
     
     private let actionIconSize: CGFloat = 16
     private let actionIconFrame: CGFloat = 22
@@ -640,6 +759,7 @@ struct StashLinePostView: View {
         self.onPerformerTap = onPerformerTap
         self._oCounters = State(initialValue: [:])
         self._ratings = State(initialValue: [:])
+        self._fullScreenImages = State(initialValue: post.images)
     }
 
     var body: some View {
@@ -650,6 +770,21 @@ struct StashLinePostView: View {
             // Image + overlaid action bar
             imageArea
                 .overlay(alignment: .bottom) { actionBar }
+                .overlay(alignment: .topLeading) {
+                    Button {
+                        // Sync current post images into the viewer
+                        fullScreenImages = post.images
+                        isFullScreenPresented = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                            .clipShape(Circle())
+                    }
+                    .padding(10)
+                }
 
             HStack(alignment: .top) {
                 if let title = image.title, !title.isEmpty {
@@ -765,6 +900,28 @@ struct StashLinePostView: View {
         .sheet(item: $activeShareWrapper) { wrapper in
             ShareSheet(items: wrapper.items)
         }
+        #if !os(tvOS)
+        .fullScreenCover(isPresented: $isFullScreenPresented) {
+            NavigationStack {
+                FullScreenImageView(
+                    images: $fullScreenImages,
+                    selectedImageId: image.id,
+                    onLoadMore: nil
+                )
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            isFullScreenPresented = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(appearanceManager.tintColor)
+                        }
+                    }
+                }
+            }
+        }
+        #endif
     }
 
     // MARK: - Header
@@ -902,17 +1059,41 @@ struct StashLinePostView: View {
 
     // MARK: - Image
 
+    // When orientation grouping is disabled, a post can contain mixed orientations.
+    // In that case the first image's ratio pins the container height so it never
+    // jumps while swiping. With orientation grouping on, all images share the same
+    // orientation anyway, so the behaviour is identical.
+    private var containerAspectRatio: CGFloat {
+        let anchor = groupByOrientation ? image : (post.images.first ?? image)
+        return imageAspectRatio(for: anchor)
+    }
+
     private var imageArea: some View {
         ZStack(alignment: .bottom) {
             if post.isSet {
                 ZStack(alignment: .topTrailing) {
-                    TabView(selection: $carouselIndex) {
-                        ForEach(Array(post.images.enumerated()), id: \.offset) { index, img in
-                            singleImageView(img, ratio: imageAspectRatio(for: img)).tag(index)
+                    GeometryReader { geo in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 0) {
+                                ForEach(Array(post.images.enumerated()), id: \.offset) { index, img in
+                                    singleImageView(img, ratio: imageAspectRatio(for: img))
+                                        .frame(width: geo.size.width)
+                                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                                            content.opacity(phase.isIdentity ? 1 : 0.97)
+                                        }
+                                        .id(index)
+                                }
+                            }
+                            .scrollTargetLayout()
                         }
+                        .scrollTargetBehavior(.viewAligned)
+                        .scrollPosition(id: Binding(
+                            get: { carouselIndex },
+                            set: { carouselIndex = $0 ?? 0 }
+                        ))
+                        .frame(width: geo.size.width)
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .aspectRatio(imageAspectRatio(for: image), contentMode: .fit)
+                    .aspectRatio(containerAspectRatio, contentMode: .fit)
                     .clipped()
 
                     // Page indicator pill — top right

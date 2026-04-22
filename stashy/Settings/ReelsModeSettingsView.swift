@@ -13,6 +13,20 @@ struct ReelsModeSettingsView: View {
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @StateObject private var viewModel = StashDBViewModel()
 
+    @ViewBuilder
+    private func reelsSettingRow(title: String, @ViewBuilder trailing: () -> some View) -> some View {
+        HStack(spacing: 0) {
+            Text(title)
+                .foregroundColor(.secondary)
+                .font(.subheadline)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            trailing()
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .frame(minHeight: 36)
+    }
+
     private var isEnabled: Bool {
         tabManager.tabs.first(where: { $0.id == .reels })?.isVisible ?? true
     }
@@ -64,34 +78,35 @@ struct ReelsModeSettingsView: View {
                                 .padding(.vertical, 8)
 
                             // Default Sort
-                            HStack {
-                                Text("Default Sort")
-                                    .foregroundColor(.secondary)
-                                    .font(.subheadline)
-                                Spacer()
+                            reelsSettingRow(title: "Default Sort") {
                                 sortPicker(for: modeConfig.type)
                             }
 
                             // Default Filter
-                            HStack {
-                                Text("Default Filter")
-                                    .foregroundColor(.secondary)
-                                    .font(.subheadline)
-                                Spacer()
+                            reelsSettingRow(title: "Default Filter") {
                                 filterPicker(for: modeConfig.type)
                             }
                             .padding(.top, 4)
 
                             if modeConfig.type == .pics {
-                                Toggle(isOn: Binding(
-                                    get: { UserDefaults.standard.object(forKey: "stashline_crop_enabled") as? Bool ?? true },
-                                    set: { UserDefaults.standard.set($0, forKey: "stashline_crop_enabled") }
-                                )) {
-                                    Text("Crop to 4:5 / 16:9")
-                                        .foregroundColor(.secondary)
-                                        .font(.subheadline)
+                                reelsSettingRow(title: "Crop to 4:5 / 16:9") {
+                                    Toggle("", isOn: Binding(
+                                        get: { UserDefaults.standard.object(forKey: "stashline_crop_enabled") as? Bool ?? true },
+                                        set: { UserDefaults.standard.set($0, forKey: "stashline_crop_enabled") }
+                                    ))
+                                    .labelsHidden()
+                                    .tint(appearanceManager.tintColor)
                                 }
-                                .tint(appearanceManager.tintColor)
+                                .padding(.top, 4)
+
+                                reelsSettingRow(title: "Group by Orientation") {
+                                    Toggle("", isOn: Binding(
+                                        get: { UserDefaults.standard.object(forKey: "stashline_group_by_orientation") as? Bool ?? true },
+                                        set: { UserDefaults.standard.set($0, forKey: "stashline_group_by_orientation") }
+                                    ))
+                                    .labelsHidden()
+                                    .tint(appearanceManager.tintColor)
+                                }
                                 .padding(.top, 4)
                             }
                         }
@@ -123,65 +138,75 @@ struct ReelsModeSettingsView: View {
     private func sortPicker(for type: ReelsModeType) -> some View {
         switch type {
         case .scenes:
-            Picker("", selection: Binding(
-                get: { StashDBViewModel.SceneSortOption(rawValue: tabManager.getReelsDefaultSort(for: .scenes) ?? "") ?? .random },
-                set: { tabManager.setReelsDefaultSort(for: .scenes, option: $0.rawValue) }
-            )) {
+            let current = StashDBViewModel.SceneSortOption(rawValue: tabManager.getReelsDefaultSort(for: .scenes) ?? "") ?? .random
+            Menu {
                 ForEach(StashDBViewModel.SceneSortOption.allCases, id: \.self) { option in
-                    Text(option.displayName).tag(option)
+                    Button(action: { tabManager.setReelsDefaultSort(for: .scenes, option: option.rawValue) }) {
+                        HStack { Text(option.displayName); if option == current { Image(systemName: "checkmark") } }
+                    }
                 }
+            } label: {
+                pickerLabelText(current.displayName)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
 
         case .markers:
-            Picker("", selection: Binding(
-                get: { StashDBViewModel.SceneMarkerSortOption(rawValue: tabManager.getReelsDefaultSort(for: .markers) ?? "") ?? .random },
-                set: { tabManager.setReelsDefaultSort(for: .markers, option: $0.rawValue) }
-            )) {
+            let current = StashDBViewModel.SceneMarkerSortOption(rawValue: tabManager.getReelsDefaultSort(for: .markers) ?? "") ?? .random
+            Menu {
                 ForEach(StashDBViewModel.SceneMarkerSortOption.allCases, id: \.self) { option in
-                    Text(option.displayName).tag(option)
+                    Button(action: { tabManager.setReelsDefaultSort(for: .markers, option: option.rawValue) }) {
+                        HStack { Text(option.displayName); if option == current { Image(systemName: "checkmark") } }
+                    }
                 }
+            } label: {
+                pickerLabelText(current.displayName)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
 
         case .clips:
-            Picker("", selection: Binding(
-                get: { StashDBViewModel.ImageSortOption(rawValue: tabManager.getReelsDefaultSort(for: .clips) ?? "") ?? .random },
-                set: { tabManager.setReelsDefaultSort(for: .clips, option: $0.rawValue) }
-            )) {
+            let current = StashDBViewModel.ImageSortOption(rawValue: tabManager.getReelsDefaultSort(for: .clips) ?? "") ?? .random
+            Menu {
                 ForEach(StashDBViewModel.ImageSortOption.allCases, id: \.self) { option in
-                    Text(option.displayName).tag(option)
+                    Button(action: { tabManager.setReelsDefaultSort(for: .clips, option: option.rawValue) }) {
+                        HStack { Text(option.displayName); if option == current { Image(systemName: "checkmark") } }
+                    }
                 }
+            } label: {
+                pickerLabelText(current.displayName)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
 
         case .previews:
-            Picker("", selection: Binding(
-                get: { StashDBViewModel.SceneSortOption(rawValue: tabManager.getReelsDefaultSort(for: .previews) ?? "") ?? .random },
-                set: { tabManager.setReelsDefaultSort(for: .previews, option: $0.rawValue) }
-            )) {
+            let current = StashDBViewModel.SceneSortOption(rawValue: tabManager.getReelsDefaultSort(for: .previews) ?? "") ?? .random
+            Menu {
                 ForEach(StashDBViewModel.SceneSortOption.allCases, id: \.self) { option in
-                    Text(option.displayName).tag(option)
+                    Button(action: { tabManager.setReelsDefaultSort(for: .previews, option: option.rawValue) }) {
+                        HStack { Text(option.displayName); if option == current { Image(systemName: "checkmark") } }
+                    }
                 }
+            } label: {
+                pickerLabelText(current.displayName)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
 
         case .pics:
-            Picker("", selection: Binding(
-                get: { StashDBViewModel.ImageSortOption(rawValue: tabManager.getPersistentSortOption(for: .stashline) ?? "") ?? .dateDesc },
-                set: { tabManager.setPersistentSortOption(for: .stashline, option: $0.rawValue) }
-            )) {
+            let current = StashDBViewModel.ImageSortOption(rawValue: tabManager.getPersistentSortOption(for: .stashline) ?? "") ?? .dateDesc
+            Menu {
                 ForEach(StashDBViewModel.ImageSortOption.allCases, id: \.self) { option in
-                    Text(option.displayName).tag(option)
+                    Button(action: { tabManager.setPersistentSortOption(for: .stashline, option: option.rawValue) }) {
+                        HStack { Text(option.displayName); if option == current { Image(systemName: "checkmark") } }
+                    }
                 }
+            } label: {
+                pickerLabelText(current.displayName)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
         }
+    }
+
+    // Menu-style Pickers tend to wrap the label in tight HStacks (List rows).
+    // Provide an explicit label view with single-line truncation + min width.
+    private func pickerLabelText(_ text: String) -> some View {
+        Text(text)
+            .foregroundColor(.secondary)
+            .font(.subheadline)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     @ViewBuilder

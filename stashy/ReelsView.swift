@@ -1294,10 +1294,6 @@ struct ReelsView: View {
 
         restoreSessionRandomSeedIfAvailable()
 
-        restorePositionIfAvailable(for: reelsMode, forceIfPrefixMismatch: false)
-        beginPagedRestoreIfNeeded()
-        autoSelectFirstItem()
-
         // Restore session sort/filter for the current mode (prevents resetting to defaults on tab return)
         switch reelsMode {
         case .scenes:
@@ -1331,6 +1327,13 @@ struct ReelsView: View {
         case .pics:
             break
         }
+
+        // IMPORTANT: Restore the session sort/filter BEFORE restoring scroll position.
+        // Otherwise we may auto-select (and persist) the first item from the wrong sort,
+        // which breaks position restore (notably for Clips when using Created sorting).
+        restorePositionIfAvailable(for: reelsMode, forceIfPrefixMismatch: false)
+        beginPagedRestoreIfNeeded()
+        autoSelectFirstItem()
         
         // 1. Initialize reelsMode ONLY if current mode is disabled in settings
         let enabledTypes = tabManager.enabledReelsModes
@@ -2821,6 +2824,9 @@ struct ReelItemView: View {
     var playTrigger: Int
     @Environment(\.verticalSizeClass) var verticalSizeClass
     @State private var timeObserver: Any?
+    /// Bumped on each `setupPlayer` / `cleanupPlayer` so in-flight `fetchSceneStreams`
+    /// completions cannot attach a new `AVPlayerItem` after the user has scrolled away.
+    @State private var playerSetupGeneration: Int = 0
     @State private var showTagsOverlay = false
     @Binding var isMenuOpen: Bool
     @Binding var isZoomed: Bool
@@ -2881,14 +2887,16 @@ extension ReelItemView {
     private func applyPlaybackLifecycleModifiers<V: View>(_ content: V) -> some View {
         content
             .onAppear {
-                setupPlayer()
+                // Critical: do **not** call `setupPlayer()` for off-screen rows. During
+                // fast scroll every flashed cell would otherwise spawn HLS + a
+                // `fetchSceneStreams` round-trip — that saturates Stash/ffmpeg.
                 if isActive {
+                    setupPlayer()
                     onInteraction()
                     if item.isAnimated { startAnimationAdvanceTimer() }
                 } else {
-                    // Deferred autoplay: after a filter change, onAppear fires before
-                    // autoSelectFirstItem has set currentVisibleSceneId. Check again
-                    // shortly after to start playback once the item becomes active.
+                    // Deferred autoplay: after a filter change, onAppear can run before
+                    // `currentVisibleSceneId` is set. Retry shortly if this row became active.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         if isActive && isPlaying && !isRotating {
                             if player == nil { setupPlayer() }
@@ -3230,22 +3238,26 @@ extension ReelItemView {
     func setupPlayer() {
         // Animations don't need AVPlayer
         guard !item.isAnimated else { return }
+
+        playerSetupGeneration &+= 1
+        let generation = playerSetupGeneration
         
         guard item.sceneID != nil else {
-            if let url = item.videoURL { initPlayer(with: url) }
+            if let url = item.videoURL { initPlayer(with: url, generation: generation) }
             return
         }
         
         // 1. Start with the immediate URL (legacy or cached) for instant playback
         if let url = item.videoURL {
-            initPlayer(with: url)
+            initPlayer(with: url, generation: generation)
         }
         
-        // 2. Performance: Fetch best stream immediately (optimized for preloading)
-        updateBestStream()
+        // 2. Fetch best stream (MP4/HLS) only for the **active** reel — never for
+        //    rows that only flashed past (those no longer call `setupPlayer`).
+        updateBestStream(generation: generation)
     }
     
-    private func updateBestStream() {
+    private func updateBestStream(generation: Int) {
         guard let sid = item.sceneID else { return }
         
         // Optimization: If we are already using a local file, don't bother fetching streams
@@ -3257,6 +3269,7 @@ extension ReelItemView {
         
         // Background fetch for the "best" stream (MP4/HLS)
         viewModel.fetchSceneStreams(sceneId: sid) { streams in
+            guard generation == self.playerSetupGeneration else { return }
             guard !streams.isEmpty else { return }
             
             let quality = ServerConfigManager.shared.activeConfig?.reelsQuality ?? .sd
@@ -3279,13 +3292,14 @@ extension ReelItemView {
                 let currentURL = (player?.currentItem?.asset as? AVURLAsset)?.url
                 if currentURL?.path != targetURL.path {
                     // Priority: Upgrade to MP4 if current is legacy, or better HLS if current is HLS
-                    initPlayer(with: targetURL)
+                    self.initPlayer(with: targetURL, generation: generation)
                 }
             }
         }
     }
     
-    private func initPlayer(with streamURL: URL) {
+    private func initPlayer(with streamURL: URL, generation: Int) {
+        guard generation == playerSetupGeneration else { return }
         let headers = ["ApiKey": ServerConfigManager.shared.activeConfig?.secureApiKey ?? ""]
         let authenticatedURL = signedURL(streamURL) ?? streamURL
         let asset = AVURLAsset(url: authenticatedURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
@@ -3393,6 +3407,7 @@ extension ReelItemView {
     }
     
     func cleanupPlayer() {
+        playerSetupGeneration &+= 1
         player?.pause()
         if let timeObserver = timeObserver {
             player?.removeTimeObserver(timeObserver)

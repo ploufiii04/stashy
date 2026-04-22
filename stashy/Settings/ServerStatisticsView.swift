@@ -22,6 +22,8 @@ struct ServerStatisticsView: View {
                     if let stats = viewModel.statistics {
                         Section("Catalogs") {
                             statRow("Scenes", value: "\(stats.sceneCount)")
+                            statRow("Galleries", value: "\(stats.galleryCount)")
+                            statRow("Images", value: "\(stats.imageCount)")
                             statRow("Markers", value: "\(stats.sceneMarkerCount ?? 0)")
                             statRow("Studios", value: "\(stats.studioCount)")
                             statRow("Groups", value: "\(stats.groupCount)")

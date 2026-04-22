@@ -12,6 +12,18 @@ struct DefaultFilterView: View {
     @StateObject private var viewModel = StashDBViewModel()
     @ObservedObject var tabManager = TabManager.shared
 
+    // Menu-style Pickers in List rows will happily wrap long labels, inflating row height.
+    // Force a single line + fixed width so the row stays compact.
+    private func pickerLabelText(_ text: String) -> some View {
+        Text(text)
+            .foregroundColor(.secondary)
+            .font(.subheadline)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(width: 220, alignment: .trailing)
+            .minimumScaleFactor(0.85)
+    }
+
     var body: some View {
         List {
             Section {
@@ -74,6 +86,9 @@ struct DefaultFilterView: View {
 
             HStack {
                 Label(title, systemImage: icon)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+                    .layoutPriority(1)
                 Spacer()
 
                 if filters.isEmpty && !viewModel.isLoadingSavedFilters {
@@ -81,24 +96,21 @@ struct DefaultFilterView: View {
                         .foregroundColor(.secondary)
                         .font(.subheadline)
                 } else {
-                    Picker("", selection: Binding(
-                        get: { currentId ?? "" },
-                        set: { newId in
-                            if newId.isEmpty {
-                                tabManager.setDefaultFilter(for: tab, filterId: nil, filterName: nil)
-                            } else if let filter = filters.first(where: { $0.id == newId }) {
-                                tabManager.setDefaultFilter(for: tab, filterId: filter.id, filterName: filter.name)
+                    let current = currentId ?? ""
+                    Menu {
+                        Button(action: { tabManager.setDefaultFilter(for: tab, filterId: nil, filterName: nil) }) {
+                            HStack { Text("None"); if current.isEmpty { Image(systemName: "checkmark") } }
+                        }
+                        Divider()
+                        ForEach(filters) { filter in
+                            Button(action: { tabManager.setDefaultFilter(for: tab, filterId: filter.id, filterName: filter.name) }) {
+                                HStack { Text(filter.name); if filter.id == current { Image(systemName: "checkmark") } }
                             }
                         }
-                    )) {
-                        Text("None").tag("")
-
-                        ForEach(filters) { filter in
-                            Text(filter.name).tag(filter.id)
-                        }
+                    } label: {
+                        let currentName = filters.first(where: { $0.id == current })?.name ?? "None"
+                        pickerLabelText(currentName)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
                 }
             }
         }
@@ -116,6 +128,9 @@ struct DefaultFilterView: View {
 
         HStack {
             Label(title, systemImage: icon)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .layoutPriority(1)
             Spacer()
 
             if filters.isEmpty && !viewModel.isLoadingSavedFilters {
@@ -123,24 +138,21 @@ struct DefaultFilterView: View {
                     .foregroundColor(.secondary)
                     .font(.subheadline)
             } else {
-                Picker("", selection: Binding(
-                    get: { currentId ?? "" },
-                    set: { newId in
-                        if newId.isEmpty {
-                            tabManager.setDefaultMarkerFilter(for: tab, filterId: nil, filterName: nil)
-                        } else if let filter = filters.first(where: { $0.id == newId }) {
-                            tabManager.setDefaultMarkerFilter(for: tab, filterId: filter.id, filterName: filter.name)
+                let current = currentId ?? ""
+                Menu {
+                    Button(action: { tabManager.setDefaultMarkerFilter(for: tab, filterId: nil, filterName: nil) }) {
+                        HStack { Text("None"); if current.isEmpty { Image(systemName: "checkmark") } }
+                    }
+                    Divider()
+                    ForEach(filters) { filter in
+                        Button(action: { tabManager.setDefaultMarkerFilter(for: tab, filterId: filter.id, filterName: filter.name) }) {
+                            HStack { Text(filter.name); if filter.id == current { Image(systemName: "checkmark") } }
                         }
                     }
-                )) {
-                    Text("None").tag("")
-
-                    ForEach(filters) { filter in
-                        Text(filter.name).tag(filter.id)
-                    }
+                } label: {
+                    let currentName = filters.first(where: { $0.id == current })?.name ?? "None"
+                    pickerLabelText(currentName)
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
             }
         }
     }
