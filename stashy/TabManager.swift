@@ -828,8 +828,8 @@ class TabManager: ObservableObject {
     
     var enabledTools: [ToolsItem] {
         let sorted = tools.sorted { $0.sortOrder < $1.sortOrder }
-        let enabledNonFixed = sorted.filter { $0.id != .downloads && $0.isEnabled }.map(\.id)
-        return [.downloads] + enabledNonFixed
+        // Downloads is enforced enabled; keep order fully user-controlled.
+        return sorted.filter { $0.isEnabled }.map(\.id)
     }
     
     func toggleTool(_ item: ToolsItem) {
@@ -841,41 +841,24 @@ class TabManager: ObservableObject {
         }
     }
     
-    /// Reorder only non-fixed tools; Downloads stays anchored.
+    /// Reorder tools (Downloads is movable but always enabled).
     func moveTools(from source: IndexSet, to destination: Int) {
-        var movable = tools
-            .filter { $0.id != .downloads }
-            .sorted { $0.sortOrder < $1.sortOrder }
-        movable.move(fromOffsets: source, toOffset: destination)
-        
-        // Rebuild with downloads anchored first
-        var rebuilt: [ToolsItemConfig] = []
-        rebuilt.append(ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0))
-        for (i, item) in movable.enumerated() {
-            rebuilt.append(ToolsItemConfig(id: item.id, isEnabled: item.isEnabled, sortOrder: i + 1))
+        var reordered = tools.sorted { $0.sortOrder < $1.sortOrder }
+        reordered.move(fromOffsets: source, toOffset: destination)
+        tools = reordered.enumerated().map { idx, item in
+            ToolsItemConfig(id: item.id, isEnabled: item.isEnabled, sortOrder: idx)
         }
-        tools = rebuilt
         saveTools()
         objectWillChange.send()
     }
     
     private func enforceFixedTools() {
-        // Ensure downloads exists, enabled, and anchored at sortOrder 0
+        // Ensure downloads exists and is always enabled (but not anchored).
         if let idx = tools.firstIndex(where: { $0.id == .downloads }) {
             tools[idx].isEnabled = true
         } else {
-            tools.append(ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0))
+            tools.append(ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: (tools.map(\.sortOrder).max() ?? 0) + 1))
         }
-        
-        // Reassign sort orders: downloads = 0, rest increasing
-        let nonFixed = tools
-            .filter { $0.id != .downloads }
-            .sorted { $0.sortOrder < $1.sortOrder }
-        
-        tools = [ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0)]
-            + nonFixed.enumerated().map { i, item in
-                ToolsItemConfig(id: item.id, isEnabled: item.isEnabled, sortOrder: i + 1)
-            }
     }
 
     func saveReelsModes() {

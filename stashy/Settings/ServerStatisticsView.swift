@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if canImport(Charts)
+import Charts
+#endif
 
 struct ServerStatisticsView: View {
     @ObservedObject var viewModel: StashDBViewModel
@@ -21,6 +24,18 @@ struct ServerStatisticsView: View {
                 List {
                     if let stats = viewModel.statistics {
                         Section("Catalogs") {
+#if canImport(Charts)
+                            CatalogsBarChart(data: [
+                                .init(title: "Scenes", value: stats.sceneCount),
+                                .init(title: "Galleries", value: stats.galleryCount),
+                                .init(title: "Images", value: stats.imageCount),
+                                .init(title: "Markers", value: stats.sceneMarkerCount ?? 0),
+                                .init(title: "Studios", value: stats.studioCount),
+                                .init(title: "Groups", value: stats.groupCount),
+                                .init(title: "Tags", value: stats.tagCount),
+                            ])
+                            .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
+#else
                             statRow("Scenes", value: "\(stats.sceneCount)")
                             statRow("Galleries", value: "\(stats.galleryCount)")
                             statRow("Images", value: "\(stats.imageCount)")
@@ -28,6 +43,7 @@ struct ServerStatisticsView: View {
                             statRow("Studios", value: "\(stats.studioCount)")
                             statRow("Groups", value: "\(stats.groupCount)")
                             statRow("Tags", value: "\(stats.tagCount)")
+#endif
                         }
                         .listRowBackground(Color.secondaryAppBackground)
 
@@ -138,3 +154,54 @@ struct ServerStatisticsView: View {
         return "\(hours)h \(minutes)m"
     }
 }
+
+#if canImport(Charts)
+private struct CatalogsBarChart: View {
+    struct Entry: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: Int
+    }
+
+    let data: [Entry]
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let maxValue = max(data.map(\.value).max() ?? 1, 1)
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Overview")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 12)
+
+            Chart(data) { entry in
+                BarMark(
+                    x: .value("Catalog", entry.title),
+                    y: .value("Count", entry.value)
+                )
+                .foregroundStyle(Color.accentColor)
+                .cornerRadius(4)
+                .annotation(position: .top, alignment: .center) {
+                    Text("\(entry.value)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .chartYScale(domain: 0...Double(maxValue))
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 4))
+            }
+            .chartXAxis {
+                AxisMarks(position: .bottom) { value in
+                    AxisValueLabel()
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(height: 180)
+            .padding(.horizontal, 12)
+        }
+    }
+}
+#endif

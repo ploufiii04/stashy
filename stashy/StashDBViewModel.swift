@@ -4370,18 +4370,50 @@ class StashDBViewModel: ObservableObject {
     }
 
     func deleteImage(imageId: String, completion: @escaping (Bool) -> Void) {
-        let mutation = """
+        guard let config = ServerConfigManager.shared.loadConfig(),
+              config.hasValidConfig else {
+            completion(false)
+            return
+        }
+
+        // 1) Fetch file IDs for the image (so we can delete files like scenes do).
+        //    Stash rescans will re-import the file if we only destroy the DB entity.
+        let fileIdsQuery = """
+        {
+          "query": "query { findImage(id: \\"\(imageId)\\") { visual_files { ... on BaseFile { id } } } }"
+        }
+        """
+
+        // 2) Destroy the image record
+        let destroyMutation = """
         {
           "query": "mutation { imageDestroy(input: { id: \\"\(imageId)\\" }) }"
         }
         """
 
-        print("🗑️ IMAGE DELETE: Deleting image \(imageId)")
-        performGraphQLMutationSilent(query: mutation) { result in
-            if let result = result,
-               let data = result["data"]?.value as? [String: Any],
-               let destroyed = data["imageDestroy"] {
-                print("✅ IMAGE DELETE: Success for image \(imageId). Response: \(destroyed)")
+        print("🗑️ IMAGE DELETE: Deleting image + files \(imageId)")
+        performGraphQLMutationSilent(query: fileIdsQuery) { [weak self] preResult in
+            let fileIds: [String] = {
+                guard
+                    let preResult,
+                    let data = preResult["data"]?.value as? [String: Any],
+                    let findImage = data["findImage"] as? [String: Any],
+                    let visualFiles = findImage["visual_files"] as? [[String: Any]]
+                else { return [] }
+
+                return visualFiles.compactMap { $0["id"] as? String }
+            }()
+
+            self?.performGraphQLMutationSilent(query: destroyMutation) { [weak self] result in
+                guard
+                    let result,
+                    let data = result["data"]?.value as? [String: Any],
+                    data["imageDestroy"] != nil
+                else {
+                    print("❌ IMAGE DELETE: Failed for image \(imageId)")
+                    completion(false)
+                    return
+                }
 
                 // Post notification so other views can update
                 NotificationCenter.default.post(
@@ -4390,10 +4422,21 @@ class StashDBViewModel: ObservableObject {
                     userInfo: ["imageId": imageId]
                 )
 
-                completion(true)
-            } else {
-                print("❌ IMAGE DELETE: Failed for image \(imageId)")
-                completion(false)
+                // 3) Delete the underlying files
+                guard let self, !fileIds.isEmpty else {
+                    print("✅ IMAGE DELETE: Success for image \(imageId) (no files to delete)")
+                    completion(true)
+                    return
+                }
+
+                self.deleteSceneFiles(fileIds: fileIds, config: config) { success in
+                    if success {
+                        print("✅ IMAGE DELETE: Deleted files for image \(imageId)")
+                    } else {
+                        print("❌ IMAGE DELETE: Image destroyed but file deletion failed for \(imageId)")
+                    }
+                    completion(success)
+                }
             }
         }
     }

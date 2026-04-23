@@ -1151,6 +1151,24 @@ struct StashLinePostView: View {
         return cropEnabled ? 4.0 / 5.0 : 1.0
     }
 
+    private func isPortraitImage(_ img: StashImage) -> Bool? {
+        guard let w = img.visual_files?.first?.width, let h = img.visual_files?.first?.height, h > 0 else { return nil }
+        return h > w
+    }
+
+    private func shouldCropImage(_ img: StashImage) -> Bool {
+        guard cropEnabled, !isExpanded else { return false }
+        // When grouping by orientation is off, keep the group's height stable (pinned to first),
+        // but avoid cropping images of the opposite orientation (otherwise they get cropped wrong).
+        if !groupByOrientation, let anchor = post.images.first,
+           let anchorPortrait = isPortraitImage(anchor),
+           let currentPortrait = isPortraitImage(img),
+           anchorPortrait != currentPortrait {
+            return false
+        }
+        return true
+    }
+
     @ViewBuilder
     private func singleImageView(_ img: StashImage, ratio: CGFloat) -> some View {
         ZStack {
@@ -1161,10 +1179,10 @@ struct StashLinePostView: View {
                     if loader.isLoading {
                         ProgressView().frame(maxWidth: .infinity)
                     } else if let loaded = loader.image {
-                        if isExpanded || !cropEnabled {
-                            loaded.resizable().scaledToFit().frame(maxWidth: .infinity)
-                        } else {
+                        if shouldCropImage(img) {
                             loaded.resizable().scaledToFill().frame(maxWidth: .infinity)
+                        } else {
+                            loaded.resizable().scaledToFit().frame(maxWidth: .infinity)
                         }
                     } else {
                         Image(systemName: "photo").font(.system(size: 40)).foregroundColor(.secondary)

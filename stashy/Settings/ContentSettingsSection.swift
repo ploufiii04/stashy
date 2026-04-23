@@ -42,10 +42,8 @@ struct ToolsSettingsView: View {
         tabManager.tabs.first(where: { $0.id == .tools })?.isVisible ?? true
     }
     
-    private var movableTools: [ToolsItemConfig] {
-        tabManager.tools
-            .filter { $0.id != .downloads }
-            .sorted { $0.sortOrder < $1.sortOrder }
+    private var orderedTools: [ToolsItemConfig] {
+        tabManager.tools.sorted { $0.sortOrder < $1.sortOrder }
     }
 
     var body: some View {
@@ -62,23 +60,24 @@ struct ToolsSettingsView: View {
             .listRowBackground(Color.secondaryAppBackground)
 
             Section("Tools Order") {
-                // Anchored Downloads
-                HStack {
-                    Label("Downloads", systemImage: ToolsItem.downloads.icon)
-                    Spacer()
-                    Text("Always Included")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                ForEach(movableTools) { tool in
-                    Toggle(isOn: Binding(
-                        get: { tool.isEnabled },
-                        set: { _ in tabManager.toggleTool(tool.id) }
-                    )) {
-                        Label(tool.id.title, systemImage: tool.id.icon)
+                ForEach(orderedTools) { tool in
+                    if tool.id == .downloads {
+                        HStack {
+                            Label(tool.id.title, systemImage: tool.id.icon)
+                            Spacer()
+                            Text("Always Included")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Toggle(isOn: Binding(
+                            get: { tool.isEnabled },
+                            set: { _ in tabManager.toggleTool(tool.id) }
+                        )) {
+                            Label(tool.id.title, systemImage: tool.id.icon)
+                        }
+                        .tint(appearanceManager.tintColor)
                     }
-                    .tint(appearanceManager.tintColor)
                 }
                 .onMove { indices, newOffset in
                     tabManager.moveTools(from: indices, to: newOffset)
