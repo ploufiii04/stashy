@@ -3990,7 +3990,181 @@ class StashDBViewModel: ObservableObject {
     private var currentClipsPage = 1
     private var currentClipSortOption: ImageSortOption = .dateDesc
     private var currentClipFilter: SavedFilter?
-    
+
+    // MARK: - Reels: freeze main feed when applying performer/tag overlay
+    // Restoring avoids refetch + pagination loss when clearing overlay back to main.
+
+    private struct ReelsFrozenClipsState {
+        let clips: [StashImage]
+        let currentClipsPage: Int
+        let totalClips: Int
+        let hasMoreClips: Bool
+        let currentClipSortOption: ImageSortOption
+        let currentClipFilter: SavedFilter?
+        let visibleItemId: String?
+    }
+
+    private struct ReelsFrozenScenesState {
+        let scenes: [Scene]
+        let currentScenePage: Int
+        let totalScenes: Int
+        let hasMoreScenes: Bool
+        let currentSceneSortOption: SceneSortOption
+        let currentSceneFilter: SavedFilter?
+        let currentSceneSearchQuery: String
+        let visibleItemId: String?
+    }
+
+    private struct ReelsFrozenMarkersState {
+        let sceneMarkers: [SceneMarker]
+        let currentMarkerPage: Int
+        let totalSceneMarkers: Int
+        let hasMoreMarkers: Bool
+        let currentMarkerSortOption: SceneMarkerSortOption
+        let currentMarkerFilter: SavedFilter?
+        let currentMarkerSearchQuery: String
+        let visibleItemId: String?
+    }
+
+    private struct ReelsFrozenPreviewsState {
+        let previews: [Scene]
+        let currentPreviewPage: Int
+        let totalPreviews: Int
+        let hasMorePreviews: Bool
+        let currentPreviewSortOption: SceneSortOption
+        let currentPreviewFilter: SavedFilter?
+        let currentPreviewSearchQuery: String
+        let visibleItemId: String?
+    }
+
+    private var reelsFrozenClips: ReelsFrozenClipsState?
+    private var reelsFrozenScenes: ReelsFrozenScenesState?
+    private var reelsFrozenMarkers: ReelsFrozenMarkersState?
+    private var reelsFrozenPreviews: ReelsFrozenPreviewsState?
+
+    func clearReelsCriterionFrozenSnapshots() {
+        reelsFrozenClips = nil
+        reelsFrozenScenes = nil
+        reelsFrozenMarkers = nil
+        reelsFrozenPreviews = nil
+    }
+
+    func takeReelsFrozenClipsSnapshot(visibleItemId: String?) {
+        reelsFrozenClips = ReelsFrozenClipsState(
+            clips: clips,
+            currentClipsPage: currentClipsPage,
+            totalClips: totalClips,
+            hasMoreClips: hasMoreClips,
+            currentClipSortOption: currentClipSortOption,
+            currentClipFilter: currentClipFilter,
+            visibleItemId: visibleItemId
+        )
+    }
+
+    @discardableResult
+    func restoreReelsFrozenClipsIfAvailable() -> String? {
+        guard let s = reelsFrozenClips else { return nil }
+        clips = s.clips
+        currentClipsPage = s.currentClipsPage
+        totalClips = s.totalClips
+        hasMoreClips = s.hasMoreClips
+        currentClipSortOption = s.currentClipSortOption
+        currentClipFilter = s.currentClipFilter
+        isLoadingClips = false
+        isLoading = false
+        reelsFrozenClips = nil
+        return s.visibleItemId
+    }
+
+    func takeReelsFrozenScenesSnapshot(visibleItemId: String?) {
+        reelsFrozenScenes = ReelsFrozenScenesState(
+            scenes: scenes,
+            currentScenePage: currentScenePage,
+            totalScenes: totalScenes,
+            hasMoreScenes: hasMoreScenes,
+            currentSceneSortOption: currentSceneSortOption,
+            currentSceneFilter: currentSceneFilter,
+            currentSceneSearchQuery: currentSceneSearchQuery,
+            visibleItemId: visibleItemId
+        )
+    }
+
+    @discardableResult
+    func restoreReelsFrozenScenesIfAvailable() -> String? {
+        guard let s = reelsFrozenScenes else { return nil }
+        scenes = s.scenes
+        currentScenePage = s.currentScenePage
+        totalScenes = s.totalScenes
+        hasMoreScenes = s.hasMoreScenes
+        currentSceneSortOption = s.currentSceneSortOption
+        currentSceneFilter = s.currentSceneFilter
+        currentSceneSearchQuery = s.currentSceneSearchQuery
+        isLoadingScenes = false
+        isLoadingMoreScenes = false
+        isLoading = false
+        reelsFrozenScenes = nil
+        return s.visibleItemId
+    }
+
+    func takeReelsFrozenMarkersSnapshot(visibleItemId: String?) {
+        reelsFrozenMarkers = ReelsFrozenMarkersState(
+            sceneMarkers: sceneMarkers,
+            currentMarkerPage: currentMarkerPage,
+            totalSceneMarkers: totalSceneMarkers,
+            hasMoreMarkers: hasMoreMarkers,
+            currentMarkerSortOption: currentMarkerSortOption,
+            currentMarkerFilter: currentMarkerFilter,
+            currentMarkerSearchQuery: currentMarkerSearchQuery,
+            visibleItemId: visibleItemId
+        )
+    }
+
+    @discardableResult
+    func restoreReelsFrozenMarkersIfAvailable() -> String? {
+        guard let s = reelsFrozenMarkers else { return nil }
+        sceneMarkers = s.sceneMarkers
+        currentMarkerPage = s.currentMarkerPage
+        totalSceneMarkers = s.totalSceneMarkers
+        hasMoreMarkers = s.hasMoreMarkers
+        currentMarkerSortOption = s.currentMarkerSortOption
+        currentMarkerFilter = s.currentMarkerFilter
+        currentMarkerSearchQuery = s.currentMarkerSearchQuery
+        isLoadingMarkers = false
+        isLoading = false
+        reelsFrozenMarkers = nil
+        return s.visibleItemId
+    }
+
+    func takeReelsFrozenPreviewsSnapshot(visibleItemId: String?) {
+        reelsFrozenPreviews = ReelsFrozenPreviewsState(
+            previews: previews,
+            currentPreviewPage: currentPreviewPage,
+            totalPreviews: totalPreviews,
+            hasMorePreviews: hasMorePreviews,
+            currentPreviewSortOption: currentPreviewSortOption,
+            currentPreviewFilter: currentPreviewFilter,
+            currentPreviewSearchQuery: currentPreviewSearchQuery,
+            visibleItemId: visibleItemId
+        )
+    }
+
+    @discardableResult
+    func restoreReelsFrozenPreviewsIfAvailable() -> String? {
+        guard let s = reelsFrozenPreviews else { return nil }
+        previews = s.previews
+        currentPreviewPage = s.currentPreviewPage
+        totalPreviews = s.totalPreviews
+        hasMorePreviews = s.hasMorePreviews
+        currentPreviewSortOption = s.currentPreviewSortOption
+        currentPreviewFilter = s.currentPreviewFilter
+        currentPreviewSearchQuery = s.currentPreviewSearchQuery
+        isLoadingPreviews = false
+        isLoadingMorePreviews = false
+        isLoading = false
+        reelsFrozenPreviews = nil
+        return s.visibleItemId
+    }
+
     func fetchClips(sortBy: ImageSortOption = .dateDesc, filter: SavedFilter? = nil, isInitialLoad: Bool = true) {
         if isInitialLoad {
             currentClipsPage = 1

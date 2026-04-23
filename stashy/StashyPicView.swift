@@ -498,6 +498,52 @@ struct StashLineView: View {
             return viewModel.allImages.map { StashLinePost(images: [$0]) }
         }
 
+        // Local tie-breakers for "Sort by Date":
+        // Stash often returns images with identical `date` in an arbitrary order
+        // (e.g. many galleries on the same day interleaved). Since our grouping
+        // is consecutive, we re-order *within the same date bucket* to keep
+        // galleries/sets contiguous, without changing the overall date ordering.
+        let imagesForGrouping: [StashImage] = {
+            switch selectedSortOption {
+            case .dateAsc, .dateDesc:
+                let ascending = (selectedSortOption == .dateAsc)
+                func timeKey(_ img: StashImage) -> String {
+                    // When sorting by date, fall back to createdAt if date missing.
+                    // Both are ISO-like strings, so lexical compare is stable enough here.
+                    return (img.date?.isEmpty == false ? img.date! : (img.createdAt ?? ""))
+                }
+                func titleIndex(_ img: StashImage) -> Int {
+                    if let t = img.title, let n = Int(t.trimmingCharacters(in: .whitespacesAndNewlines)) { return n }
+                    return 0
+                }
+                return viewModel.allImages.sorted { a, b in
+                    let ta = timeKey(a)
+                    let tb = timeKey(b)
+                    if ta != tb { return ascending ? (ta < tb) : (ta > tb) }
+
+                    let ga = galleryKey(a)
+                    let gb = galleryKey(b)
+                    if ga != gb { return ga < gb }
+
+                    let sa = sessionKey(a)
+                    let sb = sessionKey(b)
+                    if sa != sb { return sa < sb }
+
+                    let ia = imageIndex(a)
+                    let ib = imageIndex(b)
+                    if ia != ib { return ia < ib }
+
+                    let na = titleIndex(a)
+                    let nb = titleIndex(b)
+                    if na != nb { return na < nb }
+
+                    return a.id < b.id
+                }
+            default:
+                return viewModel.allImages
+            }
+        }()
+
         var posts: [StashLinePost] = []
         var currentKey: String? = nil
         var buffer: [StashImage] = []
@@ -529,7 +575,7 @@ struct StashLineView: View {
             }
         }
 
-        for image in viewModel.allImages {
+        for image in imagesForGrouping {
             let key = groupKey(image)
             if currentKey == nil {
                 currentKey = key
@@ -737,6 +783,7 @@ struct StashLinePostView: View {
     @AppStorage("stashline_group_by_orientation") private var groupByOrientation: Bool = true
     @State private var isFullScreenPresented: Bool = false
     @State private var fullScreenImages: [StashImage]
+    @State private var lastFullScreenImageIds: Set<String> = []
     
     private let actionIconSize: CGFloat = 16
     private let actionIconFrame: CGFloat = 22
@@ -774,6 +821,7 @@ struct StashLinePostView: View {
                     Button {
                         // Sync current post images into the viewer
                         fullScreenImages = post.images
+                        lastFullScreenImageIds = Set(post.images.map(\.id))
                         isFullScreenPresented = true
                     } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -920,6 +968,18 @@ struct StashLinePostView: View {
                     }
                 }
             }
+        }
+        .onChange(of: fullScreenImages.count) { _, _ in
+            // If the fullscreen viewer deletes images, it mutates `fullScreenImages`.
+            // Propagate removals into the timeline source so the items disappear from the feed.
+            let newIds = Set(fullScreenImages.map(\.id))
+            let removed = lastFullScreenImageIds.subtracting(newIds)
+            guard !removed.isEmpty else {
+                lastFullScreenImageIds = newIds
+                return
+            }
+            viewModel.allImages.removeAll { removed.contains($0.id) }
+            lastFullScreenImageIds = newIds
         }
         #endif
     }

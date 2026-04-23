@@ -1088,6 +1088,9 @@ struct FullScreenImageView: View {
             DispatchQueue.main.async {
                 if success {
                     ToastManager.shared.show("Image deleted", icon: "trash", style: .success)
+                    // Update the bound array so parent views (e.g. StashLine / Images grid)
+                    // can immediately remove the deleted item without a full reload.
+                    self.images.removeAll(where: { $0.id == imageToDelete.id })
                     dismiss()
                 } else {
                     ToastManager.shared.show("Failed to delete image", icon: "exclamationmark.triangle", style: .error)
