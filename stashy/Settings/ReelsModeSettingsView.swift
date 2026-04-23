@@ -99,6 +99,16 @@ struct ReelsModeSettingsView: View {
                                 }
                                 .padding(.top, 4)
 
+                                reelsSettingRow(title: "Load Full Images") {
+                                    Toggle("", isOn: Binding(
+                                        get: { UserDefaults.standard.object(forKey: "stashline_load_full_images") as? Bool ?? true },
+                                        set: { UserDefaults.standard.set($0, forKey: "stashline_load_full_images") }
+                                    ))
+                                    .labelsHidden()
+                                    .tint(appearanceManager.tintColor)
+                                }
+                                .padding(.top, 4)
+
                                 reelsSettingRow(title: "Group by Orientation") {
                                     Toggle("", isOn: Binding(
                                         get: { UserDefaults.standard.object(forKey: "stashline_group_by_orientation") as? Bool ?? true },

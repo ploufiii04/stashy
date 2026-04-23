@@ -81,6 +81,43 @@ func isHeadphonesConnected() -> Bool {
     })
 }
 
+// MARK: - Scene live updates (from SceneDetailView)
+
+/// Keeps scene lists in sync with live updates coming from `SceneDetailView`.
+///
+/// `SceneDetailView` publishes changes (resume time, play count, deletions) through
+/// `NotificationCenter`. Views that display scenes should apply `sceneLiveUpdates(using:)`
+/// so they update in-place when navigating back.
+struct SceneLiveUpdatesModifier: ViewModifier {
+    @ObservedObject var viewModel: StashDBViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneResumeTimeUpdated"))) { notification in
+                if let sceneId = notification.userInfo?["sceneId"] as? String,
+                   let resumeTime = notification.userInfo?["resumeTime"] as? Double {
+                    viewModel.updateSceneResumeTime(id: sceneId, newResumeTime: resumeTime)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ScenePlayAdded"))) { notification in
+                if let sceneId = notification.userInfo?["sceneId"] as? String {
+                    viewModel.incrementScenePlayCount(id: sceneId, by: 1)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneDeleted"))) { notification in
+                if let sceneId = notification.userInfo?["sceneId"] as? String {
+                    viewModel.removeScene(id: sceneId)
+                }
+            }
+    }
+}
+
+extension View {
+    func sceneLiveUpdates(using viewModel: StashDBViewModel) -> some View {
+        modifier(SceneLiveUpdatesModifier(viewModel: viewModel))
+    }
+}
+
 func createPlayer(for url: URL) -> AVPlayer {
     // Enable audio even in silent mode - Optimization: only set if needed
     let session = AVAudioSession.sharedInstance()

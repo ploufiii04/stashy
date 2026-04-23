@@ -526,18 +526,7 @@ struct ScenesView: View {
             }
         }
 
-        // Scene Update Listeners - update in place without full reload
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneResumeTimeUpdated"))) { notification in
-            if let sceneId = notification.userInfo?["sceneId"] as? String,
-               let resumeTime = notification.userInfo?["resumeTime"] as? Double {
-                viewModel.updateSceneResumeTime(id: sceneId, newResumeTime: resumeTime)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneDeleted"))) { notification in
-            if let sceneId = notification.userInfo?["sceneId"] as? String {
-                viewModel.removeScene(id: sceneId)
-            }
-        }
+        .sceneLiveUpdates(using: viewModel)
         .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
             // Fallback: If filters finished loading, we have no active filter, and no scenes yet, trigger fetch
             if oldValue == true && isLoading == false {

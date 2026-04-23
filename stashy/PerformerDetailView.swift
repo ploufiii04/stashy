@@ -184,6 +184,18 @@ struct PerformerDetailView: View {
             viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: selectedSortOption, isInitialLoad: true)
             loadPerformerMetadata()
         }
+        // Keep list state in sync with SceneDetailView updates (same behavior as ScenesView).
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneResumeTimeUpdated"))) { notification in
+            if let sceneId = notification.userInfo?["sceneId"] as? String,
+               let resumeTime = notification.userInfo?["resumeTime"] as? Double {
+                viewModel.updateSceneResumeTime(id: sceneId, newResumeTime: resumeTime)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ScenePlayAdded"))) { notification in
+            if let sceneId = notification.userInfo?["sceneId"] as? String {
+                viewModel.incrementScenePlayCount(id: sceneId, by: 1)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
             if let targetId = notification.userInfo?["performerId"] as? String,
                let newPath = notification.userInfo?["newImagePath"] as? String {

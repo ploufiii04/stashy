@@ -10,7 +10,9 @@ struct HomeView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
 
     var body: some View {
-        ZStack {
+        // Workaround for occasional Swift compiler diagnostic/type-check issues:
+        // keep the view builder shallow and apply modifiers on a separate value.
+        let base = ZStack {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { viewModel.fetchStatistics() }
             } else if viewModel.statistics == nil && viewModel.errorMessage != nil {
@@ -19,37 +21,29 @@ struct HomeView: View {
                 dashboardContent
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            guard configManager.activeConfig != nil else { return }
-            if viewModel.statistics == nil {
-                viewModel.initializeServerConnection()
-            } else {
-                viewModel.fetchStatistics()
-                for row in tabManager.homeRows where row.isEnabled && row.type != .statistics {
-                    viewModel.refreshHomeRow(config: row, limit: 10)
+
+        return base
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                guard configManager.activeConfig != nil else { return }
+                if viewModel.statistics == nil {
+                    viewModel.initializeServerConnection()
+                } else {
+                    viewModel.fetchStatistics()
+                    for row in tabManager.homeRows where row.isEnabled && row.type != .statistics {
+                        viewModel.refreshHomeRow(config: row, limit: 10)
+                    }
                 }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
-            viewModel.initializeServerConnection()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneResumeTimeUpdated"))) { notification in
-            if let sceneId = notification.userInfo?["sceneId"] as? String,
-               let resumeTime = notification.userInfo?["resumeTime"] as? Double {
-                viewModel.updateSceneResumeTime(id: sceneId, newResumeTime: resumeTime)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneDeleted"))) { notification in
-            if let sceneId = notification.userInfo?["sceneId"] as? String {
-                viewModel.removeScene(id: sceneId)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.dashboard.rawValue {
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
                 viewModel.initializeServerConnection()
             }
-        }
+            .sceneLiveUpdates(using: viewModel)
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
+                if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.dashboard.rawValue {
+                    viewModel.initializeServerConnection()
+                }
+            }
     }
 
     @ViewBuilder

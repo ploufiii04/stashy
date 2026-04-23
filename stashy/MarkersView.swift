@@ -240,6 +240,7 @@ struct MarkersView: View {
             selectedFilter = nil
             performSearch()
         }
+        .sceneLiveUpdates(using: viewModel)
         .onChange(of: viewModel.savedFilters) { oldValue, newValue in
             if selectedFilter == nil {
                 if let defaultId = TabManager.shared.getDefaultFilterId(for: .markers),

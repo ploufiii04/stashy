@@ -664,6 +664,7 @@ struct TagDetailView: View {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
+        .sceneLiveUpdates(using: viewModel)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

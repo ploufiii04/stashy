@@ -63,6 +63,99 @@ struct StashLineView: View {
         .contentShape(Rectangle())
     }
 
+    private var sortMenu: some View {
+        Menu {
+            Button(action: { changeSortOption(to: .random) }) {
+                HStack { Text("Random"); if selectedSortOption == .random { Image(systemName: "checkmark") } }
+            }
+            Divider()
+            Menu {
+                Button(action: { changeSortOption(to: .dateDesc) }) {
+                    HStack { Text("Newest First"); if selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
+                }
+                Button(action: { changeSortOption(to: .dateAsc) }) {
+                    HStack { Text("Oldest First"); if selectedSortOption == .dateAsc { Image(systemName: "checkmark") } }
+                }
+            } label: {
+                HStack { Text("Date"); if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
+            }
+            Menu {
+                Button(action: { changeSortOption(to: .ratingDesc) }) {
+                    HStack { Text("High → Low"); if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
+                }
+                Button(action: { changeSortOption(to: .ratingAsc) }) {
+                    HStack { Text("Low → High"); if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") } }
+                }
+            } label: {
+                HStack { Text("Rating"); if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
+            }
+            Menu {
+                Button(action: { changeSortOption(to: .createdAtDesc) }) {
+                    HStack { Text("Newest First"); if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
+                }
+                Button(action: { changeSortOption(to: .createdAtAsc) }) {
+                    HStack { Text("Oldest First"); if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") } }
+                }
+            } label: {
+                HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
+            }
+        } label: {
+            menuLabelText(selectedSortOption.displayName, systemImage: "arrow.up.arrow.down")
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Button(action: {
+                selectedFilter = nil
+                // Manual timeline change → jump to top after reload
+                viewModel.clearStashLineFrozenSnapshot()
+                shouldScrollToTopAfterReload = true
+                scrollPositionId = nil
+                pendingRestoreId = nil
+                performSearch()
+            }) {
+                HStack { Text("No Filter"); if selectedFilter == nil { Image(systemName: "checkmark") } }
+            }
+
+            let imageFilters = viewModel.savedFilters.values
+                .filter { $0.mode == .images }
+                .sorted { $0.name < $1.name }
+            ForEach(imageFilters) { filter in
+                Button(action: {
+                    selectedFilter = filter
+                    // Manual timeline change → jump to top after reload
+                    viewModel.clearStashLineFrozenSnapshot()
+                    shouldScrollToTopAfterReload = true
+                    scrollPositionId = nil
+                    pendingRestoreId = nil
+                    performSearch()
+                }) {
+                    HStack {
+                        Text(filter.name)
+                        if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        } label: {
+            menuLabelText(
+                selectedFilter?.name ?? "Filter",
+                systemImage: "line.3.horizontal.decrease",
+                tint: selectedFilter != nil ? appearanceManager.tintColor : .primary
+            )
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var floatingBarContent: some View {
+        HStack(spacing: 0) {
+            sortMenu
+            Divider().frame(height: 20)
+            filterMenu
+        }
+    }
+
     var body: some View {
         Group {
             if configManager.activeConfig == nil {
@@ -115,79 +208,7 @@ struct StashLineView: View {
             }
         }
         .floatingActionBar {
-            HStack(spacing: 0) {
-                Menu {
-                    Button(action: { changeSortOption(to: .random) }) {
-                        HStack { Text("Random"); if selectedSortOption == .random { Image(systemName: "checkmark") } }
-                    }
-                    Divider()
-                    Menu {
-                        Button(action: { changeSortOption(to: .dateDesc) }) {
-                            HStack { Text("Newest First"); if selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
-                        }
-                        Button(action: { changeSortOption(to: .dateAsc) }) {
-                            HStack { Text("Oldest First"); if selectedSortOption == .dateAsc { Image(systemName: "checkmark") } }
-                        }
-                    } label: {
-                        HStack { Text("Date"); if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
-                    }
-                    Menu {
-                        Button(action: { changeSortOption(to: .ratingDesc) }) {
-                            HStack { Text("High → Low"); if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
-                        }
-                        Button(action: { changeSortOption(to: .ratingAsc) }) {
-                            HStack { Text("Low → High"); if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") } }
-                        }
-                    } label: {
-                        HStack { Text("Rating"); if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
-                    }
-                    Menu {
-                        Button(action: { changeSortOption(to: .createdAtDesc) }) {
-                            HStack { Text("Newest First"); if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
-                        }
-                        Button(action: { changeSortOption(to: .createdAtAsc) }) {
-                            HStack { Text("Oldest First"); if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") } }
-                        }
-                    } label: {
-                        HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
-                    }
-                } label: {
-                    menuLabelText(selectedSortOption.displayName, systemImage: "arrow.up.arrow.down")
-                }
-                .frame(maxWidth: .infinity)
-
-                Divider().frame(height: 20)
-
-                Menu {
-                    Button(action: {
-                        selectedFilter = nil
-                        performSearch()
-                    }) {
-                        HStack { Text("No Filter"); if selectedFilter == nil { Image(systemName: "checkmark") } }
-                    }
-                    let imageFilters = viewModel.savedFilters.values
-                        .filter { $0.mode == .images }
-                        .sorted { $0.name < $1.name }
-                    ForEach(imageFilters) { filter in
-                        Button(action: {
-                            selectedFilter = filter
-                            performSearch()
-                        }) {
-                            HStack {
-                                Text(filter.name)
-                                if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
-                            }
-                        }
-                    }
-                } label: {
-                    menuLabelText(
-                        selectedFilter?.name ?? "Filter",
-                        systemImage: "line.3.horizontal.decrease",
-                        tint: selectedFilter != nil ? appearanceManager.tintColor : .primary
-                    )
-                }
-                .frame(maxWidth: .infinity)
-            }
+            floatingBarContent
         }
         .onAppear {
             let sortStr = TabManager.shared.getSortOption(for: .stashline) ?? "createdAtDesc"
@@ -754,11 +775,6 @@ struct StashLinePost: Identifiable {
 
 // MARK: - Post View
 
-struct ShareWrapper: Identifiable {
-    let id = UUID()
-    let items: [Any]
-}
-
 struct StashLinePostView: View {
     let post: StashLinePost
     @ObservedObject var viewModel: StashDBViewModel
@@ -772,15 +788,11 @@ struct StashLinePostView: View {
     @State private var ratings: [String: Int]
     @State private var carouselIndex = 0
     @State private var isExpanded = false
-    @State private var showDeleteConfirmation = false
-    @State private var showShareConfirmation = false
-    @State private var activeShareWrapper: ShareWrapper?
-    @State private var showSetPerformerImagePicker = false
-    @State private var performerImageTargetPerformers: [GalleryPerformer] = []
     @State private var performerDetailTarget: GalleryPerformer?
     @State private var showPerformerDetail = false
     @AppStorage("stashline_crop_enabled") private var cropEnabled = true
     @AppStorage("stashline_group_by_orientation") private var groupByOrientation: Bool = true
+    @AppStorage("stashline_load_full_images") private var loadFullImages: Bool = true
     @State private var isFullScreenPresented: Bool = false
     @State private var fullScreenImages: [StashImage]
     @State private var lastFullScreenImageIds: Set<String> = []
@@ -865,28 +877,6 @@ struct StashLinePostView: View {
                             }
                         }
                     }
-                    if let performers = image.performers, !performers.isEmpty {
-                        Button {
-                            performerImageTargetPerformers = performers
-                            showSetPerformerImagePicker = true
-                        } label: {
-                            actionIcon("person.crop.circle.badge.plus", scale: 1.15)
-                        }
-                    }
-                    Button {
-                        if post.isSet {
-                            showShareConfirmation = true
-                        } else {
-                            shareImage(shareWholeSet: false)
-                        }
-                    } label: {
-                        actionIcon("square.and.arrow.up")
-                    }
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
-                    } label: {
-                        actionIcon("trash")
-                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -906,47 +896,6 @@ struct StashLinePostView: View {
 
             Spacer().frame(height: 12)
             Divider()
-        }
-        .alert("Set as Performer Image?", isPresented: $showSetPerformerImagePicker) {
-            ForEach(performerImageTargetPerformers) { performer in
-                Button("Okay") {
-                    setPerformerImage(performer: performer)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Update the profile picture for the selected performer.")
-        }
-        .alert("Delete", isPresented: $showDeleteConfirmation) {
-            if post.isSet {
-                Button("Delete Single Image", role: .destructive) {
-                    deleteImage(deleteWholeSet: false)
-                }
-                Button("Delete Entire Set (\(post.images.count) images)", role: .destructive) {
-                    deleteImage(deleteWholeSet: true)
-                }
-            } else {
-                Button("Delete Image", role: .destructive) {
-                    deleteImage(deleteWholeSet: false)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text(post.isSet ? "Do you want to delete only this image or the entire set?" : "This image will be permanently deleted. This action cannot be undone.")
-        }
-        .alert("Share", isPresented: $showShareConfirmation) {
-            Button("Share Single Image") {
-                shareImage(shareWholeSet: false)
-            }
-            Button("Share Entire Set (\(post.images.count) images)") {
-                shareImage(shareWholeSet: true)
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Do you want to share only this image or the entire set?")
-        }
-        .sheet(item: $activeShareWrapper) { wrapper in
-            ShareSheet(items: wrapper.items)
         }
         #if !os(tvOS)
         .fullScreenCover(isPresented: $isFullScreenPresented) {
@@ -1206,7 +1155,8 @@ struct StashLinePostView: View {
     private func singleImageView(_ img: StashImage, ratio: CGFloat) -> some View {
         ZStack {
             Color.studioHeaderGray
-            if let url = img.thumbnailURL {
+            let url = loadFullImages ? (img.imageURL ?? img.previewURL ?? img.thumbnailURL) : img.thumbnailURL
+            if let url {
                 CustomAsyncImage(url: url) { loader in
                     if loader.isLoading {
                         ProgressView().frame(maxWidth: .infinity)
@@ -1351,108 +1301,5 @@ struct StashLinePostView: View {
         }
     }
     
-    // MARK: - Local Actions
-
-    private func deleteImage(deleteWholeSet: Bool) {
-        let targets = deleteWholeSet ? post.images : [image]
-        
-        for target in targets {
-            viewModel.deleteImage(imageId: target.id) { success in
-                DispatchQueue.main.async {
-                    if success {
-                        withAnimation {
-                            if let index = self.viewModel.allImages.firstIndex(where: { $0.id == target.id }) {
-                                self.viewModel.allImages.remove(at: index)
-                            }
-                        }
-                    } else {
-                        ToastManager.shared.show("Failed to delete image \(target.id)", icon: "exclamationmark.triangle", style: .error)
-                    }
-                }
-            }
-        }
-        ToastManager.shared.show(deleteWholeSet ? "Deleting set..." : "Deleting image...", icon: "trash", style: .success)
-    }
-
-    private func shareImage(shareWholeSet: Bool) {
-        let targets = shareWholeSet ? post.images : [image]
-        
-        Task {
-            var items: [Any] = []
-            let sessionConfig = URLSessionConfiguration.default
-            sessionConfig.timeoutIntervalForRequest = 60
-            let session = URLSession(configuration: sessionConfig, delegate: ImageLoaderSessionDelegate(), delegateQueue: nil)
-            let apiKey = ServerConfigManager.shared.activeConfig?.secureApiKey ?? ""
-            
-            for target in targets {
-                guard let url = target.imageURL else { continue }
-                var request = URLRequest(url: url)
-                if !apiKey.isEmpty {
-                    request.addValue(apiKey, forHTTPHeaderField: "ApiKey")
-                }
-                guard let (data, response) = try? await session.data(for: request) else { continue }
-                
-                let mimeType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""
-                let isVideo = mimeType.contains("video") || url.absoluteString.lowercased().contains(".mp4")
-                
-                if isVideo {
-                    let tempURL = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(UUID().uuidString)
-                        .appendingPathExtension("mp4")
-                    guard (try? data.write(to: tempURL)) != nil else { continue }
-                    items.append(tempURL)
-                } else {
-                    guard let uiImage = UIImage(data: data) else { continue }
-                    items.append(uiImage)
-                }
-            }
-            
-            await MainActor.run {
-                if !items.isEmpty {
-                    self.activeShareWrapper = ShareWrapper(items: items)
-                }
-            }
-        }
-    }
-
-    private func setPerformerImage(performer: GalleryPerformer) {
-        let urlObj: URL?
-        if let ext = image.fileExtension, ["JPG", "JPEG", "PNG", "WEBP"].contains(ext.uppercased()) {
-            urlObj = image.imageURL
-        } else {
-            urlObj = image.thumbnailURL
-        }
-        
-        guard let url = urlObj?.absoluteString else { return }
-
-        viewModel.setPerformerImage(performerId: performer.id, imageURL: url) { success in
-            DispatchQueue.main.async {
-                if success {
-                    ToastManager.shared.show("Performer image updated", icon: "person.crop.circle.badge.checkmark", style: .success)
-                    
-                    // Visually update the avatar everywhere in allImages by overriding image_path
-                    let bustedUrl = "\(url)?bust=\(UUID().uuidString)"
-                    for i in 0..<self.viewModel.allImages.count {
-                        if var mutablePerformers = self.viewModel.allImages[i].performers, 
-                           let pIndex = mutablePerformers.firstIndex(where: { $0.id == performer.id }) {
-                            mutablePerformers[pIndex].image_path = bustedUrl
-                            self.viewModel.allImages[i].performers = mutablePerformers
-                        }
-                    }
-                    
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("PerformerImageUpdated"),
-                        object: nil,
-                        userInfo: [
-                            "performerId": performer.id,
-                            "newImagePath": bustedUrl
-                        ]
-                    )
-                } else {
-                    ToastManager.shared.show("Failed to update performer image", icon: "exclamationmark.triangle", style: .error)
-                }
-            }
-        }
-    }
 }
 #endif

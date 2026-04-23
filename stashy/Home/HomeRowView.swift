@@ -125,11 +125,8 @@ struct HomeRowView: View {
                 checkAndLoad()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ScenePlayAdded"))) { _ in
-            guard config.type == .lastPlayed else { return }
-            viewModel.homeRowScenes[config.type] = nil
-            checkAndLoad()
-        }
+        // Keep in-place row caches in sync with SceneDetailView changes.
+        .sceneLiveUpdates(using: viewModel)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
             viewModel.homeRowScenes[config.type] = nil
             viewModel.homeRowPerformers[config.type] = nil

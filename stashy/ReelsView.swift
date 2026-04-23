@@ -1162,6 +1162,7 @@ struct ReelsView: View {
     private var premiumContent: some View {
         premiumContentBase
             .onAppear { handleOnAppear() }
+            .sceneLiveUpdates(using: viewModel)
             .onChange(of: isMenuOpen) { _, newValue in
                 guard newValue else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
@@ -1946,69 +1947,68 @@ struct ReelsView: View {
         let isVideo = currentItem == nil ? true : (currentItem?.videoURL != nil && !(currentItem?.isAnimated ?? true))
 
         HStack(spacing: 0) {
-            // Left Group
+            // Left Group: O-Counter + Rating
             HStack(spacing: 12) {
-                sortMenu
-                filterMenu
-            }
-            .fixedSize()
-            
-            Spacer(minLength: 4)
-            
-            // O-Counter
-            let oCounter = currentItem?.oCounter ?? 0
-            Button {
-                if let item = currentItem { handleOCounterChange(item: item, newCount: oCounter + 1) }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: oCounter > 0 ? AppearanceManager.shared.oCounterIconFilled : AppearanceManager.shared.oCounterIcon)
-                        .foregroundColor(oCounter > 0 ? appearanceManager.tintColor : .white)
-                    Text("\(oCounter)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-                .opacity(oCounter == 0 ? 0.5 : 1.0)
-            }
-            .buttonStyle(.plain)
-            
-            Spacer(minLength: 4)
-            
-            // Rating (popup menu like sort/filter)
-            if let item = currentItem {
-                let rating100 = item.rating100 ?? 0
-                let stars = max(0, min(5, Int(round(Double(rating100) / 20.0))))
-
-                Menu {
-                    Button(action: { handleRatingChange(item: item, newRating: 0) }) {
-                        HStack {
-                            Text("Clear Rating")
-                            if stars == 0 { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Divider()
-                    ForEach(1...5, id: \.self) { s in
-                        Button(action: { handleRatingChange(item: item, newRating: s * 20) }) {
-                            HStack {
-                                Text(String(repeating: "★", count: s))
-                                if stars == s { Image(systemName: "checkmark") }
-                            }
-                        }
-                    }
+                // O-Counter
+                let oCounter = currentItem?.oCounter ?? 0
+                Button {
+                    if let item = currentItem { handleOCounterChange(item: item, newCount: oCounter + 1) }
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .foregroundColor(.white.opacity(stars > 0 ? 1.0 : 0.7))
-                        Text("\(stars)")
+                        Image(systemName: oCounter > 0 ? AppearanceManager.shared.oCounterIconFilled : AppearanceManager.shared.oCounterIcon)
+                            .foregroundColor(oCounter > 0 ? appearanceManager.tintColor : .white)
+                        Text("\(oCounter)")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white)
                     }
-                    .opacity(stars == 0 ? 0.5 : 1.0)
+                    .opacity(oCounter == 0 ? 0.5 : 1.0)
                 }
                 .buttonStyle(.plain)
-                .fixedSize()
+
+                // Rating (popup menu like sort/filter)
+                if let item = currentItem {
+                    let rating100 = item.rating100 ?? 0
+                    let stars = max(0, min(5, Int(round(Double(rating100) / 20.0))))
+
+                    Menu {
+                        Button(action: { handleRatingChange(item: item, newRating: 0) }) {
+                            HStack {
+                                Text("Clear Rating")
+                                if stars == 0 { Image(systemName: "checkmark") }
+                            }
+                        }
+                        Divider()
+                        ForEach(1...5, id: \.self) { s in
+                            Button(action: { handleRatingChange(item: item, newRating: s * 20) }) {
+                                HStack {
+                                    Text(String(repeating: "★", count: s))
+                                    if stars == s { Image(systemName: "checkmark") }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill")
+                                .foregroundColor(.white.opacity(stars > 0 ? 1.0 : 0.7))
+                            Text("\(stars)")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .opacity(stars == 0 ? 0.5 : 1.0)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             
-            Spacer(minLength: 4)
+            // Middle Group: Sort + Filter (distributed across remaining width)
+            HStack(spacing: 12) {
+                sortMenu
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                filterMenu
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity)
             
             // Right Group
             HStack(spacing: 16) {
@@ -2049,6 +2049,7 @@ struct ReelsView: View {
                 .disabled(!isVideo)
             }
             .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.system(size: 17))
         .frame(maxWidth: .infinity, maxHeight: .infinity)

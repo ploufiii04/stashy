@@ -198,11 +198,7 @@ struct StudioDetailView: View {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneDeleted"))) { _ in
-            print("🔄 STUDIO DETAIL: Recieved SceneDeleted notification, refreshing...")
-            refreshTrigger = UUID()
-            viewModel.fetchStudioScenes(studioId: studio.id, sortBy: selectedSortOption, isInitialLoad: true)
-        }
+        .sceneLiveUpdates(using: viewModel)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

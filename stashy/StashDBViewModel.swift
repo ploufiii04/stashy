@@ -490,6 +490,57 @@ class StashDBViewModel: ObservableObject {
     var imageStaticPathFilter: Bool = false
     var imagePerformerIdFilter: String? = nil
 
+    // MARK: - StashLine: criterion overlay snapshot (performer/tags)
+
+    private struct StashLineFrozenImagesState {
+        let allImages: [StashImage]
+        let currentImagePage: Int
+        let totalImages: Int
+        let hasMoreImages: Bool
+        let currentImageSortOption: ImageSortOption
+        let currentImageFilter: SavedFilter?
+        let imageStaticPathFilter: Bool
+        let imagePerformerIdFilter: String?
+        let visiblePostId: String?
+    }
+
+    private var stashLineFrozenImages: StashLineFrozenImagesState?
+
+    func clearStashLineFrozenSnapshot() {
+        stashLineFrozenImages = nil
+    }
+
+    func takeStashLineFrozenImagesSnapshot(visiblePostId: String?) {
+        stashLineFrozenImages = StashLineFrozenImagesState(
+            allImages: allImages,
+            currentImagePage: currentImagePage,
+            totalImages: totalImages,
+            hasMoreImages: hasMoreImages,
+            currentImageSortOption: currentImageSortOption,
+            currentImageFilter: currentImageFilter,
+            imageStaticPathFilter: imageStaticPathFilter,
+            imagePerformerIdFilter: imagePerformerIdFilter,
+            visiblePostId: visiblePostId
+        )
+    }
+
+    @discardableResult
+    func restoreStashLineFrozenImagesIfAvailable() -> String? {
+        guard let s = stashLineFrozenImages else { return nil }
+        allImages = s.allImages
+        currentImagePage = s.currentImagePage
+        totalImages = s.totalImages
+        hasMoreImages = s.hasMoreImages
+        currentImageSortOption = s.currentImageSortOption
+        currentImageFilter = s.currentImageFilter
+        imageStaticPathFilter = s.imageStaticPathFilter
+        imagePerformerIdFilter = s.imagePerformerIdFilter
+        isLoadingImages = false
+        isLoading = false
+        stashLineFrozenImages = nil
+        return s.visiblePostId
+    }
+
     // Image Sort Options
     enum ImageSortOption: String, CaseIterable {
         case titleAsc
@@ -1051,6 +1102,8 @@ class StashDBViewModel: ObservableObject {
         // Remove from performer/studio scenes
         performerScenes.removeAll { $0.id == id }
         studioScenes.removeAll { $0.id == id }
+        tagScenes.removeAll { $0.id == id }
+        groupScenes.removeAll { $0.id == id }
 
         // Remove from home row caches
         for rowType in homeRowScenes.keys {
@@ -1090,6 +1143,20 @@ class StashDBViewModel: ObservableObject {
             updated = updated.withResumeTime(newResumeTime)
             studioScenes[index] = updated
         }
+
+        // Update tag scenes
+        if let index = tagScenes.firstIndex(where: { $0.id == id }) {
+            var updated = tagScenes[index]
+            updated = updated.withResumeTime(newResumeTime)
+            tagScenes[index] = updated
+        }
+
+        // Update group scenes
+        if let index = groupScenes.firstIndex(where: { $0.id == id }) {
+            var updated = groupScenes[index]
+            updated = updated.withResumeTime(newResumeTime)
+            groupScenes[index] = updated
+        }
         
         // Update home row caches
         for (rowType, rowScenes) in homeRowScenes {
@@ -1098,6 +1165,40 @@ class StashDBViewModel: ObservableObject {
                 var updated = rowScenes[index]
                 updated = updated.withResumeTime(newResumeTime)
                 homeRowScenes[rowType]?[index] = updated
+            }
+        }
+    }
+
+    /// Increments playCount of a scene in place (used by SceneDetailView playback).
+    func incrementScenePlayCount(id: String, by delta: Int = 1) {
+        func bumped(_ current: Int?) -> Int {
+            max(0, (current ?? 0) + delta)
+        }
+
+        if let index = scenes.firstIndex(where: { $0.id == id }) {
+            let s = scenes[index]
+            scenes[index] = s.withPlayCount(bumped(s.playCount))
+        }
+        if let index = performerScenes.firstIndex(where: { $0.id == id }) {
+            let s = performerScenes[index]
+            performerScenes[index] = s.withPlayCount(bumped(s.playCount))
+        }
+        if let index = studioScenes.firstIndex(where: { $0.id == id }) {
+            let s = studioScenes[index]
+            studioScenes[index] = s.withPlayCount(bumped(s.playCount))
+        }
+        if let index = tagScenes.firstIndex(where: { $0.id == id }) {
+            let s = tagScenes[index]
+            tagScenes[index] = s.withPlayCount(bumped(s.playCount))
+        }
+        if let index = groupScenes.firstIndex(where: { $0.id == id }) {
+            let s = groupScenes[index]
+            groupScenes[index] = s.withPlayCount(bumped(s.playCount))
+        }
+        for (rowType, rowScenes) in homeRowScenes {
+            if let index = rowScenes.firstIndex(where: { $0.id == id }) {
+                let s = rowScenes[index]
+                homeRowScenes[rowType]?[index] = s.withPlayCount(bumped(s.playCount))
             }
         }
     }
