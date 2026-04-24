@@ -188,7 +188,7 @@ enum SceneLiveChipFilterSupport {
         "duplicated",
         "duration", "framerate", "bitrate", "video_codec", "audio_codec",
         "has_markers", "is_missing",
-        "studios", "movies", "groups", "galleries", "tags", "tag_count", "performers", "performer_tags", "performer_age",
+        "movies", "groups", "galleries", "tags", "tag_count", "performers", "performer_tags", "performer_age",
         "stash_id_endpoint", "stash_ids_endpoint", "stash_id_count",
         "url", "interactive_speed", "captions", "resume_time", "play_count", "play_duration", "last_played_at",
         "date", "created_at", "updated_at",
@@ -212,10 +212,49 @@ enum SceneLiveChipFilterSupport {
     static func filterDictSupportsLiveChipEditor(_ dict: [String: Any]?) -> Bool {
         guard let dict, !dict.isEmpty else { return true }
         let flat = flattenedForChipSupportInspection(dict)
-        for key in flat.keys where unsupportedSceneFilterKeys.contains(key) {
-            return false
+        for key in flat.keys {
+            if key == "studios" {
+                if !studiosCriterionIsChipRepresentable(flat["studios"]) { return false }
+                continue
+            }
+            if unsupportedSceneFilterKeys.contains(key) { return false }
         }
         return true
+    }
+
+    private static func singleStudioIdString(_ value: Any) -> String? {
+        if let s = value as? String {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : t
+        }
+        if let n = value as? NSNumber { return String(n.intValue) }
+        if let i = value as? Int { return String(i) }
+        return nil
+    }
+
+    private static func studioIdStrings(from value: Any?) -> [String] {
+        guard let value else { return [] }
+        if let arr = value as? [Any] {
+            return arr.compactMap { singleStudioIdString($0) }
+        }
+        if let s = singleStudioIdString(value) { return [s] }
+        return []
+    }
+
+    /// First id for `studios` with modifier `INCLUDES` (Stash may send numeric ids or a single string `value`).
+    static func studioIncludesFirstId(fromCriterion value: Any?) -> String? {
+        guard let d = value as? [String: Any] else { return nil }
+        guard (d["modifier"] as? String) == "INCLUDES" else { return nil }
+        return studioIdStrings(from: d["value"]).first
+    }
+
+    /// Chip UI supports at most one studio (`INCLUDES` with zero or one id).
+    private static func studiosCriterionIsChipRepresentable(_ value: Any?) -> Bool {
+        guard let value else { return true }
+        guard let d = value as? [String: Any] else { return false }
+        let mod = (d["modifier"] as? String) ?? ""
+        guard mod == "INCLUDES" else { return false }
+        return studioIdStrings(from: d["value"]).count <= 1
     }
 
     static func savedFilterSupportsLiveChipEditor(_ filter: StashDBViewModel.SavedFilter?) -> Bool {
@@ -318,6 +357,10 @@ private struct ScenesViewContent: View {
     @State private var liveFilterPerformerFavorite: Bool? = nil // nil = any
     /// O-counter criterion as "MODIFIER:value" (e.g. GREATER_THAN:0); nil = any
     @State private var liveFilterOCounterTag: String? = nil
+    /// Selected studio id for live `studios` filter; nil = any studio.
+    @State private var liveFilterStudioId: String? = nil
+    @State private var studioPickerOptions: [Studio] = []
+    @State private var studioPickerLoading = false
     @State private var liveFilterPresets: [SceneLiveFilterPreset] = SceneLiveFilterPresetStore.loadPresets()
     /// Selected preset UUID string in the sheet; empty = none.
     @State private var liveSheetPresetSelection: String = ""
@@ -420,6 +463,7 @@ private struct ScenesViewContent: View {
         liveFilterMinRating > 0 || liveFilterOrganized != nil
         || liveFilterInteractive != nil || liveFilterOrientation != nil || liveFilterPerformerCount != nil
         || liveFilterResolution != nil || liveFilterPerformerFavorite != nil || liveFilterOCounterTag != nil
+        || liveFilterStudioId != nil
     }
 
     /// Chips, saved scene filter, or a preset row in the sheet — drives FAB tint/dot now that toolbar filter/sort are gone.
@@ -473,14 +517,21 @@ private struct ScenesViewContent: View {
         if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
             dict["o_counter"] = oc
         }
+        if let sid = liveFilterStudioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
         return dict
     }
 
-    /// When the chip editor is disabled, live chips must not merge into the server filter query.
+    /// Live chip criteria merge only when the saved filter is chip-safe; the studio picker always merges when set.
     private var effectiveSceneLiveFilterForFetch: [String: Any] {
-        SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
+        var dict: [String: Any] = SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
             ? activeLiveFilterDict
             : [:]
+        if let sid = liveFilterStudioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
+        return dict
     }
 
     /// Does not change sort: syncs chip state to `selectedFilter` / stashy metadata (e.g. deep link).
@@ -497,6 +548,9 @@ private struct ScenesViewContent: View {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveFilterChipsOnly()
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
+                    liveFilterStudioId = id
+                }
             }
         } else if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f) {
             if let raw = f.filterDict {
@@ -506,6 +560,16 @@ private struct ScenesViewContent: View {
             }
         } else {
             clearLiveFilterChipsOnly()
+            let flat: [String: Any]? = {
+                if let raw = f.filterDict { return FilterMapper.sanitize(raw, isMarker: false) }
+                if let obj = f.object_filter, let objDict = obj.value as? [String: Any] {
+                    return FilterMapper.sanitize(objDict, isMarker: false)
+                }
+                return nil
+            }()
+            if let flat, let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
+                liveFilterStudioId = id
+            }
         }
     }
 
@@ -549,6 +613,7 @@ private struct ScenesViewContent: View {
         } else {
             liveFilterOCounterTag = nil
         }
+        liveFilterStudioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
     }
 
     private func boolFromLiveJSON(_ value: Any?) -> Bool? {
@@ -587,6 +652,9 @@ private struct ScenesViewContent: View {
             mapLiveFragmentToChips(preset.liveFragment)
         } else {
             clearLiveFilterChipsOnly()
+            if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: preset.liveFragment["studios"]) {
+                liveFilterStudioId = id
+            }
         }
         applyLiveFilter()
     }
@@ -600,6 +668,16 @@ private struct ScenesViewContent: View {
         liveFilterResolution = nil
         liveFilterPerformerFavorite = nil
         liveFilterOCounterTag = nil
+        liveFilterStudioId = nil
+    }
+
+    private func loadStudiosForSceneLivePicker() {
+        guard !studioPickerLoading else { return }
+        studioPickerLoading = true
+        viewModel.fetchStudiosForLiveFilterPicker(mode: .scenesHasScenes) { list in
+            studioPickerOptions = list
+            studioPickerLoading = false
+        }
     }
 
     private func applyServerSceneSavedFilter(_ f: StashDBViewModel.SavedFilter) {
@@ -613,6 +691,9 @@ private struct ScenesViewContent: View {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveFilterChipsOnly()
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
+                    liveFilterStudioId = id
+                }
             }
             let resolvedSort: StashDBViewModel.SceneSortOption
             if let sr = meta.sortRaw, let parsed = StashDBViewModel.SceneSortOption(rawValue: sr) {
@@ -634,6 +715,16 @@ private struct ScenesViewContent: View {
                 }
             } else {
                 clearLiveFilterChipsOnly()
+                let flat: [String: Any]? = {
+                    if let raw = f.filterDict { return FilterMapper.sanitize(raw, isMarker: false) }
+                    if let obj = f.object_filter, let objDict = obj.value as? [String: Any] {
+                        return FilterMapper.sanitize(objDict, isMarker: false)
+                    }
+                    return nil
+                }()
+                if let flat, let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
+                    liveFilterStudioId = id
+                }
             }
         }
         applyLiveFilter()
@@ -1055,6 +1146,10 @@ private struct ScenesViewContent: View {
                 resolution: $liveFilterResolution,
                 performerFavorite: $liveFilterPerformerFavorite,
                 oCounterTag: $liveFilterOCounterTag,
+                studioSelectionId: $liveFilterStudioId,
+                studioPickerOptions: studioPickerOptions,
+                studioPickerLoading: studioPickerLoading,
+                onStudioPickerSectionAppear: { loadStudiosForSceneLivePicker() },
                 onApply: { applyLiveFilter() },
                 onReset: {
                     liveFilterMinRating = 0
@@ -1065,6 +1160,7 @@ private struct ScenesViewContent: View {
                     liveFilterResolution = nil
                     liveFilterPerformerFavorite = nil
                     liveFilterOCounterTag = nil
+                    liveFilterStudioId = nil
                     liveSheetPresetSelection = ""
                     selectedFilter = nil
                     applyLiveFilter()
@@ -1510,6 +1606,10 @@ struct SceneLiveFilterSheet: View {
     @Binding var resolution: String?
     @Binding var performerFavorite: Bool?
     @Binding var oCounterTag: String?
+    @Binding var studioSelectionId: String?
+    var studioPickerOptions: [Studio]
+    var studioPickerLoading: Bool
+    var onStudioPickerSectionAppear: () -> Void
     var onApply: () -> Void
     var onReset: () -> Void
     var onRequestSave: () -> Void
@@ -1572,8 +1672,16 @@ struct SceneLiveFilterSheet: View {
                         sortControlsCard
                     }
 
-                    if liveChipRowsVisible {
-                        VStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        CatalogStudioLiveFilterPickerRow(
+                            selectedStudioId: $studioSelectionId,
+                            studios: studioPickerOptions,
+                            isLoading: studioPickerLoading,
+                            onAppearLoad: onStudioPickerSectionAppear,
+                            onSelectionChange: onApply
+                        )
+                        if liveChipRowsVisible {
+                            Divider().padding(.leading, 16)
                             filterRow(label: "Rating") {
                                 filterChip("Any", isActive: minRating == 0) { minRating = 0; onApply() }
                                 ForEach([5, 4, 3, 2, 1], id: \.self) { star in
@@ -1638,16 +1746,15 @@ struct SceneLiveFilterSheet: View {
                                     oCounterTag = SceneLiveOCounterChip.greaterThan9; onApply()
                                 }
                             }
+                        } else {
+                            Divider().padding(.leading, 16)
+                            serverManagedFilterNoticeInline
                         }
-                        .background(Color.secondaryAppBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                    } else {
-                        serverManagedFilterNotice
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 8)
                     }
+                    .background(Color.secondaryAppBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
                 }
             }
             .background(Color.appBackground)
@@ -1697,11 +1804,12 @@ struct SceneLiveFilterSheet: View {
         .presentationDetents([.medium, .large])
     }
 
-    private var serverManagedFilterNotice: some View {
+    /// Shown inside the live-filter card when chip rows are hidden (same copy as standalone notice, without extra chrome).
+    private var serverManagedFilterNoticeInline: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Server filter")
                 .font(.headline)
-            Text("This saved filter uses criteria stashy cannot edit here—for example tags, exclusions, or combined AND/OR rules. Edit it in Stash, or pick a different filter or preset.")
+            Text("This saved filter uses criteria stashy cannot edit here—for example tags, exclusions, or combined AND/OR rules. You can still narrow by studio above. Edit it in Stash, or pick a different filter or preset.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1709,8 +1817,6 @@ struct SceneLiveFilterSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondaryAppBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var markerSortControlsCard: some View {

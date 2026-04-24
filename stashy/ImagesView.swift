@@ -177,8 +177,10 @@ struct ImagesView: View {
                 if let defaultId = TabManager.shared.getDefaultFilterId(for: .images),
                    let newFilter = viewModel.savedFilters[defaultId] {
                     imageListFilters.selectedFilter = newFilter
+                    imageListFilters.syncLiveChipsFromSelectedFilter(viewModel: viewModel)
                 } else {
                     imageListFilters.selectedFilter = nil
+                    imageListFilters.syncLiveChipsFromSelectedFilter(viewModel: viewModel)
                 }
                 imageListFilters.refetchImages(viewModel: viewModel, initial: true)
             }
@@ -203,6 +205,7 @@ struct ImagesView: View {
                 if let defaultId = TabManager.shared.getDefaultFilterId(for: .images),
                    let filter = newValue[defaultId] {
                     imageListFilters.selectedFilter = filter
+                    imageListFilters.syncLiveChipsFromSelectedFilter(viewModel: viewModel)
                     if viewModel.allImages.isEmpty {
                         imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                     }
@@ -271,6 +274,10 @@ struct ImagesView: View {
             livePerformerFavorite: $imageListFilters.liveFilterPerformerFavorite,
             liveOrganized: $imageListFilters.liveFilterOrganized,
             liveOCounterTag: $imageListFilters.liveFilterOCounterTag,
+            liveStudioId: $imageListFilters.liveFilterStudioId,
+            studioPickerOptions: imageListFilters.studioPickerOptions,
+            studioPickerLoading: imageListFilters.studioPickerLoading,
+            onStudioPickerSectionAppear: { imageListFilters.loadStudioPickerOptions(viewModel: viewModel) },
             onApply: { imageListFilters.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 imageListFilters.catalogPresetRowSelection = ""

@@ -563,6 +563,10 @@ struct PerformerDetailView: View {
             liveMinRating: $linkedGalleries.liveFilterMinRating,
             liveFavorite: $linkedGalleries.liveFilterFavorite,
             liveFiles: $linkedGalleries.liveFilterFiles,
+            liveStudioId: $linkedGalleries.liveFilterStudioId,
+            studioPickerOptions: linkedGalleries.studioPickerOptions,
+            studioPickerLoading: linkedGalleries.studioPickerLoading,
+            onStudioPickerSectionAppear: { linkedGalleries.loadStudioPickerOptions(viewModel: viewModel) },
             onApply: { linkedGalleries.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 linkedGalleries.catalogPresetRowSelection = ""
@@ -612,6 +616,10 @@ struct PerformerDetailView: View {
             livePerformerFavorite: $linkedImages.liveFilterPerformerFavorite,
             liveOrganized: $linkedImages.liveFilterOrganized,
             liveOCounterTag: $linkedImages.liveFilterOCounterTag,
+            liveStudioId: $linkedImages.liveFilterStudioId,
+            studioPickerOptions: linkedImages.studioPickerOptions,
+            studioPickerLoading: linkedImages.studioPickerLoading,
+            onStudioPickerSectionAppear: { linkedImages.loadStudioPickerOptions(viewModel: viewModel) },
             onApply: { linkedImages.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 linkedImages.catalogPresetRowSelection = ""

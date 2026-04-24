@@ -1075,6 +1075,9 @@ final class DetailLinkedGalleriesFilterModel: ObservableObject {
     @Published var liveFilterFavorite: Bool?
     @Published var liveFilterMinRating: Int = 0
     @Published var liveFilterFiles: String?
+    @Published var liveFilterStudioId: String?
+    @Published var studioPickerOptions: [Studio] = []
+    @Published var studioPickerLoading = false
 
     init(scope: DetailLinkedGalleriesScope, initialSort: StashDBViewModel.GallerySortOption = .dateDesc) {
         self.scope = scope
@@ -1083,11 +1086,21 @@ final class DetailLinkedGalleriesFilterModel: ObservableObject {
     }
 
     private var isLiveFilterActive: Bool {
-        liveFilterFavorite != nil || liveFilterMinRating > 0 || liveFilterFiles != nil
+        liveFilterFavorite != nil || liveFilterMinRating > 0 || liveFilterFiles != nil || liveFilterStudioId != nil
     }
 
     var catalogFilterSortFABActive: Bool {
         selectedFilter != nil || isLiveFilterActive
+    }
+
+    func loadStudioPickerOptions(viewModel: StashDBViewModel) {
+        guard !studioPickerLoading else { return }
+        studioPickerLoading = true
+        viewModel.fetchStudiosForLiveFilterPicker(mode: .galleriesHasGalleries) { [weak self] list in
+            guard let self else { return }
+            self.studioPickerOptions = list
+            self.studioPickerLoading = false
+        }
     }
 
     func sortedServerGalleryFilters(viewModel: StashDBViewModel) -> [StashDBViewModel.SavedFilter] {
@@ -1108,6 +1121,9 @@ final class DetailLinkedGalleriesFilterModel: ObservableObject {
         }
         if liveFilterFiles == "has" { dict["file_count"] = ["value": 0, "modifier": "GREATER_THAN"] }
         if liveFilterFiles == "none" { dict["file_count"] = ["value": 0, "modifier": "EQUALS"] }
+        if let sid = liveFilterStudioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
         return dict
     }
 
@@ -1137,6 +1153,7 @@ final class DetailLinkedGalleriesFilterModel: ObservableObject {
         liveFilterFavorite = nil
         liveFilterMinRating = 0
         liveFilterFiles = nil
+        liveFilterStudioId = nil
     }
 
     func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -1161,6 +1178,12 @@ final class DetailLinkedGalleriesFilterModel: ObservableObject {
             } else if mod == "EQUALS" {
                 liveFilterFiles = "none"
             }
+        }
+        if let st = frag["studios"] as? [String: Any],
+           (st["modifier"] as? String) == "INCLUDES",
+           let vals = st["value"] as? [Any] {
+            let ids = vals.compactMap { $0 as? String }
+            liveFilterStudioId = ids.first
         }
     }
 
@@ -1419,6 +1442,9 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
     @Published var liveFilterMinRating: Int = 0
     @Published var liveFilterOrganized: String?
     @Published var liveFilterOCounterTag: String?
+    @Published var liveFilterStudioId: String?
+    @Published var studioPickerOptions: [Studio] = []
+    @Published var studioPickerLoading = false
 
     init(scope: DetailLinkedImagesScope, initialSort: StashDBViewModel.ImageSortOption = .dateDesc) {
         self.scope = scope
@@ -1428,7 +1454,7 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
 
     private var isLiveFilterActive: Bool {
         liveFilterPerformerFavorite != nil || liveFilterMinRating > 0 || liveFilterOrganized != nil
-            || liveFilterOCounterTag != nil
+            || liveFilterOCounterTag != nil || liveFilterStudioId != nil
     }
 
     var catalogFilterSortFABActive: Bool {
@@ -1456,7 +1482,20 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
         if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
             dict["o_counter"] = oc
         }
+        if let sid = liveFilterStudioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
         return dict
+    }
+
+    func loadStudioPickerOptions(viewModel: StashDBViewModel) {
+        guard !studioPickerLoading else { return }
+        studioPickerLoading = true
+        viewModel.fetchStudiosForLiveFilterPicker(mode: .imagesHasImages) { [weak self] list in
+            guard let self else { return }
+            self.studioPickerOptions = list
+            self.studioPickerLoading = false
+        }
     }
 
     /// Non-nil when any live chip is set; merge into `fetchImages` / `fetchClips`.
@@ -1517,6 +1556,7 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
         liveFilterMinRating = 0
         liveFilterOrganized = nil
         liveFilterOCounterTag = nil
+        liveFilterStudioId = nil
     }
 
     func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -1551,6 +1591,50 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
                 liveFilterOCounterTag = "\(mod):\(v)"
             }
         }
+        liveFilterStudioId = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
+    }
+
+    /// Applies chip state from a normal Stash saved image filter (`filter_dict` and/or `object_filter`).
+    func applyPlainImageSavedFilterToLiveChips(_ f: StashDBViewModel.SavedFilter) {
+        let criteria = CatalogLiveChipFilterSupport.imageFilterCriteriaForLiveChipUI(from: f)
+        guard !criteria.isEmpty else {
+            clearLiveChipsOnly()
+            return
+        }
+        if CatalogLiveChipFilterSupport.imageSavedFilterSupportsLiveEditor(f) {
+            mapLiveFragmentToChips(criteria)
+        } else {
+            clearLiveChipsOnly()
+            if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: criteria["studios"]) {
+                liveFilterStudioId = id
+            }
+        }
+    }
+
+    /// Syncs live chip bindings from ``selectedFilter`` (e.g. default filter on catalog load).
+    func syncLiveChipsFromSelectedFilter(viewModel: StashDBViewModel) {
+        guard let f = selectedFilter else {
+            clearLiveChipsOnly()
+            return
+        }
+        if let meta = f.stashyCatalogPresetMetadata {
+            let base: StashDBViewModel.SavedFilter?
+            if let bid = meta.baseSavedFilterId, let b = viewModel.savedFilters[bid] {
+                base = b
+            } else {
+                base = nil
+            }
+            if CatalogLiveChipFilterSupport.imageSavedFilterSupportsLiveEditor(base) {
+                mapLiveFragmentToChips(meta.liveFragment)
+            } else {
+                clearLiveChipsOnly()
+                if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
+                    liveFilterStudioId = id
+                }
+            }
+            return
+        }
+        applyPlainImageSavedFilterToLiveChips(f)
     }
 
     func changeSortOption(to newOption: StashDBViewModel.ImageSortOption, viewModel: StashDBViewModel) {
@@ -1580,6 +1664,9 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             mapLiveFragmentToChips(preset.liveFragment)
         } else {
             clearLiveChipsOnly()
+            if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: preset.liveFragment["studios"]) {
+                liveFilterStudioId = id
+            }
         }
         applyLiveFilter(viewModel: viewModel)
     }
@@ -1595,6 +1682,9 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveChipsOnly()
+                if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
+                    liveFilterStudioId = id
+                }
             }
             if let sr = meta.sortRaw, let parsed = StashDBViewModel.ImageSortOption(rawValue: sr), parsed != selectedSortOption {
                 if parsed == .random && selectedSortOption == .random {
@@ -1604,11 +1694,7 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             }
         } else {
             selectedFilter = f
-            if CatalogLiveChipFilterSupport.imageSavedFilterSupportsLiveEditor(f), let raw = f.filterDict {
-                mapLiveFragmentToChips(raw)
-            } else {
-                clearLiveChipsOnly()
-            }
+            applyPlainImageSavedFilterToLiveChips(f)
         }
         applyLiveFilter(viewModel: viewModel)
     }

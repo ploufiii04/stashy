@@ -55,6 +55,53 @@ struct CatalogFilterRow<Chips: View>: View {
     }
 }
 
+/// Single-select studio for live filters (scenes / images / galleries); `nil` = any.
+struct CatalogStudioLiveFilterPickerRow: View {
+    @Binding var selectedStudioId: String?
+    let studios: [Studio]
+    let isLoading: Bool
+    var onAppearLoad: () -> Void
+    /// Called when the user picks a different studio (or Any).
+    var onSelectionChange: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text("Studio")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+                .frame(width: CatalogFilterSortSheetLayout.labelColumnWidth, alignment: .leading)
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                Picker("Studio", selection: Binding(
+                    get: { selectedStudioId ?? "" },
+                    set: { new in
+                        let next = new.isEmpty ? nil : new
+                        guard next != selectedStudioId else { return }
+                        selectedStudioId = next
+                        onSelectionChange()
+                    }
+                )) {
+                    Text("Any").tag("")
+                    ForEach(studios) { s in
+                        Text(s.name).tag(s.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(appearance.tintColor)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .onAppear { onAppearLoad() }
+    }
+}
+
 struct CatalogServerManagedFilterNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -982,6 +1029,10 @@ struct GalleriesCatalogFilterSortSheet: View {
     @Binding var liveMinRating: Int
     @Binding var liveFavorite: Bool?
     @Binding var liveFiles: String?
+    @Binding var liveStudioId: String?
+    var studioPickerOptions: [Studio]
+    var studioPickerLoading: Bool
+    var onStudioPickerSectionAppear: () -> Void
     var onApply: () -> Void
     var onReset: () -> Void
     var onRequestSave: () -> Void
@@ -1135,6 +1186,14 @@ struct GalleriesCatalogFilterSortSheet: View {
 
     private var galleryLiveChipsCard: some View {
         VStack(spacing: 0) {
+            CatalogStudioLiveFilterPickerRow(
+                selectedStudioId: $liveStudioId,
+                studios: studioPickerOptions,
+                isLoading: studioPickerLoading,
+                onAppearLoad: onStudioPickerSectionAppear,
+                onSelectionChange: onApply
+            )
+            Divider().padding(.leading, 16)
             CatalogFilterRow(label: "Favorite") {
                 CatalogFilterChip(title: "Any", isActive: liveFavorite == nil) { liveFavorite = nil; onApply() }
                 CatalogFilterChip(title: "Yes", isActive: liveFavorite == true) { liveFavorite = true; onApply() }
@@ -1243,6 +1302,10 @@ struct ImagesCatalogFilterSortSheet: View {
     @Binding var livePerformerFavorite: Bool?
     @Binding var liveOrganized: String?
     @Binding var liveOCounterTag: String?
+    @Binding var liveStudioId: String?
+    var studioPickerOptions: [Studio]
+    var studioPickerLoading: Bool
+    var onStudioPickerSectionAppear: () -> Void
     var onApply: () -> Void
     var onReset: () -> Void
     var onRequestSave: () -> Void
@@ -1396,6 +1459,14 @@ struct ImagesCatalogFilterSortSheet: View {
 
     private var imageLiveChipsCard: some View {
         VStack(spacing: 0) {
+            CatalogStudioLiveFilterPickerRow(
+                selectedStudioId: $liveStudioId,
+                studios: studioPickerOptions,
+                isLoading: studioPickerLoading,
+                onAppearLoad: onStudioPickerSectionAppear,
+                onSelectionChange: onApply
+            )
+            Divider().padding(.leading, 16)
             CatalogFilterRow(label: "Perf. fav.") {
                 CatalogFilterChip(title: "Any", isActive: livePerformerFavorite == nil) { livePerformerFavorite = nil; onApply() }
                 CatalogFilterChip(title: "Yes", isActive: livePerformerFavorite == true) { livePerformerFavorite = true; onApply() }
@@ -1453,10 +1524,13 @@ struct SceneLiveChipRowState: Equatable {
     var resolution: String? = nil
     var performerFavorite: Bool? = nil
     var oCounterTag: String? = nil
+    /// Single studio id for `studios` `INCLUDES`; nil = any.
+    var studioId: String? = nil
 
     var isLiveFilterActive: Bool {
         minRating > 0 || organized != nil || interactive != nil || orientation != nil
             || performerCount != nil || resolution != nil || performerFavorite != nil || oCounterTag != nil
+            || studioId != nil
     }
 
     func activeLiveFilterDict() -> [String: Any] {
@@ -1483,13 +1557,20 @@ struct SceneLiveChipRowState: Equatable {
         if let tag = oCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
             dict["o_counter"] = oc
         }
+        if let sid = studioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
         return dict
     }
 
     func effectiveLiveFilter(for selectedFilter: StashDBViewModel.SavedFilter?) -> [String: Any] {
-        SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
+        var dict: [String: Any] = SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
             ? activeLiveFilterDict()
             : [:]
+        if let sid = studioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
+        return dict
     }
 
     mutating func clearChipsOnly() {
@@ -1501,6 +1582,7 @@ struct SceneLiveChipRowState: Equatable {
         resolution = nil
         performerFavorite = nil
         oCounterTag = nil
+        studioId = nil
     }
 
     mutating func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -1543,6 +1625,7 @@ struct SceneLiveChipRowState: Equatable {
         } else {
             oCounterTag = nil
         }
+        studioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
     }
 
     mutating func syncLiveChipsToMatchSelectedFilter(_ selectedFilter: StashDBViewModel.SavedFilter?, savedFilters: [String: StashDBViewModel.SavedFilter]) {
@@ -1561,6 +1644,9 @@ struct SceneLiveChipRowState: Equatable {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearChipsOnly()
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
+                    studioId = id
+                }
             }
         } else if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f) {
             if let raw = f.filterDict {
@@ -1570,6 +1656,16 @@ struct SceneLiveChipRowState: Equatable {
             }
         } else {
             clearChipsOnly()
+            let flat: [String: Any]? = {
+                if let raw = f.filterDict { return FilterMapper.sanitize(raw, isMarker: false) }
+                if let obj = f.object_filter, let objDict = obj.value as? [String: Any] {
+                    return FilterMapper.sanitize(objDict, isMarker: false)
+                }
+                return nil
+            }()
+            if let flat, let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
+                studioId = id
+            }
         }
     }
 

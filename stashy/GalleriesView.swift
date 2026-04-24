@@ -34,9 +34,12 @@ struct GalleriesView: View {
     @State private var liveFilterFavorite: Bool?
     @State private var liveFilterMinRating: Int = 0
     @State private var liveFilterFiles: String?
+    @State private var liveFilterStudioId: String?
+    @State private var studioPickerOptions: [Studio] = []
+    @State private var studioPickerLoading = false
 
     private var isLiveFilterActive: Bool {
-        liveFilterFavorite != nil || liveFilterMinRating > 0 || liveFilterFiles != nil
+        liveFilterFavorite != nil || liveFilterMinRating > 0 || liveFilterFiles != nil || liveFilterStudioId != nil
     }
 
     private var activeLiveFilterDict: [String: Any] {
@@ -47,6 +50,9 @@ struct GalleriesView: View {
         }
         if liveFilterFiles == "has" { dict["file_count"] = ["value": 0, "modifier": "GREATER_THAN"] }
         if liveFilterFiles == "none" { dict["file_count"] = ["value": 0, "modifier": "EQUALS"] }
+        if let sid = liveFilterStudioId {
+            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
         return dict
     }
 
@@ -72,6 +78,16 @@ struct GalleriesView: View {
         liveFilterFavorite = nil
         liveFilterMinRating = 0
         liveFilterFiles = nil
+        liveFilterStudioId = nil
+    }
+
+    private func loadGalleryStudioPickerOptions() {
+        guard !studioPickerLoading else { return }
+        studioPickerLoading = true
+        viewModel.fetchStudiosForLiveFilterPicker(mode: .galleriesHasGalleries) { list in
+            studioPickerOptions = list
+            studioPickerLoading = false
+        }
     }
 
     private func mapGalleryLiveFragmentToChips(_ frag: [String: Any]) {
@@ -96,6 +112,12 @@ struct GalleriesView: View {
             } else if mod == "EQUALS" {
                 liveFilterFiles = "none"
             }
+        }
+        if let st = frag["studios"] as? [String: Any],
+           (st["modifier"] as? String) == "INCLUDES",
+           let vals = st["value"] as? [Any] {
+            let ids = vals.compactMap { $0 as? String }
+            liveFilterStudioId = ids.first
         }
     }
 
@@ -589,6 +611,10 @@ struct GalleriesView: View {
             liveMinRating: $liveFilterMinRating,
             liveFavorite: $liveFilterFavorite,
             liveFiles: $liveFilterFiles,
+            liveStudioId: $liveFilterStudioId,
+            studioPickerOptions: studioPickerOptions,
+            studioPickerLoading: studioPickerLoading,
+            onStudioPickerSectionAppear: { loadGalleryStudioPickerOptions() },
             onApply: { applyLiveFilter() },
             onReset: {
                 catalogPresetRowSelection = ""

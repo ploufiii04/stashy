@@ -108,6 +108,16 @@ enum NetworkError: Error {
 
 @MainActor
 class StashDBViewModel: ObservableObject {
+    /// Which studios to list in live-filter dropdowns (`findStudios` + count filter + client sort).
+    enum LiveFilterStudioPickerMode {
+        /// Studios with at least one scene; sorted by scene count (desc).
+        case scenesHasScenes
+        /// Studios with at least one image; sorted by image count (desc).
+        case imagesHasImages
+        /// Studios with at least one gallery; sorted by gallery count (desc).
+        case galleriesHasGalleries
+    }
+
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var serverStatus: String = "Nicht verbunden"
@@ -5684,6 +5694,46 @@ struct GenerateData: Codable {
         }
     }
 
+    /// Studios suitable for live-filter dropdowns (has scenes / images / galleries); sorted client-side by the relevant count.
+    func fetchStudiosForLiveFilterPicker(mode: LiveFilterStudioPickerMode, completion: @escaping ([Studio]) -> Void) {
+        let query = GraphQLQueries.queryWithFragments("findStudios")
+        let studioFilter: [String: Any]
+        switch mode {
+        case .scenesHasScenes:
+            studioFilter = ["scene_count": ["value": 0, "modifier": "GREATER_THAN"]]
+        case .imagesHasImages:
+            studioFilter = ["image_count": ["value": 0, "modifier": "GREATER_THAN"]]
+        case .galleriesHasGalleries:
+            studioFilter = ["gallery_count": ["value": 0, "modifier": "GREATER_THAN"]]
+        }
+        let variables: [String: Any] = [
+            "filter": [
+                "page": 1,
+                "per_page": 1000,
+                "sort": "name",
+                "direction": "ASC"
+            ],
+            "studio_filter": sanitizeFilter(studioFilter)
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            Task { @MainActor in completion([]) }
+            return
+        }
+        performGraphQLQuery(query: bodyString) { (response: StudiosResponse?) in
+            var list = response?.data?.findStudios.studios ?? []
+            switch mode {
+            case .scenesHasScenes:
+                list.sort { $0.sceneCount > $1.sceneCount }
+            case .imagesHasImages:
+                list.sort { ($0.imageCount ?? 0) > ($1.imageCount ?? 0) }
+            case .galleriesHasGalleries:
+                list.sort { ($0.galleryCount ?? 0) > ($1.galleryCount ?? 0) }
+            }
+            Task { @MainActor in completion(list) }
+        }
+    }
+
     func updateScenePerformers(sceneId: String, performerIds: [String], completion: @escaping (Bool) -> Void) {
         let mutation = """
         mutation SceneUpdate($input: SceneUpdateInput!) {
@@ -7420,6 +7470,8 @@ struct Studio: Codable, Identifiable, Equatable {
     let sceneCount: Int
     let performerCount: Int?
     let galleryCount: Int?
+    /// From `image_count` on `Studio` (GraphQL); used for studio picker ordering and display.
+    let imageCount: Int?
     let details: String?
     let imagePath: String?
     let favorite: Bool?
@@ -7432,18 +7484,20 @@ struct Studio: Codable, Identifiable, Equatable {
         case sceneCount = "scene_count"
         case performerCount = "performer_count"
         case galleryCount = "gallery_count"
+        case imageCount = "image_count"
         case imagePath = "image_path"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
     
-    init(id: String, name: String, url: String? = nil, sceneCount: Int = 0, performerCount: Int? = nil, galleryCount: Int? = nil, details: String? = nil, imagePath: String? = nil, favorite: Bool? = nil, rating100: Int? = nil, createdAt: String? = nil, updatedAt: String? = nil) {
+    init(id: String, name: String, url: String? = nil, sceneCount: Int = 0, performerCount: Int? = nil, galleryCount: Int? = nil, imageCount: Int? = nil, details: String? = nil, imagePath: String? = nil, favorite: Bool? = nil, rating100: Int? = nil, createdAt: String? = nil, updatedAt: String? = nil) {
         self.id = id
         self.name = name
         self.url = url
         self.sceneCount = sceneCount
         self.performerCount = performerCount
         self.galleryCount = galleryCount
+        self.imageCount = imageCount
         self.details = details
         self.imagePath = imagePath
         self.favorite = favorite

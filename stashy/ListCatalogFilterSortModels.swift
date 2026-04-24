@@ -382,6 +382,56 @@ enum StudioListLiveFilterPresetStore {
 // MARK: - When to show live chip rows vs. server-only notice
 
 enum CatalogLiveChipFilterSupport {
+    // MARK: Studio criterion parsing (saved filters / JSON may use Int ids or a single string `value`)
+
+    private static func singleStudioIdString(_ value: Any) -> String? {
+        if let s = value as? String {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : t
+        }
+        if let n = value as? NSNumber { return String(n.intValue) }
+        if let i = value as? Int { return String(i) }
+        return nil
+    }
+
+    private static func studioIdStrings(from value: Any?) -> [String] {
+        guard let value else { return [] }
+        if let arr = value as? [Any] {
+            return arr.compactMap { singleStudioIdString($0) }
+        }
+        if let s = singleStudioIdString(value) { return [s] }
+        return []
+    }
+
+    /// First id for `studios` with modifier `INCLUDES` (catalog live filters).
+    static func studioIncludesFirstId(fromCriterion value: Any?) -> String? {
+        guard let d = value as? [String: Any] else { return nil }
+        guard (d["modifier"] as? String) == "INCLUDES" else { return nil }
+        return studioIdStrings(from: d["value"]).first
+    }
+
+    /// Criteria dict for image live chips: prefers `filter_dict`, else `object_filter`, unwraps nested `image_filter`.
+    static func imageFilterCriteriaForLiveChipUI(from filter: StashDBViewModel.SavedFilter?) -> [String: Any] {
+        guard let filter else { return [:] }
+        let raw: [String: Any]?
+        if let d = filter.filterDict, !d.isEmpty {
+            raw = d
+        } else if let obj = filter.object_filter, let od = obj.value as? [String: Any], !od.isEmpty {
+            raw = od
+        } else {
+            return [:]
+        }
+        var flat = FilterMapper.sanitize(raw!, isMarker: false)
+        while let inner = flat["image_filter"] as? [String: Any] {
+            flat.removeValue(forKey: "image_filter")
+            let innerSan = FilterMapper.sanitize(inner, isMarker: false)
+            for (k, v) in innerSan {
+                flat[k] = v
+            }
+        }
+        return flat
+    }
+
     static func performerSavedFilterSupportsLiveEditor(_ filter: StashDBViewModel.SavedFilter?) -> Bool {
         guard let dict = filter?.filterDict, !dict.isEmpty else { return true }
         if dict.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
@@ -409,15 +459,16 @@ enum CatalogLiveChipFilterSupport {
     static func gallerySavedFilterSupportsLiveEditor(_ filter: StashDBViewModel.SavedFilter?) -> Bool {
         guard let dict = filter?.filterDict, !dict.isEmpty else { return true }
         if dict.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
-        let allowed: Set<String> = ["favorite", "rating100", "file_count", "path", "details", "stash_ids"]
+        let allowed: Set<String> = ["favorite", "rating100", "file_count", "path", "details", "stash_ids", "studios"]
         return dict.keys.allSatisfy { allowed.contains($0) }
     }
 
     static func imageSavedFilterSupportsLiveEditor(_ filter: StashDBViewModel.SavedFilter?) -> Bool {
-        guard let dict = filter?.filterDict, !dict.isEmpty else { return true }
-        if dict.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
-        let allowed: Set<String> = ["performer_favorite", "rating100", "organized", "is_missing", "path", "stash_ids", "o_counter"]
-        return dict.keys.allSatisfy { allowed.contains($0) }
+        let flat = imageFilterCriteriaForLiveChipUI(from: filter)
+        guard !flat.isEmpty else { return true }
+        if flat.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
+        let allowed: Set<String> = ["performer_favorite", "rating100", "organized", "is_missing", "path", "stash_ids", "o_counter", "studios"]
+        return flat.keys.allSatisfy { allowed.contains($0) }
     }
 }
 

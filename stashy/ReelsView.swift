@@ -121,6 +121,8 @@ struct ReelsView: View {
     @State private var reelsSceneLiveChips = SceneLiveChipRowState()
     @State private var reelsMarkerLiveChips = SceneLiveChipRowState()
     @State private var reelsPreviewLiveChips = SceneLiveChipRowState()
+    @State private var reelsStudioPickerOptions: [Studio] = []
+    @State private var reelsStudioPickerLoading = false
     @State private var reelsSceneLivePresets: [SceneLiveFilterPreset] = SceneLiveFilterPresetStore.loadPresets()
     @State private var reelsScenePresetNameInput = ""
     @State private var showReelsSceneSaveAsAlert = false
@@ -251,6 +253,15 @@ struct ReelsView: View {
         case .markers: reelsMarkerLiveChips.clearChipsOnly()
         case .previews: reelsPreviewLiveChips.clearChipsOnly()
         default: reelsSceneLiveChips.clearChipsOnly()
+        }
+    }
+
+    private func reelsLoadStudioPickerOptions() {
+        guard !reelsStudioPickerLoading else { return }
+        reelsStudioPickerLoading = true
+        viewModel.fetchStudiosForLiveFilterPicker(mode: .scenesHasScenes) { list in
+            reelsStudioPickerOptions = list
+            reelsStudioPickerLoading = false
         }
     }
 
@@ -1638,6 +1649,10 @@ struct ReelsView: View {
             resolution: reelChipBinding(\.resolution),
             performerFavorite: reelChipBinding(\.performerFavorite),
             oCounterTag: reelChipBinding(\.oCounterTag),
+            studioSelectionId: reelChipBinding(\.studioId),
+            studioPickerOptions: reelsStudioPickerOptions,
+            studioPickerLoading: reelsStudioPickerLoading,
+            onStudioPickerSectionAppear: { reelsLoadStudioPickerOptions() },
             onApply: { reelsApplySceneLiveFromSheet() },
             onReset: {
                 reelsSetActiveSheetPresetSelection("")
@@ -1731,6 +1746,10 @@ struct ReelsView: View {
                     livePerformerFavorite: $reelsClipImageFilters.liveFilterPerformerFavorite,
                     liveOrganized: $reelsClipImageFilters.liveFilterOrganized,
                     liveOCounterTag: $reelsClipImageFilters.liveFilterOCounterTag,
+                    liveStudioId: $reelsClipImageFilters.liveFilterStudioId,
+                    studioPickerOptions: reelsClipImageFilters.studioPickerOptions,
+                    studioPickerLoading: reelsClipImageFilters.studioPickerLoading,
+                    onStudioPickerSectionAppear: { reelsClipImageFilters.loadStudioPickerOptions(viewModel: viewModel) },
                     onApply: {
                         refetchReelsClipsFromModel(viewModel)
                     },
