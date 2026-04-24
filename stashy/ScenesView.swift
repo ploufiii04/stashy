@@ -249,20 +249,24 @@ enum SceneLiveChipFilterSupport {
         return []
     }
 
-    /// First id for `studios` with modifier `INCLUDES` (Stash may send numeric ids or a single string `value`).
-    static func studioIncludesFirstId(fromCriterion value: Any?) -> String? {
-        guard let d = value as? [String: Any] else { return nil }
-        guard (d["modifier"] as? String) == "INCLUDES" else { return nil }
-        return studioIdStrings(from: d["value"]).first
+    /// Ids for `studios` / `tags` / `groups` with modifier `INCLUDES`.
+    static func includesIds(fromCriterion value: Any?) -> [String] {
+        guard let d = value as? [String: Any] else { return [] }
+        guard (d["modifier"] as? String) == "INCLUDES" else { return [] }
+        return studioIdStrings(from: d["value"])
     }
 
-    /// `studios` / `tags` / `groups` with `INCLUDES`: at most one id (same shape as Stash multi-id criteria).
+    /// First id for `studios` with modifier `INCLUDES` (Stash may send numeric ids or a single string `value`).
+    static func studioIncludesFirstId(fromCriterion value: Any?) -> String? {
+        includesIds(fromCriterion: value).first
+    }
+
+    /// `studios` / `tags` / `groups` with `INCLUDES` (same shape as Stash multi-id criteria).
     private static func multiIdINCLUDESCriterionIsChipRepresentable(_ value: Any?) -> Bool {
         guard let value else { return true }
         guard let d = value as? [String: Any] else { return false }
         let mod = (d["modifier"] as? String) ?? ""
-        guard mod == "INCLUDES" else { return false }
-        return studioIdStrings(from: d["value"]).count <= 1
+        return mod == "INCLUDES"
     }
 
     static func savedFilterSupportsLiveChipEditor(_ filter: StashDBViewModel.SavedFilter?) -> Bool {
@@ -365,16 +369,16 @@ private struct ScenesViewContent: View {
     @State private var liveFilterPerformerFavorite: Bool? = nil // nil = any
     /// O-counter criterion as "MODIFIER:value" (e.g. GREATER_THAN:0); nil = any
     @State private var liveFilterOCounterTag: String? = nil
-    /// Selected studio id for live `studios` filter; nil = any studio.
-    @State private var liveFilterStudioId: String? = nil
+    /// Selected studio ids for live `studios` filter; empty = any studio.
+    @State private var liveFilterStudioIds: [String] = []
     @State private var studioPickerOptions: [Studio] = []
     @State private var studioPickerLoading = false
-    /// Live `tags` `INCLUDES` (single id); tag picker lists only tags with scenes.
-    @State private var liveFilterTagId: String? = nil
+    /// Live `tags` `INCLUDES`; tag picker lists only tags with scenes.
+    @State private var liveFilterTagIds: [String] = []
     @State private var tagPickerOptions: [Tag] = []
     @State private var tagPickerLoading = false
-    /// Live `groups` `INCLUDES` (single id).
-    @State private var liveFilterGroupId: String? = nil
+    /// Live `groups` `INCLUDES`.
+    @State private var liveFilterGroupIds: [String] = []
     @State private var groupPickerOptions: [StashGroup] = []
     @State private var groupPickerLoading = false
     @State private var liveFilterPresets: [SceneLiveFilterPreset] = SceneLiveFilterPresetStore.loadPresets()
@@ -479,7 +483,7 @@ private struct ScenesViewContent: View {
         liveFilterMinRating > 0 || liveFilterOrganized != nil
         || liveFilterInteractive != nil || liveFilterOrientation != nil || liveFilterPerformerCount != nil
         || liveFilterResolution != nil || liveFilterPerformerFavorite != nil || liveFilterOCounterTag != nil
-        || liveFilterStudioId != nil || liveFilterTagId != nil || liveFilterGroupId != nil
+        || !liveFilterStudioIds.isEmpty || !liveFilterTagIds.isEmpty || !liveFilterGroupIds.isEmpty
     }
 
     /// Chips, saved scene filter, or a preset row in the sheet — drives FAB tint/dot now that toolbar filter/sort are gone.
@@ -533,14 +537,14 @@ private struct ScenesViewContent: View {
         if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
             dict["o_counter"] = oc
         }
-        if let sid = liveFilterStudioId {
-            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        if !liveFilterStudioIds.isEmpty {
+            dict["studios"] = ["modifier": "INCLUDES", "value": liveFilterStudioIds]
         }
-        if let tid = liveFilterTagId {
-            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        if !liveFilterTagIds.isEmpty {
+            dict["tags"] = ["modifier": "INCLUDES", "value": liveFilterTagIds]
         }
-        if let gid = liveFilterGroupId {
-            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        if !liveFilterGroupIds.isEmpty {
+            dict["groups"] = ["modifier": "INCLUDES", "value": liveFilterGroupIds]
         }
         return dict
     }
@@ -550,24 +554,24 @@ private struct ScenesViewContent: View {
         var dict: [String: Any] = SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
             ? activeLiveFilterDict
             : [:]
-        if let sid = liveFilterStudioId {
-            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        if !liveFilterStudioIds.isEmpty {
+            dict["studios"] = ["modifier": "INCLUDES", "value": liveFilterStudioIds]
         }
-        if let tid = liveFilterTagId {
-            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        if !liveFilterTagIds.isEmpty {
+            dict["tags"] = ["modifier": "INCLUDES", "value": liveFilterTagIds]
         }
-        if let gid = liveFilterGroupId {
-            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        if !liveFilterGroupIds.isEmpty {
+            dict["groups"] = ["modifier": "INCLUDES", "value": liveFilterGroupIds]
         }
         return dict
     }
 
-    /// Reads at most one `INCLUDES` id each for `studios`, `tags`, `groups` (after clearing other live chips).
+    /// Reads `INCLUDES` ids each for `studios`, `tags`, `groups` (after clearing other live chips).
     private func applyLiveAuxIdsFromFragment(_ frag: [String: Any]) {
         let f = FilterMapper.sanitize(frag, isMarker: false)
-        liveFilterStudioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["studios"])
-        liveFilterTagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["tags"])
-        liveFilterGroupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["groups"])
+        liveFilterStudioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["studios"])
+        liveFilterTagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["tags"])
+        liveFilterGroupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["groups"])
     }
 
     /// Does not change sort: syncs chip state to `selectedFilter` / stashy metadata (e.g. deep link).
@@ -647,9 +651,9 @@ private struct ScenesViewContent: View {
         } else {
             liveFilterOCounterTag = nil
         }
-        liveFilterStudioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
-        liveFilterTagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["tags"])
-        liveFilterGroupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["groups"])
+        liveFilterStudioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: frag["studios"])
+        liveFilterTagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: frag["tags"])
+        liveFilterGroupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: frag["groups"])
     }
 
     private func boolFromLiveJSON(_ value: Any?) -> Bool? {
@@ -702,9 +706,9 @@ private struct ScenesViewContent: View {
         liveFilterResolution = nil
         liveFilterPerformerFavorite = nil
         liveFilterOCounterTag = nil
-        liveFilterStudioId = nil
-        liveFilterTagId = nil
-        liveFilterGroupId = nil
+        liveFilterStudioIds = []
+        liveFilterTagIds = []
+        liveFilterGroupIds = []
     }
 
     private func loadStudiosForSceneLivePicker() {
@@ -1198,15 +1202,15 @@ private struct ScenesViewContent: View {
                 resolution: $liveFilterResolution,
                 performerFavorite: $liveFilterPerformerFavorite,
                 oCounterTag: $liveFilterOCounterTag,
-                studioSelectionId: $liveFilterStudioId,
+                studioSelectionIds: $liveFilterStudioIds,
                 studioPickerOptions: studioPickerOptions,
                 studioPickerLoading: studioPickerLoading,
                 onStudioPickerSectionAppear: { loadStudiosForSceneLivePicker() },
-                tagSelectionId: $liveFilterTagId,
+                tagSelectionIds: $liveFilterTagIds,
                 tagPickerOptions: tagPickerOptions,
                 tagPickerLoading: tagPickerLoading,
                 onTagPickerSectionAppear: { loadTagsForSceneLivePicker() },
-                groupSelectionId: $liveFilterGroupId,
+                groupSelectionIds: $liveFilterGroupIds,
                 groupPickerOptions: groupPickerOptions,
                 groupPickerLoading: groupPickerLoading,
                 onGroupPickerSectionAppear: { loadGroupsForSceneLivePicker() },
@@ -1220,9 +1224,9 @@ private struct ScenesViewContent: View {
                     liveFilterResolution = nil
                     liveFilterPerformerFavorite = nil
                     liveFilterOCounterTag = nil
-                    liveFilterStudioId = nil
-                    liveFilterTagId = nil
-                    liveFilterGroupId = nil
+                    liveFilterStudioIds = []
+                    liveFilterTagIds = []
+                    liveFilterGroupIds = []
                     liveSheetPresetSelection = ""
                     selectedFilter = nil
                     applyLiveFilter()
@@ -1668,15 +1672,15 @@ struct SceneLiveFilterSheet: View {
     @Binding var resolution: String?
     @Binding var performerFavorite: Bool?
     @Binding var oCounterTag: String?
-    @Binding var studioSelectionId: String?
+    @Binding var studioSelectionIds: [String]
     var studioPickerOptions: [Studio]
     var studioPickerLoading: Bool
     var onStudioPickerSectionAppear: () -> Void
-    @Binding var tagSelectionId: String?
+    @Binding var tagSelectionIds: [String]
     var tagPickerOptions: [Tag]
     var tagPickerLoading: Bool
     var onTagPickerSectionAppear: () -> Void
-    @Binding var groupSelectionId: String?
+    @Binding var groupSelectionIds: [String]
     var groupPickerOptions: [StashGroup]
     var groupPickerLoading: Bool
     var onGroupPickerSectionAppear: () -> Void
@@ -1743,17 +1747,19 @@ struct SceneLiveFilterSheet: View {
                     }
 
                 VStack(spacing: 0) {
-                        CatalogStudioLiveFilterPickerRow(
-                            selectedStudioId: $studioSelectionId,
-                            studios: studioPickerOptions,
+                        CatalogNamedEntityLiveFilterMultiPickerRow(
+                            title: "Studio",
+                            selectedIds: $studioSelectionIds,
+                            items: studioPickerOptions,
+                            displayName: { $0.name },
                             isLoading: studioPickerLoading,
                             onAppearLoad: onStudioPickerSectionAppear,
                             onSelectionChange: onApply
                         )
                         Divider().padding(.leading, 16)
-                        CatalogNamedEntityLiveFilterPickerRow(
+                        CatalogNamedEntityLiveFilterMultiPickerRow(
                             title: "Tag",
-                            selectedId: $tagSelectionId,
+                            selectedIds: $tagSelectionIds,
                             items: tagPickerOptions,
                             displayName: { $0.name },
                             isLoading: tagPickerLoading,
@@ -1761,9 +1767,9 @@ struct SceneLiveFilterSheet: View {
                             onSelectionChange: onApply
                         )
                         Divider().padding(.leading, 16)
-                        CatalogNamedEntityLiveFilterPickerRow(
+                        CatalogNamedEntityLiveFilterMultiPickerRow(
                             title: "Group",
-                            selectedId: $groupSelectionId,
+                            selectedIds: $groupSelectionIds,
                             items: groupPickerOptions,
                             displayName: { $0.name },
                             isLoading: groupPickerLoading,

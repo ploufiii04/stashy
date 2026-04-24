@@ -5767,6 +5767,32 @@ struct GenerateData: Codable {
         }
     }
 
+    /// Tags that appear on at least one image — for image live-filter pickers; sorted by `image_count` desc.
+    func fetchTagsForImageLiveFilterPicker(completion: @escaping ([Tag]) -> Void) {
+        let query = GraphQLQueries.queryWithFragments("findTags")
+        let variables: [String: Any] = [
+            "filter": [
+                "page": 1,
+                "per_page": Self.sceneLiveFilterPickerMaxResults,
+                "sort": "images_count",
+                "direction": "DESC"
+            ],
+            "tag_filter": sanitizeFilter([
+                "image_count": ["value": 0, "modifier": "GREATER_THAN"]
+            ])
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            Task { @MainActor in completion([]) }
+            return
+        }
+        performGraphQLQuery(query: bodyString) { (response: TagsResponse?) in
+            var list = response?.data?.findTags.tags ?? []
+            list.sort { ($0.imageCount ?? 0) > ($1.imageCount ?? 0) }
+            Task { @MainActor in completion(list) }
+        }
+    }
+
     /// Groups with at least one scene — for scene live-filter pickers (no 50-cap; large `per_page` like catalog).
     func fetchGroupsForSceneLiveFilterPicker(completion: @escaping ([StashGroup]) -> Void) {
         let query = GraphQLQueries.queryWithFragments("findGroups")
@@ -7603,6 +7629,7 @@ struct Tag: Codable, Identifiable, Equatable {
     let description: String?
     let imagePath: String?
     let sceneCount: Int?
+    let imageCount: Int?
     let galleryCount: Int?
     let sceneMarkerCount: Int?
     let performerCount: Int?
@@ -7614,6 +7641,7 @@ struct Tag: Codable, Identifiable, Equatable {
         case id, name, favorite, description
         case imagePath = "image_path"
         case sceneCount = "scene_count"
+        case imageCount = "image_count"
         case galleryCount = "gallery_count"
         case sceneMarkerCount = "scene_marker_count"
         case performerCount = "performer_count"

@@ -274,10 +274,14 @@ struct ImagesView: View {
             livePerformerFavorite: $imageListFilters.liveFilterPerformerFavorite,
             liveOrganized: $imageListFilters.liveFilterOrganized,
             liveOCounterTag: $imageListFilters.liveFilterOCounterTag,
-            liveStudioId: $imageListFilters.liveFilterStudioId,
+            liveStudioIds: $imageListFilters.liveFilterStudioIds,
+            liveTagIds: $imageListFilters.liveFilterTagIds,
             studioPickerOptions: imageListFilters.studioPickerOptions,
             studioPickerLoading: imageListFilters.studioPickerLoading,
             onStudioPickerSectionAppear: { imageListFilters.loadStudioPickerOptions(viewModel: viewModel) },
+            tagPickerOptions: imageListFilters.tagPickerOptions,
+            tagPickerLoading: imageListFilters.tagPickerLoading,
+            onTagPickerSectionAppear: { imageListFilters.loadTagPickerOptions(viewModel: viewModel) },
             onApply: { imageListFilters.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 imageListFilters.catalogPresetRowSelection = ""

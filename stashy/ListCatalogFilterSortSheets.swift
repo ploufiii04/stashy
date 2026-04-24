@@ -150,6 +150,115 @@ struct CatalogNamedEntityLiveFilterPickerRow<Item: Identifiable & Equatable>: Vi
     }
 }
 
+/// Inline multi-select picker for live filters. It intentionally does not use `Picker(.menu)`,
+/// because menus close after every tap; this stays open while the user toggles multiple rows.
+struct CatalogNamedEntityLiveFilterMultiPickerRow<Item: Identifiable & Equatable>: View where Item.ID == String {
+    let title: String
+    @Binding var selectedIds: [String]
+    let items: [Item]
+    let displayName: (Item) -> String
+    let isLoading: Bool
+    var onAppearLoad: () -> Void
+    var onSelectionChange: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+    @State private var isExpanded = false
+
+    private var selectedSummary: String {
+        guard !selectedIds.isEmpty else { return "Any" }
+        let selectedNames = items
+            .filter { selectedIds.contains($0.id) }
+            .map(displayName)
+        if selectedNames.isEmpty { return "\(selectedIds.count) selected" }
+        if selectedNames.count <= 2 { return selectedNames.joined(separator: ", ") }
+        return "\(selectedNames[0]), \(selectedNames[1]) +\(selectedNames.count - 2)"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(DesignTokens.Animation.quick) {
+                    isExpanded.toggle()
+                }
+                onAppearLoad()
+            } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: CatalogFilterSortSheetLayout.labelColumnWidth, alignment: .leading)
+                    Text(selectedSummary)
+                        .font(.subheadline)
+                        .foregroundColor(selectedIds.isEmpty ? .secondary : .primary)
+                        .lineLimit(1)
+                    Spacer()
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(appearance.tintColor)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            if isExpanded {
+                VStack(spacing: 0) {
+                    Button {
+                        guard !selectedIds.isEmpty else { return }
+                        selectedIds = []
+                        onSelectionChange()
+                    } label: {
+                        multiPickerOptionRow(title: "Any", isSelected: selectedIds.isEmpty)
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(items) { item in
+                        Divider().padding(.leading, CatalogFilterSortSheetLayout.labelColumnWidth + 28)
+                        Button {
+                            toggle(item.id)
+                        } label: {
+                            multiPickerOptionRow(title: displayName(item), isSelected: selectedIds.contains(item.id))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+        .onAppear { onAppearLoad() }
+    }
+
+    private func multiPickerOptionRow(title: String, isSelected: Bool) -> some View {
+        HStack(spacing: 12) {
+            Spacer().frame(width: CatalogFilterSortSheetLayout.labelColumnWidth)
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(isSelected ? appearance.tintColor : .secondary)
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+    }
+
+    private func toggle(_ id: String) {
+        if selectedIds.contains(id) {
+            selectedIds.removeAll { $0 == id }
+        } else {
+            selectedIds.append(id)
+        }
+        onSelectionChange()
+    }
+}
+
 struct CatalogServerManagedFilterNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1350,10 +1459,14 @@ struct ImagesCatalogFilterSortSheet: View {
     @Binding var livePerformerFavorite: Bool?
     @Binding var liveOrganized: String?
     @Binding var liveOCounterTag: String?
-    @Binding var liveStudioId: String?
+    @Binding var liveStudioIds: [String]
+    @Binding var liveTagIds: [String]
     var studioPickerOptions: [Studio]
     var studioPickerLoading: Bool
     var onStudioPickerSectionAppear: () -> Void
+    var tagPickerOptions: [Tag]
+    var tagPickerLoading: Bool
+    var onTagPickerSectionAppear: () -> Void
     var onApply: () -> Void
     var onReset: () -> Void
     var onRequestSave: () -> Void
@@ -1507,11 +1620,23 @@ struct ImagesCatalogFilterSortSheet: View {
 
     private var imageLiveChipsCard: some View {
         VStack(spacing: 0) {
-            CatalogStudioLiveFilterPickerRow(
-                selectedStudioId: $liveStudioId,
-                studios: studioPickerOptions,
+            CatalogNamedEntityLiveFilterMultiPickerRow(
+                title: "Studio",
+                selectedIds: $liveStudioIds,
+                items: studioPickerOptions,
+                displayName: { $0.name },
                 isLoading: studioPickerLoading,
                 onAppearLoad: onStudioPickerSectionAppear,
+                onSelectionChange: onApply
+            )
+            Divider().padding(.leading, 16)
+            CatalogNamedEntityLiveFilterMultiPickerRow(
+                title: "Tag",
+                selectedIds: $liveTagIds,
+                items: tagPickerOptions,
+                displayName: { $0.name },
+                isLoading: tagPickerLoading,
+                onAppearLoad: onTagPickerSectionAppear,
                 onSelectionChange: onApply
             )
             Divider().padding(.leading, 16)
@@ -1572,17 +1697,17 @@ struct SceneLiveChipRowState: Equatable {
     var resolution: String? = nil
     var performerFavorite: Bool? = nil
     var oCounterTag: String? = nil
-    /// Single studio id for `studios` `INCLUDES`; nil = any.
-    var studioId: String? = nil
-    /// Single tag id for `tags` `INCLUDES`; nil = any.
-    var tagId: String? = nil
-    /// Single group id for `groups` `INCLUDES`; nil = any.
-    var groupId: String? = nil
+    /// Studio ids for `studios` `INCLUDES`; empty = any.
+    var studioIds: [String] = []
+    /// Tag ids for `tags` `INCLUDES`; empty = any.
+    var tagIds: [String] = []
+    /// Group ids for `groups` `INCLUDES`; empty = any.
+    var groupIds: [String] = []
 
     var isLiveFilterActive: Bool {
         minRating > 0 || organized != nil || interactive != nil || orientation != nil
             || performerCount != nil || resolution != nil || performerFavorite != nil || oCounterTag != nil
-            || studioId != nil || tagId != nil || groupId != nil
+            || !studioIds.isEmpty || !tagIds.isEmpty || !groupIds.isEmpty
     }
 
     func activeLiveFilterDict() -> [String: Any] {
@@ -1609,14 +1734,14 @@ struct SceneLiveChipRowState: Equatable {
         if let tag = oCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
             dict["o_counter"] = oc
         }
-        if let sid = studioId {
-            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        if !studioIds.isEmpty {
+            dict["studios"] = ["modifier": "INCLUDES", "value": studioIds]
         }
-        if let tid = tagId {
-            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        if !tagIds.isEmpty {
+            dict["tags"] = ["modifier": "INCLUDES", "value": tagIds]
         }
-        if let gid = groupId {
-            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        if !groupIds.isEmpty {
+            dict["groups"] = ["modifier": "INCLUDES", "value": groupIds]
         }
         return dict
     }
@@ -1625,14 +1750,14 @@ struct SceneLiveChipRowState: Equatable {
         var dict: [String: Any] = SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
             ? activeLiveFilterDict()
             : [:]
-        if let sid = studioId {
-            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        if !studioIds.isEmpty {
+            dict["studios"] = ["modifier": "INCLUDES", "value": studioIds]
         }
-        if let tid = tagId {
-            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        if !tagIds.isEmpty {
+            dict["tags"] = ["modifier": "INCLUDES", "value": tagIds]
         }
-        if let gid = groupId {
-            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        if !groupIds.isEmpty {
+            dict["groups"] = ["modifier": "INCLUDES", "value": groupIds]
         }
         return dict
     }
@@ -1646,9 +1771,9 @@ struct SceneLiveChipRowState: Equatable {
         resolution = nil
         performerFavorite = nil
         oCounterTag = nil
-        studioId = nil
-        tagId = nil
-        groupId = nil
+        studioIds = []
+        tagIds = []
+        groupIds = []
     }
 
     mutating func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -1691,9 +1816,9 @@ struct SceneLiveChipRowState: Equatable {
         } else {
             oCounterTag = nil
         }
-        studioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
-        tagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["tags"])
-        groupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["groups"])
+        studioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: frag["studios"])
+        tagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: frag["tags"])
+        groupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: frag["groups"])
     }
 
     mutating func syncLiveChipsToMatchSelectedFilter(_ selectedFilter: StashDBViewModel.SavedFilter?, savedFilters: [String: StashDBViewModel.SavedFilter]) {
@@ -1712,15 +1837,9 @@ struct SceneLiveChipRowState: Equatable {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearChipsOnly()
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
-                    studioId = id
-                }
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["tags"]) {
-                    tagId = id
-                }
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["groups"]) {
-                    groupId = id
-                }
+                studioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["studios"])
+                tagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["tags"])
+                groupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["groups"])
             }
         } else if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f) {
             if let raw = f.filterDict {
@@ -1738,15 +1857,9 @@ struct SceneLiveChipRowState: Equatable {
                 return nil
             }()
             if let flat {
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
-                    studioId = id
-                }
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["tags"]) {
-                    tagId = id
-                }
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["groups"]) {
-                    groupId = id
-                }
+                studioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: flat["studios"])
+                tagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: flat["tags"])
+                groupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: flat["groups"])
             }
         }
     }

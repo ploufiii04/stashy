@@ -403,11 +403,16 @@ enum CatalogLiveChipFilterSupport {
         return []
     }
 
+    /// Ids for `studios` / `tags` with modifier `INCLUDES` (catalog live filters).
+    static func includesIds(fromCriterion value: Any?) -> [String] {
+        guard let d = value as? [String: Any] else { return [] }
+        guard (d["modifier"] as? String) == "INCLUDES" else { return [] }
+        return studioIdStrings(from: d["value"])
+    }
+
     /// First id for `studios` with modifier `INCLUDES` (catalog live filters).
     static func studioIncludesFirstId(fromCriterion value: Any?) -> String? {
-        guard let d = value as? [String: Any] else { return nil }
-        guard (d["modifier"] as? String) == "INCLUDES" else { return nil }
-        return studioIdStrings(from: d["value"]).first
+        includesIds(fromCriterion: value).first
     }
 
     /// Criteria dict for image live chips: prefers `filter_dict`, else `object_filter`, unwraps nested `image_filter`.
@@ -467,7 +472,13 @@ enum CatalogLiveChipFilterSupport {
         let flat = imageFilterCriteriaForLiveChipUI(from: filter)
         guard !flat.isEmpty else { return true }
         if flat.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
-        let allowed: Set<String> = ["performer_favorite", "rating100", "organized", "is_missing", "path", "stash_ids", "o_counter", "studios"]
+        let allowed: Set<String> = ["performer_favorite", "rating100", "organized", "is_missing", "path", "stash_ids", "o_counter", "studios", "tags"]
+        if flat["studios"] != nil, includesIds(fromCriterion: flat["studios"]).isEmpty {
+            return false
+        }
+        if flat["tags"] != nil, includesIds(fromCriterion: flat["tags"]).isEmpty {
+            return false
+        }
         return flat.keys.allSatisfy { allowed.contains($0) }
     }
 }

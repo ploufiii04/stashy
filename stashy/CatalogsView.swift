@@ -1216,10 +1216,14 @@ struct GroupDetailView: View {
             livePerformerFavorite: $linkedImages.liveFilterPerformerFavorite,
             liveOrganized: $linkedImages.liveFilterOrganized,
             liveOCounterTag: $linkedImages.liveFilterOCounterTag,
-            liveStudioId: $linkedImages.liveFilterStudioId,
+            liveStudioIds: $linkedImages.liveFilterStudioIds,
+            liveTagIds: $linkedImages.liveFilterTagIds,
             studioPickerOptions: linkedImages.studioPickerOptions,
             studioPickerLoading: linkedImages.studioPickerLoading,
             onStudioPickerSectionAppear: { linkedImages.loadStudioPickerOptions(viewModel: viewModel) },
+            tagPickerOptions: linkedImages.tagPickerOptions,
+            tagPickerLoading: linkedImages.tagPickerLoading,
+            onTagPickerSectionAppear: { linkedImages.loadTagPickerOptions(viewModel: viewModel) },
             onApply: { linkedImages.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 linkedImages.catalogPresetRowSelection = ""

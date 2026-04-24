@@ -1442,9 +1442,12 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
     @Published var liveFilterMinRating: Int = 0
     @Published var liveFilterOrganized: String?
     @Published var liveFilterOCounterTag: String?
-    @Published var liveFilterStudioId: String?
+    @Published var liveFilterStudioIds: [String] = []
     @Published var studioPickerOptions: [Studio] = []
     @Published var studioPickerLoading = false
+    @Published var liveFilterTagIds: [String] = []
+    @Published var tagPickerOptions: [Tag] = []
+    @Published var tagPickerLoading = false
 
     init(scope: DetailLinkedImagesScope, initialSort: StashDBViewModel.ImageSortOption = .dateDesc) {
         self.scope = scope
@@ -1454,7 +1457,7 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
 
     private var isLiveFilterActive: Bool {
         liveFilterPerformerFavorite != nil || liveFilterMinRating > 0 || liveFilterOrganized != nil
-            || liveFilterOCounterTag != nil || liveFilterStudioId != nil
+            || liveFilterOCounterTag != nil || !liveFilterStudioIds.isEmpty || !liveFilterTagIds.isEmpty
     }
 
     var catalogFilterSortFABActive: Bool {
@@ -1482,8 +1485,11 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
         if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
             dict["o_counter"] = oc
         }
-        if let sid = liveFilterStudioId {
-            dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        if !liveFilterStudioIds.isEmpty {
+            dict["studios"] = ["modifier": "INCLUDES", "value": liveFilterStudioIds]
+        }
+        if !liveFilterTagIds.isEmpty {
+            dict["tags"] = ["modifier": "INCLUDES", "value": liveFilterTagIds]
         }
         return dict
     }
@@ -1495,6 +1501,16 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             guard let self else { return }
             self.studioPickerOptions = list
             self.studioPickerLoading = false
+        }
+    }
+
+    func loadTagPickerOptions(viewModel: StashDBViewModel) {
+        guard !tagPickerLoading else { return }
+        tagPickerLoading = true
+        viewModel.fetchTagsForImageLiveFilterPicker { [weak self] list in
+            guard let self else { return }
+            self.tagPickerOptions = list
+            self.tagPickerLoading = false
         }
     }
 
@@ -1556,7 +1572,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
         liveFilterMinRating = 0
         liveFilterOrganized = nil
         liveFilterOCounterTag = nil
-        liveFilterStudioId = nil
+        liveFilterStudioIds = []
+        liveFilterTagIds = []
     }
 
     func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -1591,7 +1608,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
                 liveFilterOCounterTag = "\(mod):\(v)"
             }
         }
-        liveFilterStudioId = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
+        liveFilterStudioIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: frag["studios"])
+        liveFilterTagIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: frag["tags"])
     }
 
     /// Applies chip state from a normal Stash saved image filter (`filter_dict` and/or `object_filter`).
@@ -1605,9 +1623,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             mapLiveFragmentToChips(criteria)
         } else {
             clearLiveChipsOnly()
-            if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: criteria["studios"]) {
-                liveFilterStudioId = id
-            }
+            liveFilterStudioIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: criteria["studios"])
+            liveFilterTagIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: criteria["tags"])
         }
     }
 
@@ -1628,9 +1645,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveChipsOnly()
-                if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
-                    liveFilterStudioId = id
-                }
+                liveFilterStudioIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["studios"])
+                liveFilterTagIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["tags"])
             }
             return
         }
@@ -1664,9 +1680,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             mapLiveFragmentToChips(preset.liveFragment)
         } else {
             clearLiveChipsOnly()
-            if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: preset.liveFragment["studios"]) {
-                liveFilterStudioId = id
-            }
+            liveFilterStudioIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: preset.liveFragment["studios"])
+            liveFilterTagIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: preset.liveFragment["tags"])
         }
         applyLiveFilter(viewModel: viewModel)
     }
@@ -1682,9 +1697,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveChipsOnly()
-                if let id = CatalogLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
-                    liveFilterStudioId = id
-                }
+                liveFilterStudioIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["studios"])
+                liveFilterTagIds = CatalogLiveChipFilterSupport.includesIds(fromCriterion: meta.liveFragment["tags"])
             }
             if let sr = meta.sortRaw, let parsed = StashDBViewModel.ImageSortOption(rawValue: sr), parsed != selectedSortOption {
                 if parsed == .random && selectedSortOption == .random {

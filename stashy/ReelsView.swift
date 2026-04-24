@@ -300,30 +300,30 @@ struct ReelsView: View {
         switch reelsMode {
         case .scenes:
             var c = reelsSceneLiveChips
-            c.studioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["studios"])
-            c.tagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["tags"])
-            c.groupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["groups"])
+            c.studioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["studios"])
+            c.tagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["tags"])
+            c.groupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["groups"])
             reelsSceneLiveChips = c
         case .markers:
             var c = reelsMarkerLiveChips
-            c.studioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["studios"])
-            c.tagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["tags"])
-            c.groupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["groups"])
+            c.studioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["studios"])
+            c.tagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["tags"])
+            c.groupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["groups"])
             reelsMarkerLiveChips = c
         case .previews:
             var c = reelsPreviewLiveChips
-            c.studioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["studios"])
-            c.tagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["tags"])
-            c.groupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["groups"])
+            c.studioIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["studios"])
+            c.tagIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["tags"])
+            c.groupIds = SceneLiveChipFilterSupport.includesIds(fromCriterion: f["groups"])
             reelsPreviewLiveChips = c
         default:
             break
         }
     }
 
-    /// Keeps filter-sort sheet preset rows and live chips aligned with `@State` selections (e.g. after defaults or session restore).
-    /// - Parameter mode: Pass the target sub-mode when syncing from `handleModeChange` so state matches `newValue` even if `reelsMode` lags one tick.
-    private func reelsSyncFilterSheetPresetAndLiveChips(for mode: ReelsMode? = nil, savedFilters: [String: StashDBViewModel.SavedFilter]) {
+    /// Keeps only the sheet preset row aligned with the active saved filter.
+    /// This is safe on sheet open / saved-filter refresh because it does not overwrite live chips.
+    private func reelsSyncFilterSheetPresetRow(for mode: ReelsMode? = nil) {
         let mode = mode ?? reelsMode
         switch mode {
         case .scenes:
@@ -332,27 +332,18 @@ struct ReelsView: View {
             } else {
                 reelsSceneLiveSheetPresetSelection = ""
             }
-            var sceneChips = reelsSceneLiveChips
-            sceneChips.syncLiveChipsToMatchSelectedFilter(selectedFilter, savedFilters: savedFilters)
-            reelsSceneLiveChips = sceneChips
         case .markers:
             if let f = selectedMarkerFilter {
                 reelsMarkerLiveSheetPresetSelection = SceneLivePresetTag.serverRow(f.id)
             } else {
                 reelsMarkerLiveSheetPresetSelection = ""
             }
-            var markerChips = reelsMarkerLiveChips
-            markerChips.syncLiveChipsToMatchSelectedFilter(selectedMarkerFilter, savedFilters: savedFilters)
-            reelsMarkerLiveChips = markerChips
         case .previews:
             if let f = selectedPreviewFilter {
                 reelsPreviewLiveSheetPresetSelection = SceneLivePresetTag.serverRow(f.id)
             } else {
                 reelsPreviewLiveSheetPresetSelection = ""
             }
-            var previewChips = reelsPreviewLiveChips
-            previewChips.syncLiveChipsToMatchSelectedFilter(selectedPreviewFilter, savedFilters: savedFilters)
-            reelsPreviewLiveChips = previewChips
         case .clips:
             if let f = reelsClipImageFilters.selectedFilter {
                 reelsClipImageFilters.catalogPresetRowSelection = ListLivePresetTag.serverRow(f.id)
@@ -360,6 +351,29 @@ struct ReelsView: View {
                 reelsClipImageFilters.catalogPresetRowSelection = ""
             }
         case .pics:
+            break
+        }
+    }
+
+    /// Keeps filter-sort sheet preset rows and live chips aligned with `@State` selections (e.g. after defaults or session restore).
+    /// - Parameter mode: Pass the target sub-mode when syncing from `handleModeChange` so state matches `newValue` even if `reelsMode` lags one tick.
+    private func reelsSyncFilterSheetPresetAndLiveChips(for mode: ReelsMode? = nil, savedFilters: [String: StashDBViewModel.SavedFilter]) {
+        let mode = mode ?? reelsMode
+        reelsSyncFilterSheetPresetRow(for: mode)
+        switch mode {
+        case .scenes:
+            var sceneChips = reelsSceneLiveChips
+            sceneChips.syncLiveChipsToMatchSelectedFilter(selectedFilter, savedFilters: savedFilters)
+            reelsSceneLiveChips = sceneChips
+        case .markers:
+            var markerChips = reelsMarkerLiveChips
+            markerChips.syncLiveChipsToMatchSelectedFilter(selectedMarkerFilter, savedFilters: savedFilters)
+            reelsMarkerLiveChips = markerChips
+        case .previews:
+            var previewChips = reelsPreviewLiveChips
+            previewChips.syncLiveChipsToMatchSelectedFilter(selectedPreviewFilter, savedFilters: savedFilters)
+            reelsPreviewLiveChips = previewChips
+        case .clips, .pics:
             break
         }
     }
@@ -1751,15 +1765,15 @@ struct ReelsView: View {
             resolution: reelChipBinding(\.resolution),
             performerFavorite: reelChipBinding(\.performerFavorite),
             oCounterTag: reelChipBinding(\.oCounterTag),
-            studioSelectionId: reelChipBinding(\.studioId),
+            studioSelectionIds: reelChipBinding(\.studioIds),
             studioPickerOptions: reelsStudioPickerOptions,
             studioPickerLoading: reelsStudioPickerLoading,
             onStudioPickerSectionAppear: { reelsLoadStudioPickerOptions() },
-            tagSelectionId: reelChipBinding(\.tagId),
+            tagSelectionIds: reelChipBinding(\.tagIds),
             tagPickerOptions: reelsTagPickerOptions,
             tagPickerLoading: reelsTagPickerLoading,
             onTagPickerSectionAppear: { reelsLoadTagPickerOptions() },
-            groupSelectionId: reelChipBinding(\.groupId),
+            groupSelectionIds: reelChipBinding(\.groupIds),
             groupPickerOptions: reelsGroupPickerOptions,
             groupPickerLoading: reelsGroupPickerLoading,
             onGroupPickerSectionAppear: { reelsLoadGroupPickerOptions() },
@@ -1809,9 +1823,9 @@ struct ReelsView: View {
             SceneLivePresetTag.migrateLegacySelection(&reelsMarkerLiveSheetPresetSelection)
             SceneLivePresetTag.migrateLegacySelection(&reelsPreviewLiveSheetPresetSelection)
             reelsRefreshSceneLivePresets()
-            reelsSyncFilterSheetPresetAndLiveChips(savedFilters: viewModel.savedFilters)
+            reelsSyncFilterSheetPresetRow()
             viewModel.fetchSavedFilters { _ in
-                reelsSyncFilterSheetPresetAndLiveChips(savedFilters: viewModel.savedFilters)
+                reelsSyncFilterSheetPresetRow()
             }
             Task { @MainActor in
                 reelsSceneFilterSheetHydrating = false
@@ -1860,10 +1874,14 @@ struct ReelsView: View {
                     livePerformerFavorite: $reelsClipImageFilters.liveFilterPerformerFavorite,
                     liveOrganized: $reelsClipImageFilters.liveFilterOrganized,
                     liveOCounterTag: $reelsClipImageFilters.liveFilterOCounterTag,
-                    liveStudioId: $reelsClipImageFilters.liveFilterStudioId,
+                    liveStudioIds: $reelsClipImageFilters.liveFilterStudioIds,
+                    liveTagIds: $reelsClipImageFilters.liveFilterTagIds,
                     studioPickerOptions: reelsClipImageFilters.studioPickerOptions,
                     studioPickerLoading: reelsClipImageFilters.studioPickerLoading,
                     onStudioPickerSectionAppear: { reelsClipImageFilters.loadStudioPickerOptions(viewModel: viewModel) },
+                    tagPickerOptions: reelsClipImageFilters.tagPickerOptions,
+                    tagPickerLoading: reelsClipImageFilters.tagPickerLoading,
+                    onTagPickerSectionAppear: { reelsClipImageFilters.loadTagPickerOptions(viewModel: viewModel) },
                     onApply: {
                         refetchReelsClipsFromModel(viewModel)
                     },
@@ -1899,7 +1917,7 @@ struct ReelsView: View {
                     ListLivePresetTag.migrateLegacySelection(&sel)
                     reelsClipImageFilters.catalogPresetRowSelection = sel
                     reelsClipImageFilters.refreshLocalPresets()
-                    reelsSyncFilterSheetPresetAndLiveChips(savedFilters: viewModel.savedFilters)
+                    reelsSyncFilterSheetPresetRow(for: .clips)
                     Task { @MainActor in
                         reelsClipFilterSheetHydrating = false
                     }
@@ -2088,7 +2106,21 @@ struct ReelsView: View {
             case .pics: return true
             }
         }()
-        let noCriteriaSet = noSavedSceneStyleFilter && selectedPerformer == nil && selectedTags.isEmpty
+        let noLiveChipCriteria: Bool = {
+            switch reelsMode {
+            case .clips:
+                return !reelsClipImageFilters.catalogFilterSortFABActive
+            case .scenes:
+                return !reelsSceneLiveChips.isLiveFilterActive
+            case .markers:
+                return !reelsMarkerLiveChips.isLiveFilterActive
+            case .previews:
+                return !reelsPreviewLiveChips.isLiveFilterActive
+            case .pics:
+                return true
+            }
+        }()
+        let noCriteriaSet = noSavedSceneStyleFilter && noLiveChipCriteria && selectedPerformer == nil && selectedTags.isEmpty
 
         if noCriteriaSet && !newValue.isEmpty {
             let defaultId: String? = {
@@ -2142,8 +2174,10 @@ struct ReelsView: View {
                         break
                     }
                 }
+                reelsSyncFilterSheetPresetAndLiveChips(savedFilters: newValue)
+            } else {
+                reelsSyncFilterSheetPresetRow()
             }
-            reelsSyncFilterSheetPresetAndLiveChips(savedFilters: newValue)
         }
     }
 
@@ -3154,16 +3188,7 @@ struct ReelsView: View {
                     SceneLivePresetTag.migrateLegacySelection(&reelsSceneLiveSheetPresetSelection)
                     SceneLivePresetTag.migrateLegacySelection(&reelsMarkerLiveSheetPresetSelection)
                     SceneLivePresetTag.migrateLegacySelection(&reelsPreviewLiveSheetPresetSelection)
-                    switch reelsMode {
-                    case .scenes:
-                        reelsSceneLiveChips.syncLiveChipsToMatchSelectedFilter(selectedFilter, savedFilters: viewModel.savedFilters)
-                    case .markers:
-                        reelsMarkerLiveChips.syncLiveChipsToMatchSelectedFilter(selectedMarkerFilter, savedFilters: viewModel.savedFilters)
-                    case .previews:
-                        reelsPreviewLiveChips.syncLiveChipsToMatchSelectedFilter(selectedPreviewFilter, savedFilters: viewModel.savedFilters)
-                    default:
-                        break
-                    }
+                    reelsSyncFilterSheetPresetRow()
                     showReelsSceneFilterSheet = true
                 case .clips:
                     reelsClipImageFilters.refreshLocalPresets()

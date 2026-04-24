@@ -122,10 +122,14 @@ struct StashLineView: View {
                 livePerformerFavorite: $stashLineListFilters.liveFilterPerformerFavorite,
                 liveOrganized: $stashLineListFilters.liveFilterOrganized,
                 liveOCounterTag: $stashLineListFilters.liveFilterOCounterTag,
-                liveStudioId: $stashLineListFilters.liveFilterStudioId,
+                liveStudioIds: $stashLineListFilters.liveFilterStudioIds,
+                liveTagIds: $stashLineListFilters.liveFilterTagIds,
                 studioPickerOptions: stashLineListFilters.studioPickerOptions,
                 studioPickerLoading: stashLineListFilters.studioPickerLoading,
                 onStudioPickerSectionAppear: { stashLineListFilters.loadStudioPickerOptions(viewModel: viewModel) },
+                tagPickerOptions: stashLineListFilters.tagPickerOptions,
+                tagPickerLoading: stashLineListFilters.tagPickerLoading,
+                onTagPickerSectionAppear: { stashLineListFilters.loadTagPickerOptions(viewModel: viewModel) },
                 onApply: { stashLineListFilters.applyLiveFilter(viewModel: viewModel) },
                 onReset: {
                     stashLineListFilters.catalogPresetRowSelection = ""
