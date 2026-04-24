@@ -346,8 +346,13 @@ class StashDBViewModel: ObservableObject {
     var currentDetailGroupPage = 1
     var currentDetailPerformerPage = 1
     var currentDetailPerformerSortOption: PerformerSortOption = .nameAsc
+    private var currentDetailTagSortOption: TagSortOption = .nameAsc
+    private var currentDetailStudioSortOption: StudioSortOption = .nameAsc
     var currentDetailImagePage = 1
     private var currentDetailImageSortOption: ImageSortOption = .dateDesc
+    /// Saved + live criteria for detail image tabs; reused when `fetchDetailImages` paginates (`isInitialLoad: false`).
+    private var detailImagesActiveFilter: SavedFilter?
+    private var detailImagesActiveLive: [String: Any] = [:]
     
     @Published var performers: [Performer] = []
     @Published var studios: [Studio] = []
@@ -494,7 +499,8 @@ class StashDBViewModel: ObservableObject {
     var currentGallerySortOption: GallerySortOption = .dateDesc
     @Published var currentGalleryFilter: SavedFilter? = nil
     var currentGallerySearchQuery: String = ""
-    
+    var currentGalleryLiveFilter: [String: Any] = [:]
+
     // Gallery Images (Detail)
     @Published var galleryImages: [StashImage] = []
     @Published var totalGalleryImages: Int = 0
@@ -513,6 +519,12 @@ class StashDBViewModel: ObservableObject {
     var currentImageSortOption: ImageSortOption = .dateDesc
     var imageStaticPathFilter: Bool = false
     var imagePerformerIdFilter: String? = nil
+    var currentImageLiveFilter: [String: Any] = [:]
+
+    /// Last filter/live used for `fetchGalleryImages` (pagination keeps same criteria).
+    private var galleryImagesActiveGalleryId: String = ""
+    private var galleryImagesActiveFilter: SavedFilter? = nil
+    private var galleryImagesActiveLive: [String: Any] = [:]
 
     // MARK: - StashLine: criterion overlay snapshot (performer/tags)
 
@@ -954,6 +966,10 @@ class StashDBViewModel: ObservableObject {
     private var currentGroupGalleryPage = 1
     private var currentPerformerGallerySortOption: GallerySortOption = .dateDesc
     private var currentGroupGallerySortOption: GallerySortOption = .dateDesc
+    private var currentPerformerGalleryFilter: SavedFilter?
+    private var currentPerformerGalleryLive: [String: Any] = [:]
+    private var currentGroupGalleryFilter: SavedFilter?
+    private var currentGroupGalleryLive: [String: Any] = [:]
     @Published var totalPerformerGalleries: Int = 0
     @Published var totalGroupGalleries: Int = 0
     // Detail View: Studio Galleries
@@ -964,6 +980,8 @@ class StashDBViewModel: ObservableObject {
     @Published var hasMoreStudioGalleries: Bool = false
     @Published var currentStudioGalleryPage: Int = 1
     private var currentStudioGallerySortOption: GallerySortOption = .dateDesc
+    private var currentStudioGalleryFilter: SavedFilter?
+    private var currentStudioGalleryLive: [String: Any] = [:]
 
     // Performer scenes
     @Published var performerScenes: [Scene] = []
@@ -1031,7 +1049,8 @@ class StashDBViewModel: ObservableObject {
     @Published var hasMoreTagGalleries = true
     private var currentTagGalleryPage = 1
     private var currentTagGallerySortOption: GallerySortOption = .dateDesc
-
+    private var currentTagGalleryFilter: SavedFilter?
+    private var currentTagGalleryLive: [String: Any] = [:]
 
     private var cancellables = Set<AnyCancellable>()
     
@@ -1115,14 +1134,26 @@ class StashDBViewModel: ObservableObject {
         
         currentGallerySortOption = .dateDesc
         currentGalleryFilter = nil
+        currentGalleryLiveFilter = [:]
         
         currentImageSortOption = .dateDesc
+        currentImageLiveFilter = [:]
         currentTagSortOption = .nameAsc
         
         currentPerformerGalleryPage = 1
         currentStudioGalleryPage = 1
         hasMorePerformerGalleries = true
         hasMoreStudioGalleries = true
+        currentPerformerGalleryFilter = nil
+        currentPerformerGalleryLive = [:]
+        currentStudioGalleryFilter = nil
+        currentStudioGalleryLive = [:]
+        currentTagGalleryFilter = nil
+        currentTagGalleryLive = [:]
+        currentGroupGalleryFilter = nil
+        currentGroupGalleryLive = [:]
+        detailImagesActiveFilter = nil
+        detailImagesActiveLive = [:]
         
         // Detail View Filters
         currentPerformerDetailFilter = nil
@@ -1367,6 +1398,89 @@ class StashDBViewModel: ObservableObject {
         let variables: [String: Any] = ["input": input]
         let mutation = """
         mutation SaveSceneFilter($input: SaveFilterInput!) {
+          saveFilter(input: $input) {
+            id
+            name
+            mode
+            filter
+            object_filter
+            ui_options
+          }
+        }
+        """
+        GraphQLClient.shared.execute(query: mutation, variables: variables) { [weak self] (result: Result<SaveFilterGraphQLEnvelope, GraphQLNetworkError>) in
+            guard let self = self else { return }
+            Task { @MainActor in
+                switch result {
+                case .success(let env):
+                    if let err = env.errors?.first?.message {
+                        self.errorMessage = err
+                        completion(.failure(NSError(domain: "graphql", code: -1, userInfo: [NSLocalizedDescriptionKey: err])))
+                        return
+                    }
+                    guard let saved = env.data?.saveFilter else {
+                        let msg = "Save filter response missing data"
+                        self.errorMessage = msg
+                        completion(.failure(NSError(domain: "graphql", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])))
+                        return
+                    }
+                    self.savedFilters[saved.id] = saved
+                    self.fetchSavedFilters()
+                    completion(.success(saved))
+                case .failure(let error):
+                    self.handleNetworkError(error)
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    /// Creates or updates a **catalog list** saved filter on the server (`saveFilter`) for performers, tags, or studios.
+    /// `sortRaw` is persisted in `ui_options.stashy` for stashy round-trip; `sortField` / `sortDirection` drive `find_filter`.
+    func saveCatalogSavedFilter(
+        mode: FilterMode,
+        randomSeedKind: RandomSeedKind,
+        existingId: String?,
+        name: String,
+        sortRaw: String,
+        sortField: String,
+        sortDirection: String,
+        baseFilter: SavedFilter?,
+        liveFragment: [String: Any],
+        completion: @escaping (Result<SavedFilter, Error>) -> Void
+    ) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            completion(.failure(NSError(domain: "stashy", code: -2, userInfo: [NSLocalizedDescriptionKey: "Name is empty"])))
+            return
+        }
+        let merged = mergedSceneObjectFilterForSave(base: baseFilter, live: liveFragment)
+        var stashy: [String: Any] = [
+            "liveFragment": liveFragment,
+            "sortRaw": sortRaw
+        ]
+        if let bid = baseFilter?.id {
+            stashy["baseSavedFilterId"] = bid
+        }
+        let uiOptions: [String: Any] = ["stashy": stashy]
+        let sortResolved = sortField == "random" ? randomSort(randomSeedKind) : sortField
+        let findFilter: [String: Any] = [
+            "sort": sortResolved,
+            "direction": sortDirection
+        ]
+        var input: [String: Any] = [
+            "mode": mode.rawValue,
+            "name": trimmedName,
+            "find_filter": findFilter,
+            "object_filter": merged,
+            "ui_options": uiOptions
+        ]
+        if let existingId = existingId {
+            input["id"] = existingId
+        }
+        let variables: [String: Any] = ["input": input]
+        let mutation = """
+        mutation SaveCatalogFilter($input: SaveFilterInput!) {
           saveFilter(input: $input) {
             id
             name
@@ -2632,10 +2746,12 @@ class StashDBViewModel: ObservableObject {
     }
 
 
-    func fetchPerformerGalleries(performerId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true) {
+    func fetchPerformerGalleries(performerId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentPerformerGalleryPage = 1
             currentPerformerGallerySortOption = sortBy
+            currentPerformerGalleryFilter = filter
+            currentPerformerGalleryLive = liveFilter ?? [:]
             // performerGalleries = []
             totalPerformerGalleries = 0
             isLoadingPerformerGalleries = true
@@ -2654,6 +2770,19 @@ class StashDBViewModel: ObservableObject {
         
         // Find galleries with performer filter
         let query = GraphQLQueries.queryWithFragments("findGalleries")
+        let scope: [String: Any] = [
+            "performers": [
+                "value": [performerId],
+                "modifier": "INCLUDES"
+            ]
+        ]
+        let effSaved = isInitialLoad ? filter : currentPerformerGalleryFilter
+        let effLive = isInitialLoad ? (liveFilter ?? [:]) : currentPerformerGalleryLive
+        let galleryFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(
+            scope: scope,
+            saved: effSaved,
+            live: effLive.isEmpty ? nil : effLive
+        )
         
         let variables: [String: Any] = [
             "filter": [
@@ -2662,12 +2791,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortField,
                 "direction": sortDirection
             ],
-            "gallery_filter": [
-                "performers": [
-                    "value": [performerId],
-                    "modifier": "INCLUDES"
-                ]
-            ]
+            "gallery_filter": galleryFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -2705,10 +2829,12 @@ class StashDBViewModel: ObservableObject {
     }
     
     
-    func fetchStudioGalleries(studioId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true) {
+    func fetchStudioGalleries(studioId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentStudioGalleryPage = 1
             currentStudioGallerySortOption = sortBy
+            currentStudioGalleryFilter = filter
+            currentStudioGalleryLive = liveFilter ?? [:]
             totalStudioGalleries = 0
             isLoadingStudioGalleries = true
             hasMoreStudioGalleries = true
@@ -2726,6 +2852,19 @@ class StashDBViewModel: ObservableObject {
         
         // Find galleries with studio filter
         let query = GraphQLQueries.queryWithFragments("findGalleries")
+        let scope: [String: Any] = [
+            "studios": [
+                "value": [studioId],
+                "modifier": "INCLUDES"
+            ]
+        ]
+        let effSaved = isInitialLoad ? filter : currentStudioGalleryFilter
+        let effLive = isInitialLoad ? (liveFilter ?? [:]) : currentStudioGalleryLive
+        let galleryFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(
+            scope: scope,
+            saved: effSaved,
+            live: effLive.isEmpty ? nil : effLive
+        )
         
         let variables: [String: Any] = [
             "filter": [
@@ -2734,12 +2873,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortField,
                 "direction": sortDirection
             ],
-            "gallery_filter": [
-                "studios": [
-                    "value": [studioId],
-                    "modifier": "INCLUDES"
-                ]
-            ]
+            "gallery_filter": galleryFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -2888,9 +3022,40 @@ class StashDBViewModel: ObservableObject {
     
     // MARK: - Detail Content Fetching
     
-    func fetchDetailStudios(performerId: String? = nil, tagId: String? = nil, parentStudioId: String? = nil, groupId: String? = nil, isInitialLoad: Bool = true) {
+    /// Merges optional saved filter with `scope` (parent-entity constraint wins on key collision), then applies `live`.
+    private func mergeDetailScopeWithSavedAndLiveFilters(scope: [String: Any], saved: SavedFilter?, live: [String: Any]?) -> [String: Any] {
+        var merged: [String: Any] = [:]
+        if let saved {
+            if let dict = saved.filterDict {
+                merged = sanitizeFilter(dict)
+            } else if let obj = saved.object_filter, let d = obj.value as? [String: Any] {
+                merged = sanitizeFilter(d)
+            }
+        }
+        for (k, v) in scope {
+            merged[k] = v
+        }
+        if let live {
+            for (k, v) in live {
+                merged[k] = v
+            }
+        }
+        return sanitizeFilter(merged)
+    }
+    
+    func fetchDetailStudios(
+        performerId: String? = nil,
+        tagId: String? = nil,
+        parentStudioId: String? = nil,
+        groupId: String? = nil,
+        sortBy: StudioSortOption = .nameAsc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil
+    ) {
         if isInitialLoad {
             currentDetailStudioPage = 1
+            currentDetailStudioSortOption = sortBy
             detailStudios = []
             isLoadingDetailStudios = true
             hasMoreDetailStudios = true
@@ -2901,23 +3066,27 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentDetailStudioPage + 1
         let query = GraphQLQueries.queryWithFragments("findStudios")
         
-        var studioFilter: [String: Any] = [:]
+        var studioScope: [String: Any] = [:]
         if let pid = performerId {
-            studioFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+            studioScope["performers"] = ["value": [pid], "modifier": "INCLUDES"]
         }
         if let tid = tagId {
-            studioFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+            studioScope["tags"] = ["value": [tid], "modifier": "INCLUDES"]
         }
         if let psid = parentStudioId {
-            studioFilter["parent_id"] = psid
+            studioScope["parent_id"] = psid
         }
         if let gid = groupId {
-            studioFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+            studioScope["groups"] = ["value": [gid], "modifier": "INCLUDES"]
         }
         
+        let sortToUse = isInitialLoad ? sortBy : currentDetailStudioSortOption
+        let sortField = sortToUse.sortField == "random" ? randomSort(.studios) : sortToUse.sortField
+        let studioFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(scope: studioScope, saved: filter, live: liveFilter)
+        
         let variables: [String: Any] = [
-            "filter": ["page": page, "per_page": 20, "sort": "name", "direction": "ASC"],
-            "studio_filter": studioFilter
+            "filter": ["page": page, "per_page": 20, "sort": sortField, "direction": sortToUse.direction],
+            "studio_filter": studioFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -2940,9 +3109,18 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchDetailTags(performerId: String? = nil, studioId: String? = nil, groupId: String? = nil, isInitialLoad: Bool = true) {
+    func fetchDetailTags(
+        performerId: String? = nil,
+        studioId: String? = nil,
+        groupId: String? = nil,
+        sortBy: TagSortOption = .nameAsc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil
+    ) {
         if isInitialLoad {
             currentDetailTagPage = 1
+            currentDetailTagSortOption = sortBy
             detailTags = []
             isLoadingDetailTags = true
             hasMoreDetailTags = true
@@ -2953,20 +3131,24 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentDetailTagPage + 1
         let query = GraphQLQueries.queryWithFragments("findTags")
         
-        var tagFilter: [String: Any] = [:]
+        var tagScope: [String: Any] = [:]
         if let pid = performerId {
-            tagFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+            tagScope["performers"] = ["value": [pid], "modifier": "INCLUDES"]
         }
         if let sid = studioId {
-            tagFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+            tagScope["studios"] = ["value": [sid], "modifier": "INCLUDES"]
         }
         if let gid = groupId {
-            tagFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+            tagScope["groups"] = ["value": [gid], "modifier": "INCLUDES"]
         }
         
+        let sortToUse = isInitialLoad ? sortBy : currentDetailTagSortOption
+        let sortField = sortToUse.sortField == "random" ? randomSort(.tags) : sortToUse.sortField
+        let tagFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(scope: tagScope, saved: filter, live: liveFilter)
+        
         let variables: [String: Any] = [
-            "filter": ["page": page, "per_page": 40, "sort": "name", "direction": "ASC"],
-            "tag_filter": tagFilter
+            "filter": ["page": page, "per_page": 40, "sort": sortField, "direction": sortToUse.direction],
+            "tag_filter": tagFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -3041,7 +3223,15 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchDetailPerformers(tagId: String? = nil, studioId: String? = nil, groupId: String? = nil, sortBy: PerformerSortOption = .nameAsc, isInitialLoad: Bool = true) {
+    func fetchDetailPerformers(
+        tagId: String? = nil,
+        studioId: String? = nil,
+        groupId: String? = nil,
+        sortBy: PerformerSortOption = .nameAsc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil
+    ) {
         if isInitialLoad {
             currentDetailPerformerPage = 1
             currentDetailPerformerSortOption = sortBy
@@ -3055,23 +3245,24 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentDetailPerformerPage + 1
         let query = GraphQLQueries.queryWithFragments("findPerformers")
         
-        var performerFilter: [String: Any] = [:]
+        var performerScope: [String: Any] = [:]
         if let tid = tagId {
-            performerFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+            performerScope["tags"] = ["value": [tid], "modifier": "INCLUDES"]
         }
         if let sid = studioId {
-            performerFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+            performerScope["studios"] = ["value": [sid], "modifier": "INCLUDES"]
         }
         if let gid = groupId {
-            performerFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+            performerScope["groups"] = ["value": [gid], "modifier": "INCLUDES"]
         }
         
         let sortByToUse = isInitialLoad ? sortBy : currentDetailPerformerSortOption
         let sortField = sortByToUse.sortField == "random" ? randomSort(.performers) : sortByToUse.sortField
+        let performerFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(scope: performerScope, saved: filter, live: liveFilter)
         
         let variables: [String: Any] = [
             "filter": ["page": page, "per_page": 20, "sort": sortField, "direction": sortByToUse.direction],
-            "performer_filter": sanitizeFilter(performerFilter)
+            "performer_filter": performerFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -3094,10 +3285,12 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchDetailImages(performerId: String? = nil, tagId: String? = nil, studioId: String? = nil, groupId: String? = nil, sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true) {
+    func fetchDetailImages(performerId: String? = nil, tagId: String? = nil, studioId: String? = nil, groupId: String? = nil, sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentDetailImagePage = 1
             currentDetailImageSortOption = sortBy
+            detailImagesActiveFilter = filter
+            detailImagesActiveLive = liveFilter ?? [:]
             detailImages = []
             isLoadingDetailImages = true
             hasMoreDetailImages = true
@@ -3108,19 +3301,27 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentDetailImagePage + 1
         let query = GraphQLQueries.queryWithFragments("findImages")
         
-        var imageFilter: [String: Any] = [:]
+        var imageScope: [String: Any] = [:]
         if let pid = performerId {
-            imageFilter["performers"] = ["value": [pid], "modifier": "INCLUDES"]
+            imageScope["performers"] = ["value": [pid], "modifier": "INCLUDES"]
         }
         if let tid = tagId {
-            imageFilter["tags"] = ["value": [tid], "modifier": "INCLUDES"]
+            imageScope["tags"] = ["value": [tid], "modifier": "INCLUDES"]
         }
         if let sid = studioId {
-            imageFilter["studios"] = ["value": [sid], "modifier": "INCLUDES"]
+            imageScope["studios"] = ["value": [sid], "modifier": "INCLUDES"]
         }
         if let gid = groupId {
-            imageFilter["groups"] = ["value": [gid], "modifier": "INCLUDES"]
+            imageScope["groups"] = ["value": [gid], "modifier": "INCLUDES"]
         }
+        
+        let effSaved = isInitialLoad ? filter : detailImagesActiveFilter
+        let effLive = isInitialLoad ? (liveFilter ?? [:]) : detailImagesActiveLive
+        let imageFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(
+            scope: imageScope,
+            saved: effSaved,
+            live: effLive.isEmpty ? nil : effLive
+        )
         
         let sortByToUse = isInitialLoad ? sortBy : currentDetailImageSortOption
         let variables: [String: Any] = [
@@ -3130,7 +3331,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortByToUse.sortField == "random" ? randomSort(.images) : sortByToUse.sortField,
                 "direction": sortByToUse.direction
             ],
-            "image_filter": imageFilter
+            "image_filter": imageFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -3842,10 +4043,12 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchGroupGalleries(groupId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true) {
+    func fetchGroupGalleries(groupId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentGroupGalleryPage = 1
             currentGroupGallerySortOption = sortBy
+            currentGroupGalleryFilter = filter
+            currentGroupGalleryLive = liveFilter ?? [:]
             groupGalleries = []
             totalGroupGalleries = 0
             isLoadingGroupGalleries = true
@@ -3857,6 +4060,19 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentGroupGalleryPage + 1
         
         let sortByToUse = isInitialLoad ? sortBy : currentGroupGallerySortOption
+        let scope: [String: Any] = [
+            "groups": [
+                "value": [groupId],
+                "modifier": "INCLUDES"
+            ]
+        ]
+        let effSaved = isInitialLoad ? filter : currentGroupGalleryFilter
+        let effLive = isInitialLoad ? (liveFilter ?? [:]) : currentGroupGalleryLive
+        let galleryFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(
+            scope: scope,
+            saved: effSaved,
+            live: effLive.isEmpty ? nil : effLive
+        )
         let variables: [String: Any] = [
             "filter": [
                 "page": page,
@@ -3864,12 +4080,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortByToUse.sortField == "random" ? randomSort(.galleries) : sortByToUse.sortField,
                 "direction": sortByToUse.direction
             ],
-            "gallery_filter": [
-                "groups": [
-                    "value": [groupId],
-                    "modifier": "INCLUDES"
-                ]
-            ]
+            "gallery_filter": galleryFilterMerged
         ]
         
         let query = GraphQLQueries.queryWithFragments("findGalleries")
@@ -4019,10 +4230,12 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchTagGalleries(tagId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true) {
+    func fetchTagGalleries(tagId: String, sortBy: GallerySortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentTagGalleryPage = 1
             currentTagGallerySortOption = sortBy
+            currentTagGalleryFilter = filter
+            currentTagGalleryLive = liveFilter ?? [:]
             // tagGalleries = []
             totalTagGalleries = 0
             isLoadingTagGalleries = true
@@ -4037,6 +4250,19 @@ class StashDBViewModel: ObservableObject {
         let sortField = sortByToUse.sortField == "random" ? randomSort(.galleries) : sortByToUse.sortField
         let sortDirection = sortByToUse.direction
         let query = GraphQLQueries.queryWithFragments("findGalleries")
+        let scope: [String: Any] = [
+            "tags": [
+                "value": [tagId],
+                "modifier": "INCLUDES"
+            ]
+        ]
+        let effSaved = isInitialLoad ? filter : currentTagGalleryFilter
+        let effLive = isInitialLoad ? (liveFilter ?? [:]) : currentTagGalleryLive
+        let galleryFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(
+            scope: scope,
+            saved: effSaved,
+            live: effLive.isEmpty ? nil : effLive
+        )
         
         let variables: [String: Any] = [
             "filter": [
@@ -4045,12 +4271,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortField,
                 "direction": sortDirection
             ],
-            "gallery_filter": [
-                "tags": [
-                    "value": [tagId],
-                    "modifier": "INCLUDES"
-                ]
-            ]
+            "gallery_filter": galleryFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -4097,7 +4318,7 @@ class StashDBViewModel: ObservableObject {
     
     // MARK: - Galleries
     
-    func fetchGalleries(sortBy: GallerySortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchGalleries(sortBy: GallerySortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentGalleryPage = 1
             galleries = []
@@ -4107,6 +4328,7 @@ class StashDBViewModel: ObservableObject {
             currentGallerySortOption = sortBy
             currentGalleryFilter = filter
             currentGallerySearchQuery = searchQuery
+            currentGalleryLiveFilter = liveFilter ?? [:]
         } else {
             isLoadingGalleries = true
         }
@@ -4133,6 +4355,12 @@ class StashDBViewModel: ObservableObject {
             }
         }
         
+        let mergedGalleryFilter = sanitizeFilter(
+            currentGalleryLiveFilter.isEmpty
+                ? galleryFilter
+                : galleryFilter.merging(currentGalleryLiveFilter) { _, new in new }
+        )
+        
         // Variables for GraphQL - search query goes in FindFilterType, not GalleryFilterType
         var filterParams: [String: Any] = [
             "page": page,
@@ -4148,7 +4376,7 @@ class StashDBViewModel: ObservableObject {
         
         let variables: [String: Any] = [
             "filter": filterParams,
-            "gallery_filter": galleryFilter
+            "gallery_filter": mergedGalleryFilter
         ]
         
         let query = GraphQLQueries.queryWithFragments("findGalleries")
@@ -4198,7 +4426,7 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchGalleryImages(galleryId: String, sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true) {
+    func fetchGalleryImages(galleryId: String, sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         print("🖼️ fetchGalleryImages called for gallery: \(galleryId), sortBy: \(sortBy.rawValue), isInitialLoad: \(isInitialLoad)")
         
         if isInitialLoad {
@@ -4206,6 +4434,9 @@ class StashDBViewModel: ObservableObject {
             galleryImages = []
             totalGalleryImages = 0
             isLoadingGalleryImages = true
+            galleryImagesActiveGalleryId = galleryId
+            galleryImagesActiveFilter = filter
+            galleryImagesActiveLive = liveFilter ?? [:]
         } else {
             isLoadingGalleryImages = true
         }
@@ -4214,6 +4445,16 @@ class StashDBViewModel: ObservableObject {
         let page = isInitialLoad ? 1 : currentGalleryImagePage + 1
         
         let query = GraphQLQueries.queryWithFragments("findImages")
+        let effGalleryId = isInitialLoad ? galleryId : galleryImagesActiveGalleryId
+        let effFilter = isInitialLoad ? filter : galleryImagesActiveFilter
+        let effLive = isInitialLoad ? (liveFilter ?? [:]) : galleryImagesActiveLive
+        let scope: [String: Any] = [
+            "galleries": [
+                "value": [effGalleryId],
+                "modifier": "INCLUDES"
+            ]
+        ]
+        let imageFilterMerged = mergeDetailScopeWithSavedAndLiveFilters(scope: scope, saved: effFilter, live: effLive.isEmpty ? nil : effLive)
         
         let variables: [String: Any] = [
             "filter": [
@@ -4222,12 +4463,7 @@ class StashDBViewModel: ObservableObject {
                 "sort": sortBy.sortField == "random" ? randomSort(.images) : sortBy.sortField,
                 "direction": sortBy.direction
             ],
-            "image_filter": [
-                "galleries": [
-                    "value": [galleryId],
-                    "modifier": "INCLUDES"
-                ]
-            ]
+            "image_filter": imageFilterMerged
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -4263,7 +4499,7 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchImages(sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, staticPathFilter: Bool = false, performerId: String? = nil) {
+    func fetchImages(sortBy: ImageSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil, staticPathFilter: Bool = false, performerId: String? = nil, liveFilter: [String: Any]? = nil) {
         print("🖼️ fetchImages called, sortBy: \(sortBy.rawValue), isInitialLoad: \(isInitialLoad)")
 
         if isInitialLoad {
@@ -4274,6 +4510,7 @@ class StashDBViewModel: ObservableObject {
             currentImageFilter = filter
             imageStaticPathFilter = staticPathFilter
             imagePerformerIdFilter = performerId
+            currentImageLiveFilter = liveFilter ?? [:]
         } else {
             isLoadingImages = true
         }
@@ -4331,6 +4568,15 @@ class StashDBViewModel: ObservableObject {
             var combined: [String: Any] = performerFilter
             if imageStaticPathFilter { combined.merge(staticFilter) { _, new in new } }
             if !combined.isEmpty { variables["image_filter"] = combined }
+        }
+
+        if !currentImageLiveFilter.isEmpty {
+            if var imgf = variables["image_filter"] as? [String: Any] {
+                imgf.merge(currentImageLiveFilter) { _, new in new }
+                variables["image_filter"] = sanitizeFilter(imgf)
+            } else {
+                variables["image_filter"] = sanitizeFilter(currentImageLiveFilter)
+            }
         }
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),

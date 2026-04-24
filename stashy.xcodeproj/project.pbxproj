@@ -81,6 +81,9 @@
 		DF22BB342F1831C7007C2090 /* AppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB332F1831C7007C2090 /* AppearanceSettingsView.swift */; };
 		DF22BB362F1832AD007C2090 /* NavigationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB352F1832AD007C2090 /* NavigationCoordinator.swift */; };
 		DF22BB3A2F1832E8007C2090 /* PerformersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22BB392F1832E8007C2090 /* PerformersView.swift */; };
+		CA7A10D12F500001 /* ListCatalogFilterSortModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7A10D02F500000 /* ListCatalogFilterSortModels.swift */; };
+		CA7A10E12F500010 /* DetailLinkedCatalogControllers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7A10E02F500011 /* DetailLinkedCatalogControllers.swift */; };
+		CA7A10D42F500003 /* ListCatalogFilterSortSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7A10D32F500002 /* ListCatalogFilterSortSheets.swift */; };
 		DF4A022C2F1E8B6900E5EAFB /* ImagesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4A022B2F1E8B6800E5EAFB /* ImagesView.swift */; };
 		DF675E622F2A46A2004CA019 /* HomeRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF675E5D2F2A46A1004CA019 /* HomeRowView.swift */; };
 		DF675E632F2A46A2004CA019 /* HomeStatisticsRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF675E5F2F2A46A1004CA019 /* HomeStatisticsRowView.swift */; };
@@ -164,6 +167,9 @@
 		DF22BB332F1831C7007C2090 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
 		DF22BB352F1832AD007C2090 /* NavigationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationCoordinator.swift; sourceTree = "<group>"; };
 		DF22BB392F1832E8007C2090 /* PerformersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformersView.swift; sourceTree = "<group>"; };
+		CA7A10D02F500000 /* ListCatalogFilterSortModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListCatalogFilterSortModels.swift; sourceTree = "<group>"; };
+		CA7A10D32F500002 /* ListCatalogFilterSortSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListCatalogFilterSortSheets.swift; sourceTree = "<group>"; };
+		CA7A10E02F500011 /* DetailLinkedCatalogControllers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailLinkedCatalogControllers.swift; sourceTree = "<group>"; };
 		DF4A022B2F1E8B6800E5EAFB /* ImagesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagesView.swift; sourceTree = "<group>"; };
 		DF675E5D2F2A46A1004CA019 /* HomeRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeRowView.swift; sourceTree = "<group>"; };
 		DF675E5E2F2A46A1004CA019 /* HomeSceneCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSceneCardView.swift; sourceTree = "<group>"; };
@@ -286,6 +292,9 @@
 				DFE5045D2E8A8C2000323FF1 /* SceneDetailView.swift */,
 				37D092D52F8980B400DB7A08 /* MarkersView.swift */,
 				DFE5045D2E8A8C2000323FF0 /* ScenesView.swift */,
+				CA7A10D02F500000 /* ListCatalogFilterSortModels.swift */,
+				CA7A10D32F500002 /* ListCatalogFilterSortSheets.swift */,
+				CA7A10E02F500011 /* DetailLinkedCatalogControllers.swift */,
 				08FB779EFE84155DC02AAC07 /* ServerConfig.swift */,
 				DFSM000062F2NEWFILE006 /* ServerFormViewNew.swift */,
 				DF90B7632F1ACEA3003ED852 /* ServerSetupWizardView.swift */,
@@ -571,6 +580,9 @@
 				37D092D62F8980B400DB7A08 /* MarkersView.swift in Sources */,
 				DF90B7662F1B72E5003ED852 /* UniversalSearchView.swift in Sources */,
 				DF22BB3A2F1832E8007C2090 /* PerformersView.swift in Sources */,
+				CA7A10D12F500001 /* ListCatalogFilterSortModels.swift in Sources */,
+				CA7A10D42F500003 /* ListCatalogFilterSortSheets.swift in Sources */,
+				CA7A10E12F500010 /* DetailLinkedCatalogControllers.swift in Sources */,
 				DF22BB152F167223007C2090 /* CatalogsView.swift in Sources */,
 				DF22BB1E2F16743C007C2090 /* TagsView.swift in Sources */,
 				DF90B75E2F1A5ECF003ED852 /* StarRatingView.swift in Sources */,

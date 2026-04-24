@@ -21,8 +21,17 @@ struct TagsView: View {
     @State private var isSearchVisible = false
     var hideTitle: Bool = false
 
-    // Live filter
-    @State private var showLiveFilterSheet = false
+    // Filter & sort sheet
+    @State private var showFilterSortSheet = false
+    @State private var catalogPresetRowSelection = ""
+    @State private var localCatalogPresets: [TagListLiveFilterPreset] = TagListLiveFilterPresetStore.loadPresets()
+    @State private var showSaveAsCatalogPresetAlert = false
+    @State private var catalogPresetNameInput = ""
+    @State private var showRenameCatalogPresetAlert = false
+    @State private var renameCatalogPresetInput = ""
+    @State private var showDeleteCatalogPresetAlert = false
+
+    // Live filter (chips)
     @State private var liveFilterFavorite: Bool? = nil
     @State private var liveFilterHasScenes: Bool = false
 
@@ -58,7 +67,315 @@ struct TagsView: View {
         viewModel.fetchTags(sortBy: selectedSortOption, searchQuery: searchText, isInitialLoad: isInitialLoad, filter: selectedFilter, liveFilter: isLiveFilterActive ? activeLiveFilterDict : nil)
     }
 
+    private func changeTagSortOption(to newOption: StashDBViewModel.TagSortOption) {
+        if newOption == .random && selectedSortOption == .random {
+            viewModel.refreshRandomSeed()
+        }
+        selectedSortOption = newOption
+        TabManager.shared.setSortOption(for: .tags, option: newOption.rawValue)
+        performSearch()
+    }
+
+    private var catalogFilterSortFABActive: Bool {
+        selectedFilter != nil || isLiveFilterActive
+    }
+
+    private var sortedServerTagFilters: [StashDBViewModel.SavedFilter] {
+        viewModel.savedFilters.values
+            .filter { $0.mode == .tags }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var tagLiveChipRowsVisible: Bool {
+        CatalogLiveChipFilterSupport.tagSavedFilterSupportsLiveEditor(selectedFilter)
+    }
+
+    private func refreshTagLocalPresets() {
+        localCatalogPresets = TagListLiveFilterPresetStore.loadPresets()
+    }
+
+    private func clearTagLiveChipsOnly() {
+        liveFilterFavorite = nil
+        liveFilterHasScenes = false
+    }
+
+    private func mapTagLiveFragmentToChips(_ frag: [String: Any]) {
+        clearTagLiveChipsOnly()
+        if let fav = frag["favorite"] as? Bool {
+            liveFilterFavorite = fav
+        }
+        if let sc = frag["scene_count"] as? [String: Any],
+           let mod = sc["modifier"] as? String,
+           mod == "GREATER_THAN" {
+            liveFilterHasScenes = true
+        }
+    }
+
+    private func applyTagCatalogPreset(_ preset: TagListLiveFilterPreset) {
+        if preset.sort != selectedSortOption {
+            if preset.sort == .random && selectedSortOption == .random {
+                viewModel.refreshRandomSeed()
+            }
+            selectedSortOption = preset.sort
+            TabManager.shared.setSortOption(for: .tags, option: preset.sort.rawValue)
+        }
+        if let fid = preset.baseSavedFilterId, let f = viewModel.savedFilters[fid] {
+            selectedFilter = f
+        } else {
+            selectedFilter = nil
+        }
+        if CatalogLiveChipFilterSupport.tagSavedFilterSupportsLiveEditor(selectedFilter) {
+            mapTagLiveFragmentToChips(preset.liveFragment)
+        } else {
+            clearTagLiveChipsOnly()
+        }
+        performSearch()
+    }
+
+    private func applyServerTagSavedFilter(_ f: StashDBViewModel.SavedFilter) {
+        if let meta = f.stashyCatalogPresetMetadata {
+            if let bid = meta.baseSavedFilterId, let base = viewModel.savedFilters[bid] {
+                selectedFilter = base
+            } else {
+                selectedFilter = nil
+            }
+            if CatalogLiveChipFilterSupport.tagSavedFilterSupportsLiveEditor(selectedFilter) {
+                mapTagLiveFragmentToChips(meta.liveFragment)
+            } else {
+                clearTagLiveChipsOnly()
+            }
+            if let sr = meta.sortRaw, let parsed = StashDBViewModel.TagSortOption(rawValue: sr), parsed != selectedSortOption {
+                if parsed == .random && selectedSortOption == .random {
+                    viewModel.refreshRandomSeed()
+                }
+                selectedSortOption = parsed
+                TabManager.shared.setSortOption(for: .tags, option: parsed.rawValue)
+            }
+        } else {
+            selectedFilter = f
+            if CatalogLiveChipFilterSupport.tagSavedFilterSupportsLiveEditor(f), let raw = f.filterDict {
+                mapTagLiveFragmentToChips(raw)
+            } else {
+                clearTagLiveChipsOnly()
+            }
+        }
+        performSearch()
+    }
+
+    private func applyCatalogPresetSelectionFromSheetIfNeeded() {
+        let newId = catalogPresetRowSelection
+        guard !newId.isEmpty else { return }
+        if let sid = ListLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
+            applyServerTagSavedFilter(f)
+            return
+        }
+        if let ls = ListLivePresetTag.parseLocalUUIDString(newId),
+           let uuid = UUID(uuidString: ls),
+           let preset = localCatalogPresets.first(where: { $0.id == uuid }) {
+            applyTagCatalogPreset(preset)
+            return
+        }
+        if let uuid = UUID(uuidString: newId),
+           let preset = localCatalogPresets.first(where: { $0.id == uuid }) {
+            catalogPresetRowSelection = ListLivePresetTag.localRow(uuid)
+            applyTagCatalogPreset(preset)
+        }
+    }
+
+    private var deleteCatalogPresetConfirmationText: String {
+        if let sid = ListLivePresetTag.parseServerId(catalogPresetRowSelection),
+           let f = viewModel.savedFilters[sid] {
+            return "Remove “\(f.name)” from Stash? Other devices will lose this saved filter."
+        }
+        if let ls = ListLivePresetTag.parseLocalUUIDString(catalogPresetRowSelection),
+           let uuid = UUID(uuidString: ls),
+           let p = localCatalogPresets.first(where: { $0.id == uuid }) {
+            return "Remove “\(p.name)” from this device? This cannot be undone."
+        }
+        return "Remove this filter? This cannot be undone."
+    }
+
+    private func saveTagCatalogPresetOverwrite() {
+        let sel = catalogPresetRowSelection
+        if let sid = ListLivePresetTag.parseServerId(sel) {
+            let name = viewModel.savedFilters[sid]?.name ?? "Filter"
+            viewModel.saveCatalogSavedFilter(
+                mode: .tags,
+                randomSeedKind: .tags,
+                existingId: sid,
+                name: name,
+                sortRaw: selectedSortOption.rawValue,
+                sortField: selectedSortOption.sortField,
+                sortDirection: selectedSortOption.direction,
+                baseFilter: selectedFilter,
+                liveFragment: activeLiveFilterDict
+            ) { _ in }
+            return
+        }
+        guard let ls = ListLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls),
+              let index = localCatalogPresets.firstIndex(where: { $0.id == uuid }) else { return }
+        let old = localCatalogPresets[index]
+        let updated = TagListLiveFilterPreset(
+            id: old.id,
+            name: old.name,
+            createdAt: old.createdAt,
+            sort: selectedSortOption,
+            baseSavedFilterId: selectedFilter?.id,
+            liveFragment: activeLiveFilterDict
+        )
+        TagListLiveFilterPresetStore.upsert(updated)
+        refreshTagLocalPresets()
+    }
+
+    private func saveTagCatalogPresetAs(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        viewModel.saveCatalogSavedFilter(
+            mode: .tags,
+            randomSeedKind: .tags,
+            existingId: nil,
+            name: trimmed,
+            sortRaw: selectedSortOption.rawValue,
+            sortField: selectedSortOption.sortField,
+            sortDirection: selectedSortOption.direction,
+            baseFilter: selectedFilter,
+            liveFragment: activeLiveFilterDict
+        ) { result in
+            if case .success(let saved) = result {
+                catalogPresetRowSelection = ListLivePresetTag.serverRow(saved.id)
+                showSaveAsCatalogPresetAlert = false
+            }
+        }
+    }
+
+    private func renameTagCatalogPreset(to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let sel = catalogPresetRowSelection
+        if let sid = ListLivePresetTag.parseServerId(sel) {
+            viewModel.saveCatalogSavedFilter(
+                mode: .tags,
+                randomSeedKind: .tags,
+                existingId: sid,
+                name: trimmed,
+                sortRaw: selectedSortOption.rawValue,
+                sortField: selectedSortOption.sortField,
+                sortDirection: selectedSortOption.direction,
+                baseFilter: selectedFilter,
+                liveFragment: activeLiveFilterDict
+            ) { result in
+                if case .success = result {
+                    showRenameCatalogPresetAlert = false
+                }
+            }
+            return
+        }
+        guard let ls = ListLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls),
+              let preset = localCatalogPresets.first(where: { $0.id == uuid }) else { return }
+        TagListLiveFilterPresetStore.upsert(preset.renamed(trimmed))
+        refreshTagLocalPresets()
+        showRenameCatalogPresetAlert = false
+    }
+
+    private func deleteTagCatalogPreset() {
+        let sel = catalogPresetRowSelection
+        if let sid = ListLivePresetTag.parseServerId(sel) {
+            viewModel.destroySavedSceneFilter(id: sid) { result in
+                if case .success = result {
+                    if selectedFilter?.id == sid {
+                        selectedFilter = nil
+                    }
+                    catalogPresetRowSelection = ""
+                    showDeleteCatalogPresetAlert = false
+                    performSearch()
+                }
+            }
+            return
+        }
+        guard let ls = ListLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls) else { return }
+        TagListLiveFilterPresetStore.remove(id: uuid)
+        refreshTagLocalPresets()
+        catalogPresetRowSelection = ""
+        showDeleteCatalogPresetAlert = false
+    }
+
     var body: some View {
+        tagsCoreChrome
+            .sheet(isPresented: $showFilterSortSheet, content: tagsFilterSortSheet)
+            .onChange(of: catalogPresetRowSelection) { _, newId in
+                handleTagCatalogPresetSelectionChange(newId)
+            }
+            .alert("Save As", isPresented: $showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $catalogPresetNameInput)
+                Button("Save") { saveTagCatalogPresetAs(name: catalogPresetNameInput) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save the current sort, filter, and live criteria as a new Stash saved filter.")
+            }
+            .alert("Rename", isPresented: $showRenameCatalogPresetAlert) {
+                TextField("Name", text: $renameCatalogPresetInput)
+                Button("Save") { renameTagCatalogPreset(to: renameCatalogPresetInput) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rename this preset or saved filter.")
+            }
+            .alert("Delete filter?", isPresented: $showDeleteCatalogPresetAlert) {
+                Button("Delete", role: .destructive) { deleteTagCatalogPreset() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(deleteCatalogPresetConfirmationText)
+            }
+            .onAppear {
+                tagsOnAppear()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
+                if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.tags.rawValue {
+                    if let defaultId = TabManager.shared.getDefaultFilterId(for: .tags),
+                       let newFilter = viewModel.savedFilters[defaultId] {
+                        selectedFilter = newFilter
+                    } else {
+                        selectedFilter = nil
+                    }
+                    performSearch()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+                if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.tags.rawValue {
+                    let newSort = StashDBViewModel.TagSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .tags) ?? "") ?? .sceneCountDesc
+                    changeTagSortOption(to: newSort)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+                selectedFilter = nil
+                catalogPresetRowSelection = ""
+                refreshTagLocalPresets()
+                performSearch()
+            }
+            .onChange(of: viewModel.savedFilters) { oldValue, newValue in
+                if selectedFilter == nil {
+                    if let defaultId = TabManager.shared.getDefaultFilterId(for: .tags),
+                       let filter = newValue[defaultId] {
+                        selectedFilter = filter
+                        performSearch()
+                    } else if !viewModel.isLoadingSavedFilters {
+                        performSearch()
+                    }
+                }
+            }
+            .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
+                if oldValue == true && isLoading == false {
+                    if viewModel.tags.isEmpty && !viewModel.isLoading && selectedFilter == nil {
+                        performSearch()
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var tagsCoreChrome: some View {
         Group {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
@@ -76,7 +393,6 @@ struct TagsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .conditionalSearchable(isVisible: isSearchVisible, text: $searchText, prompt: "Search tags...")
         .onChange(of: searchText) { oldValue, newValue in
-            // Debounce
             NSObject.cancelPreviousPerformRequests(withTarget: self)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if newValue == self.searchText {
@@ -106,281 +422,110 @@ struct TagsView: View {
                     }
                 }
             }
-            
         }
         .floatingActionBar {
             HStack(spacing: 0) {
-                // Sort Menu with grouped options
-                Menu {
-                        // Random
-                        Button(action: {
-                            if selectedSortOption == .random {
-                                viewModel.refreshRandomSeed()
-                            }
-                            selectedSortOption = .random
-                            TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.random.rawValue)
-                            performSearch()
-                        }) {
-                            HStack {
-                                Text("Random")
-                                if selectedSortOption == .random { Image(systemName: "checkmark") }
-                            }
-                        }
-                        
-                        Divider()
-                        
-                        // Name
-                        Menu {
-                            Button(action: {
-                                selectedSortOption = .nameAsc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.nameAsc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("A → Z")
-                                    if selectedSortOption == .nameAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: {
-                                selectedSortOption = .nameDesc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.nameDesc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("Z → A")
-                                    if selectedSortOption == .nameDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Name")
-                                if selectedSortOption == .nameAsc || selectedSortOption == .nameDesc { Image(systemName: "checkmark") }
+                Spacer(minLength: 0)
+                Button {
+                    showFilterSortSheet = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(catalogFilterSortFABActive ? appearanceManager.tintColor : .primary)
+                        .overlay(alignment: .topTrailing) {
+                            if catalogFilterSortFABActive {
+                                Circle()
+                                    .fill(appearanceManager.tintColor)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: 3, y: -3)
                             }
                         }
-                        
-                        // Scene Count
-                        Menu {
-                            Button(action: {
-                                selectedSortOption = .sceneCountDesc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.sceneCountDesc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("High → Low")
-                                    if selectedSortOption == .sceneCountDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: {
-                                selectedSortOption = .sceneCountAsc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.sceneCountAsc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("Low → High")
-                                    if selectedSortOption == .sceneCountAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Scene Count")
-                                if selectedSortOption == .sceneCountAsc || selectedSortOption == .sceneCountDesc { Image(systemName: "checkmark") }
-                            }
-                        }
-                        
-                        // Updated
-                        Menu {
-                            Button(action: {
-                                selectedSortOption = .updatedAtDesc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.updatedAtDesc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("Newest First")
-                                    if selectedSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: {
-                                selectedSortOption = .updatedAtAsc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.updatedAtAsc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("Oldest First")
-                                    if selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Updated")
-                                if selectedSortOption == .updatedAtAsc || selectedSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
-                            }
-                        }
-                        
-                        // Created
-                        Menu {
-                            Button(action: {
-                                selectedSortOption = .createdAtDesc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.createdAtDesc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("Newest First")
-                                    if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: {
-                                selectedSortOption = .createdAtAsc
-                                TabManager.shared.setSortOption(for: .tags, option: StashDBViewModel.TagSortOption.createdAtAsc.rawValue)
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text("Oldest First")
-                                    if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Created")
-                                if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.primary)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    // Filter Menu
-                    Menu {
-                        Button(action: {
-                            selectedFilter = nil
-                            performSearch()
-                        }) {
-                            HStack {
-                                Text("No Filter")
-                                if selectedFilter == nil {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        
-                        let tagFilters = viewModel.savedFilters.values
-                            .filter { $0.mode == .tags }
-                            .sorted { $0.name < $1.name }
-                        
-                        ForEach(tagFilters) { filter in
-                            Button(action: {
-                                selectedFilter = filter
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text(filter.name)
-                                    if selectedFilter?.id == filter.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    // Live Filter button
-                    Button(action: { showLiveFilterSheet = true }) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 20))
-                            .foregroundColor(isLiveFilterActive ? appearanceManager.tintColor : .primary)
-                            .overlay(alignment: .topTrailing) {
-                                if isLiveFilterActive {
-                                    Circle()
-                                        .fill(appearanceManager.tintColor)
-                                        .frame(width: 7, height: 7)
-                                        .offset(x: 3, y: -3)
-                                }
-                            }
-                    }
-                    .frame(maxWidth: .infinity)
                 }
+                .accessibilityLabel("Filter and sort")
+                Spacer(minLength: 0)
             }
-        .sheet(isPresented: $showLiveFilterSheet) {
-            TagLiveFilterSheet(
-                favorite: $liveFilterFavorite,
-                hasScenes: $liveFilterHasScenes,
-                onApply: { applyLiveFilter() },
-                onReset: {
-                    liveFilterFavorite = nil
-                    liveFilterHasScenes = false
-                    applyLiveFilter()
-                }
-            )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(Color.appBackground)
         }
+    }
+
+    @ViewBuilder
+    private func tagsFilterSortSheet() -> some View {
+        TagsCatalogFilterSortSheet(
+            serverFilters: sortedServerTagFilters,
+            localPresets: localCatalogPresets,
+            selectedPresetRowId: $catalogPresetRowSelection,
+            liveChipRowsVisible: tagLiveChipRowsVisible,
+            sortOption: selectedSortOption,
+            onSortChange: { changeTagSortOption(to: $0) },
+            liveFavorite: $liveFilterFavorite,
+            liveHasScenes: $liveFilterHasScenes,
+            onApply: { applyLiveFilter() },
+            onReset: {
+                catalogPresetRowSelection = ""
+                selectedFilter = nil
+                clearTagLiveChipsOnly()
+                applyLiveFilter()
+            },
+            onRequestSave: { saveTagCatalogPresetOverwrite() },
+            onRequestSaveAs: {
+                catalogPresetNameInput = ""
+                showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = localCatalogPresets.first(where: { $0.id == uuid }) {
+                    renameCatalogPresetInput = p.name
+                }
+                showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
         .onAppear {
-            // Check for search text from navigation
-            if !coordinator.activeSearchText.isEmpty {
-                searchText = coordinator.activeSearchText
-                isSearchVisible = true
-                coordinator.activeSearchText = ""
-                performSearch()
-                viewModel.fetchSavedFilters()
-                return
-            }
-            
-            if TabManager.shared.getDefaultFilterId(for: .tags) == nil || !viewModel.savedFilters.isEmpty {
-                if viewModel.tags.isEmpty {
-                    performSearch()
-                }
-            }
-            viewModel.fetchSavedFilters()
+            ListLivePresetTag.migrateLegacySelection(&catalogPresetRowSelection)
+            refreshTagLocalPresets()
+            applyCatalogPresetSelectionFromSheetIfNeeded()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.tags.rawValue {
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .tags),
-                   let newFilter = viewModel.savedFilters[defaultId] {
-                    selectedFilter = newFilter
-                } else {
-                    selectedFilter = nil
-                }
-                performSearch()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.tags.rawValue {
-                let newSort = StashDBViewModel.TagSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .tags) ?? "") ?? .sceneCountDesc
-                selectedSortOption = newSort
-                performSearch()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+    }
+
+    private func handleTagCatalogPresetSelectionChange(_ newId: String) {
+        guard showFilterSortSheet else { return }
+        if newId.isEmpty {
             selectedFilter = nil
+            clearTagLiveChipsOnly()
+            applyLiveFilter()
+            return
+        }
+        if let sid = ListLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
+            applyServerTagSavedFilter(f)
+            return
+        }
+        if let ls = ListLivePresetTag.parseLocalUUIDString(newId),
+           let uuid = UUID(uuidString: ls),
+           let preset = localCatalogPresets.first(where: { $0.id == uuid }) {
+            applyTagCatalogPreset(preset)
+        }
+    }
+
+    private func tagsOnAppear() {
+        if !coordinator.activeSearchText.isEmpty {
+            searchText = coordinator.activeSearchText
+            isSearchVisible = true
+            coordinator.activeSearchText = ""
             performSearch()
+            viewModel.fetchSavedFilters()
+            return
         }
-        .onChange(of: viewModel.savedFilters) { oldValue, newValue in
-            // Apply default filter if set and none selected yet
-            if selectedFilter == nil {
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .tags),
-                   let filter = newValue[defaultId] {
-                    selectedFilter = filter
-                    performSearch()
-                } else if !viewModel.isLoadingSavedFilters {
-                    // Default filter was set but not found, or filters finished loading and none match
-                    performSearch()
-                }
+        if TabManager.shared.getDefaultFilterId(for: .tags) == nil || !viewModel.savedFilters.isEmpty {
+            if viewModel.tags.isEmpty {
+                performSearch()
             }
         }
-        .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
-            if oldValue == true && isLoading == false {
-                if viewModel.tags.isEmpty && !viewModel.isLoading && selectedFilter == nil {
-                    performSearch()
-                }
-            }
-        }
+        viewModel.fetchSavedFilters()
     }
 
     private var emptyStateView: some View {
@@ -511,11 +656,12 @@ struct TagDetailView: View {
     @Environment(\.verticalSizeClass) var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var tagLiveFilterSheetPresented = false
-    @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
-    @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
     @State private var isHeaderExpanded = false
+    @StateObject private var linkedStudios: DetailLinkedStudiosFilterModel
+    @StateObject private var linkedGalleries: DetailLinkedGalleriesFilterModel
+    @StateObject private var linkedImages: DetailLinkedImagesFilterModel
     
     enum DetailTab: String, CaseIterable {
         case scenes = "Scenes"
@@ -532,24 +678,11 @@ struct TagDetailView: View {
         let gal = selectedTag.galleryCount ?? 0
         let initialTab: DetailTab = sc > 0 ? .scenes : (gal > 0 ? .galleries : .scenes)
         _selectedDetailTab = State(initialValue: initialTab)
+        _linkedStudios = StateObject(wrappedValue: DetailLinkedStudiosFilterModel(scope: .tag(selectedTag.id)))
+        _linkedGalleries = StateObject(wrappedValue: DetailLinkedGalleriesFilterModel(scope: .tag(selectedTag.id)))
+        _linkedImages = StateObject(wrappedValue: DetailLinkedImagesFilterModel(scope: .tag(selectedTag.id)))
     }
 
-    private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
-        if newOption == .random && selectedGallerySortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedGallerySortOption = newOption
-        viewModel.fetchTagGalleries(tagId: selectedTag.id, sortBy: newOption, isInitialLoad: true)
-    }
-
-    private func changeImageSortOption(to newOption: StashDBViewModel.ImageSortOption) {
-        if newOption == .random && selectedImageSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedImageSortOption = newOption
-        viewModel.fetchDetailImages(tagId: selectedTag.id, sortBy: newOption, isInitialLoad: true)
-    }
-    
     private var columns: [GridItem] {
         if verticalSizeClass == .compact {
              return [
@@ -657,6 +790,96 @@ struct TagDetailView: View {
     }
 
     var body: some View {
+        tagDetailWithLinkedGalleriesAndImagesSheets
+    }
+
+    private var tagDetailWithLinkedGalleriesAndImagesSheets: some View {
+        tagDetailWithLinkedStudiosSheets
+            .sheet(isPresented: $linkedGalleries.showFilterSortSheet) {
+                tagDetailGalleriesFilterSheet
+            }
+            .onChange(of: linkedGalleries.catalogPresetRowSelection) { _, newId in
+                linkedGalleries.handlePresetSelection(newId, viewModel: viewModel)
+            }
+            .alert("Save As", isPresented: $linkedGalleries.showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $linkedGalleries.catalogPresetNameInput)
+                Button("Save") { linkedGalleries.savePresetAs(name: linkedGalleries.catalogPresetNameInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save the current sort, filter, and live criteria as a new Stash saved filter.")
+            }
+            .alert("Rename", isPresented: $linkedGalleries.showRenameCatalogPresetAlert) {
+                TextField("Name", text: $linkedGalleries.renameCatalogPresetInput)
+                Button("Save") { linkedGalleries.renamePreset(to: linkedGalleries.renameCatalogPresetInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rename this preset or saved filter.")
+            }
+            .alert("Delete filter?", isPresented: $linkedGalleries.showDeleteCatalogPresetAlert) {
+                Button("Delete", role: .destructive) { linkedGalleries.deletePreset(viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(linkedGalleries.deletePresetConfirmationText(viewModel: viewModel))
+            }
+            .sheet(isPresented: $linkedImages.showFilterSortSheet) {
+                tagDetailImagesFilterSheet
+            }
+            .onChange(of: linkedImages.catalogPresetRowSelection) { _, newId in
+                linkedImages.handlePresetSelection(newId, viewModel: viewModel)
+            }
+            .alert("Save As", isPresented: $linkedImages.showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $linkedImages.catalogPresetNameInput)
+                Button("Save") { linkedImages.savePresetAs(name: linkedImages.catalogPresetNameInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save the current sort, filter, and live criteria as a new Stash saved filter.")
+            }
+            .alert("Rename", isPresented: $linkedImages.showRenameCatalogPresetAlert) {
+                TextField("Name", text: $linkedImages.renameCatalogPresetInput)
+                Button("Save") { linkedImages.renamePreset(to: linkedImages.renameCatalogPresetInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rename this preset or saved filter.")
+            }
+            .alert("Delete filter?", isPresented: $linkedImages.showDeleteCatalogPresetAlert) {
+                Button("Delete", role: .destructive) { linkedImages.deletePreset(viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(linkedImages.deletePresetConfirmationText(viewModel: viewModel))
+            }
+    }
+
+    private var tagDetailWithLinkedStudiosSheets: some View {
+        tagDetailCoreChrome
+            .sheet(isPresented: $linkedStudios.showFilterSortSheet) {
+                tagDetailStudiosFilterSheet
+            }
+            .onChange(of: linkedStudios.catalogPresetRowSelection) { _, newId in
+                linkedStudios.handlePresetSelection(newId, viewModel: viewModel)
+            }
+            .alert("Save As", isPresented: $linkedStudios.showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $linkedStudios.catalogPresetNameInput)
+                Button("Save") { linkedStudios.savePresetAs(name: linkedStudios.catalogPresetNameInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save the current sort, filter, and live criteria as a new Stash saved filter.")
+            }
+            .alert("Rename", isPresented: $linkedStudios.showRenameCatalogPresetAlert) {
+                TextField("Name", text: $linkedStudios.renameCatalogPresetInput)
+                Button("Save") { linkedStudios.renamePreset(to: linkedStudios.renameCatalogPresetInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rename this preset or saved filter.")
+            }
+            .alert("Delete filter?", isPresented: $linkedStudios.showDeleteCatalogPresetAlert) {
+                Button("Delete", role: .destructive) { linkedStudios.deletePreset(viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(linkedStudios.deletePresetConfirmationText(viewModel: viewModel))
+            }
+    }
+
+    private var tagDetailCoreChrome: some View {
         Group {
             if selectedDetailTab == .scenes {
                 tagScenesStack
@@ -690,14 +913,14 @@ struct TagDetailView: View {
                     .font(.headline)
                     .lineLimit(1)
             }
-            
+
             ToolbarItem(placement: .navigationBarTrailing) {
                 if showTabSwitcher {
                     Menu {
                         ForEach(availableTabs, id: \.self) { tab in
-                            Button(action: { 
+                            Button(action: {
                                 withAnimation(DesignTokens.Animation.quick) {
-                                    selectedDetailTab = tab 
+                                    selectedDetailTab = tab
                                 }
                             }) {
                                 HStack {
@@ -723,7 +946,6 @@ struct TagDetailView: View {
                     }
                 }
             }
-            
         }
         .floatingActionBar {
             HStack(spacing: 0) {
@@ -761,13 +983,206 @@ struct TagDetailView: View {
                     .accessibilityLabel("Filter and sort")
                     .frame(maxWidth: .infinity)
                 } else if selectedDetailTab == .galleries {
-                    gallerySortMenu
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        HapticManager.light()
+                        linkedGalleries.showFilterSortSheet = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(linkedGalleries.catalogFilterSortFABActive ? appearanceManager.tintColor : .primary)
+                            .overlay(alignment: .topTrailing) {
+                                if linkedGalleries.catalogFilterSortFABActive {
+                                    Circle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 3, y: -3)
+                                }
+                            }
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
+                } else if selectedDetailTab == .studios {
+                    Button {
+                        HapticManager.light()
+                        linkedStudios.showFilterSortSheet = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(linkedStudios.catalogFilterSortFABActive ? appearanceManager.tintColor : .primary)
+                            .overlay(alignment: .topTrailing) {
+                                if linkedStudios.catalogFilterSortFABActive {
+                                    Circle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 3, y: -3)
+                                }
+                            }
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
                 } else if selectedDetailTab == .images {
-                    imageSortMenu
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        HapticManager.light()
+                        linkedImages.showFilterSortSheet = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(linkedImages.catalogFilterSortFABActive ? appearanceManager.tintColor : .primary)
+                            .overlay(alignment: .topTrailing) {
+                                if linkedImages.catalogFilterSortFABActive {
+                                    Circle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 3, y: -3)
+                                }
+                            }
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var tagDetailStudiosFilterSheet: some View {
+        StudiosCatalogFilterSortSheet(
+            serverFilters: linkedStudios.sortedServerStudioFilters(viewModel: viewModel),
+            localPresets: linkedStudios.localCatalogPresets,
+            selectedPresetRowId: $linkedStudios.catalogPresetRowSelection,
+            liveChipRowsVisible: linkedStudios.studioLiveChipRowsVisible,
+            sortOption: linkedStudios.selectedSortOption,
+            onSortChange: { linkedStudios.changeSortOption(to: $0, viewModel: viewModel) },
+            liveMinRating: $linkedStudios.liveFilterMinRating,
+            liveFavorite: $linkedStudios.liveFilterFavorite,
+            liveScenes: $linkedStudios.liveFilterScenes,
+            onApply: { linkedStudios.applyLiveFilter(viewModel: viewModel) },
+            onReset: {
+                linkedStudios.catalogPresetRowSelection = ""
+                linkedStudios.selectedFilter = nil
+                linkedStudios.clearLiveChipsOnly()
+                linkedStudios.applyLiveFilter(viewModel: viewModel)
+            },
+            onRequestSave: { linkedStudios.savePresetOverwrite(viewModel: viewModel) },
+            onRequestSaveAs: {
+                linkedStudios.catalogPresetNameInput = ""
+                linkedStudios.showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(linkedStudios.catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    linkedStudios.renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(linkedStudios.catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = linkedStudios.localCatalogPresets.first(where: { $0.id == uuid }) {
+                    linkedStudios.renameCatalogPresetInput = p.name
+                }
+                linkedStudios.showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { linkedStudios.showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .onAppear {
+            ListLivePresetTag.migrateLegacySelection(&linkedStudios.catalogPresetRowSelection)
+            linkedStudios.refreshLocalPresets()
+            linkedStudios.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
+        }
+    }
+
+    @ViewBuilder
+    private var tagDetailGalleriesFilterSheet: some View {
+        GalleriesCatalogFilterSortSheet(
+            serverFilters: linkedGalleries.sortedServerGalleryFilters(viewModel: viewModel),
+            localPresets: linkedGalleries.localCatalogPresets,
+            selectedPresetRowId: $linkedGalleries.catalogPresetRowSelection,
+            liveChipRowsVisible: linkedGalleries.galleryLiveChipRowsVisible,
+            sortOption: linkedGalleries.selectedSortOption,
+            onSortChange: { linkedGalleries.changeSortOption(to: $0, viewModel: viewModel) },
+            liveMinRating: $linkedGalleries.liveFilterMinRating,
+            liveFavorite: $linkedGalleries.liveFilterFavorite,
+            liveFiles: $linkedGalleries.liveFilterFiles,
+            onApply: { linkedGalleries.applyLiveFilter(viewModel: viewModel) },
+            onReset: {
+                linkedGalleries.catalogPresetRowSelection = ""
+                linkedGalleries.selectedFilter = nil
+                linkedGalleries.clearLiveChipsOnly()
+                linkedGalleries.applyLiveFilter(viewModel: viewModel)
+            },
+            onRequestSave: { linkedGalleries.savePresetOverwrite(viewModel: viewModel) },
+            onRequestSaveAs: {
+                linkedGalleries.catalogPresetNameInput = ""
+                linkedGalleries.showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(linkedGalleries.catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    linkedGalleries.renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(linkedGalleries.catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = linkedGalleries.localCatalogPresets.first(where: { $0.id == uuid }) {
+                    linkedGalleries.renameCatalogPresetInput = p.name
+                }
+                linkedGalleries.showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { linkedGalleries.showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .onAppear {
+            var sel = linkedGalleries.catalogPresetRowSelection
+            ListLivePresetTag.migrateLegacySelection(&sel)
+            linkedGalleries.catalogPresetRowSelection = sel
+            linkedGalleries.refreshLocalPresets()
+            linkedGalleries.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
+        }
+    }
+
+    @ViewBuilder
+    private var tagDetailImagesFilterSheet: some View {
+        ImagesCatalogFilterSortSheet(
+            serverFilters: linkedImages.sortedServerImageFilters(viewModel: viewModel),
+            localPresets: linkedImages.localCatalogPresets,
+            selectedPresetRowId: $linkedImages.catalogPresetRowSelection,
+            liveChipRowsVisible: linkedImages.imageLiveChipRowsVisible,
+            sortOption: linkedImages.selectedSortOption,
+            onSortChange: { linkedImages.changeSortOption(to: $0, viewModel: viewModel) },
+            liveMinRating: $linkedImages.liveFilterMinRating,
+            liveFavorite: $linkedImages.liveFilterFavorite,
+            liveOrganized: $linkedImages.liveFilterOrganized,
+            onApply: { linkedImages.applyLiveFilter(viewModel: viewModel) },
+            onReset: {
+                linkedImages.catalogPresetRowSelection = ""
+                linkedImages.selectedFilter = nil
+                linkedImages.clearLiveChipsOnly()
+                linkedImages.refetchImages(viewModel: viewModel, initial: true)
+            },
+            onRequestSave: { linkedImages.savePresetOverwrite(viewModel: viewModel) },
+            onRequestSaveAs: {
+                linkedImages.catalogPresetNameInput = ""
+                linkedImages.showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(linkedImages.catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    linkedImages.renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(linkedImages.catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = linkedImages.localCatalogPresets.first(where: { $0.id == uuid }) {
+                    linkedImages.renameCatalogPresetInput = p.name
+                }
+                linkedImages.showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { linkedImages.showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .onAppear {
+            var sel = linkedImages.catalogPresetRowSelection
+            ListLivePresetTag.migrateLegacySelection(&sel)
+            linkedImages.catalogPresetRowSelection = sel
+            linkedImages.refreshLocalPresets()
+            linkedImages.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
         }
     }
     
@@ -775,7 +1190,7 @@ struct TagDetailView: View {
     
     private func loadDetailData() {
         if viewModel.tagGalleries.isEmpty && !viewModel.isLoadingTagGalleries {
-            viewModel.fetchTagGalleries(tagId: selectedTag.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
+            linkedGalleries.refetchGalleries(viewModel: viewModel, initial: true)
         }
         
         // Update favorite status from server
@@ -786,9 +1201,12 @@ struct TagDetailView: View {
         }
         
         // Fetch extended content
-        viewModel.fetchDetailStudios(tagId: selectedTag.id)
+        viewModel.fetchSavedFilters()
+        linkedStudios.refetchStudios(viewModel: viewModel, initial: true)
         viewModel.fetchDetailGroups(tagId: selectedTag.id)
-        viewModel.fetchDetailImages(tagId: selectedTag.id, sortBy: selectedImageSortOption)
+        if viewModel.detailImages.isEmpty && !viewModel.isLoadingDetailImages {
+            linkedImages.refetchImages(viewModel: viewModel, initial: true)
+        }
     }
     
     private var tagHeaderView: some View {
@@ -965,7 +1383,7 @@ struct TagDetailView: View {
             }
             if viewModel.isLoadingDetailStudios { ProgressView().padding() }
             else if viewModel.hasMoreDetailStudios {
-                Color.clear.onAppear { viewModel.fetchDetailStudios(tagId: selectedTag.id, isInitialLoad: false) }
+                Color.clear.onAppear { linkedStudios.refetchStudios(viewModel: viewModel, initial: false) }
             }
         }
     }
@@ -995,170 +1413,8 @@ struct TagDetailView: View {
             }
             if viewModel.isLoadingDetailImages { ProgressView().padding() }
             else if viewModel.hasMoreDetailImages {
-                Color.clear.onAppear { viewModel.fetchDetailImages(tagId: selectedTag.id, isInitialLoad: false) }
+                Color.clear.onAppear { linkedImages.refetchImages(viewModel: viewModel, initial: false) }
             }
-        }
-    }
-    
-    private var gallerySortMenu: some View {
-        Menu {
-            // Random
-            Button(action: { changeGallerySortOption(to: .random) }) {
-                HStack {
-                    Text("Random")
-                    if selectedGallerySortOption == .random { Image(systemName: "checkmark") }
-                }
-            }
-            
-            Divider()
-
-            // Name
-            Menu {
-                Button(action: { changeGallerySortOption(to: .titleAsc) }) {
-                    HStack {
-                        Text("A → Z")
-                        if selectedGallerySortOption == .titleAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeGallerySortOption(to: .titleDesc) }) {
-                    HStack {
-                        Text("Z → A")
-                        if selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Name")
-                    if selectedGallerySortOption == .titleAsc || selectedGallerySortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-
-            // Date
-            Menu {
-                Button(action: { changeGallerySortOption(to: .dateDesc) }) {
-                    HStack {
-                        Text("Newest First")
-                        if selectedGallerySortOption == .dateDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeGallerySortOption(to: .dateAsc) }) {
-                    HStack {
-                        Text("Oldest First")
-                        if selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Date")
-                    if selectedGallerySortOption == .dateDesc || selectedGallerySortOption == .dateAsc { Image(systemName: "checkmark") }
-                }
-            }
-
-            // Rating
-            Menu {
-                Button(action: { changeGallerySortOption(to: .ratingDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedGallerySortOption == .ratingDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeGallerySortOption(to: .ratingAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Rating")
-                    if selectedGallerySortOption == .ratingDesc || selectedGallerySortOption == .ratingAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
-        }
-    }
-    
-    private var imageSortMenu: some View {
-        Menu {
-            // Random
-            Button(action: { changeImageSortOption(to: .random) }) {
-                HStack {
-                    Text("Random")
-                    if selectedImageSortOption == .random { Image(systemName: "checkmark") }
-                }
-            }
-            
-            Divider()
-
-            // Title
-            Menu {
-                Button(action: { changeImageSortOption(to: .titleAsc) }) {
-                    HStack {
-                        Text("A → Z")
-                        if selectedImageSortOption == .titleAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeImageSortOption(to: .titleDesc) }) {
-                    HStack {
-                        Text("Z → A")
-                        if selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Title")
-                    if selectedImageSortOption == .titleAsc || selectedImageSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-
-            // Date
-            Menu {
-                Button(action: { changeImageSortOption(to: .dateDesc) }) {
-                    HStack {
-                        Text("Newest First")
-                        if selectedImageSortOption == .dateDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeImageSortOption(to: .dateAsc) }) {
-                    HStack {
-                        Text("Oldest First")
-                        if selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Date")
-                    if selectedImageSortOption == .dateDesc || selectedImageSortOption == .dateAsc { Image(systemName: "checkmark") }
-                }
-            }
-
-            // Rating
-            Menu {
-                Button(action: { changeImageSortOption(to: .ratingDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedImageSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeImageSortOption(to: .ratingAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Rating")
-                    if selectedImageSortOption == .ratingDesc || selectedImageSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
         }
     }
     
@@ -1216,74 +1472,5 @@ struct TagImageView: View {
     }
 }
 
-// MARK: - Tag Live Filter Sheet
-
-struct TagLiveFilterSheet: View {
-    @Binding var favorite: Bool?
-    @Binding var hasScenes: Bool
-    var onApply: () -> Void
-    var onReset: () -> Void
-
-    @ObservedObject private var appearance = AppearanceManager.shared
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationView {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(spacing: 0) {
-                    filterRow(label: "Favorite") {
-                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
-                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
-                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Scenes") {
-                        filterChip("Any",        isActive: !hasScenes) { hasScenes = false; onApply() }
-                        filterChip("Has scenes", isActive: hasScenes)  { hasScenes = true;  onApply() }
-                    }
-                }
-                .background(Color.secondaryAppBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                Spacer()
-            }
-            .background(Color.appBackground)
-            .navigationTitle("Live Filter")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Reset", role: .destructive) { onReset() }.foregroundColor(.red)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }.fontWeight(.semibold)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func filterRow<C: View>(label: String, @ViewBuilder chips: () -> C) -> some View {
-        HStack(spacing: 12) {
-            Text(label).font(.system(size: 15)).frame(width: 80, alignment: .leading).foregroundColor(.primary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) { chips() }.padding(.vertical, 12)
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    @ViewBuilder
-    private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).font(.system(size: 13, weight: .medium))
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(isActive ? appearance.tintColor : Color.secondary.opacity(0.15))
-                .foregroundColor(isActive ? .white : .primary)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
 #endif
 

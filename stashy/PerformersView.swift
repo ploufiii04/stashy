@@ -24,8 +24,17 @@ struct PerformersView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    // Live filter state
-    @State private var showLiveFilterSheet = false
+    // Filter & sort sheet (unified)
+    @State private var showFilterSortSheet = false
+    @State private var catalogPresetRowSelection = ""
+    @State private var localCatalogPresets: [PerformerListLiveFilterPreset] = PerformerListLiveFilterPresetStore.loadPresets()
+    @State private var showSaveAsCatalogPresetAlert = false
+    @State private var catalogPresetNameInput = ""
+    @State private var showRenameCatalogPresetAlert = false
+    @State private var renameCatalogPresetInput = ""
+    @State private var showDeleteCatalogPresetAlert = false
+
+    // Live filter state (chips)
     @State private var liveFilterAgeRange: String? = nil   // "18-21" / "22-26" / "26-30" / "30+"
     @State private var liveFilterHairColor: String? = nil  // "BLONDE" / "BRUNETTE" / "RED" / "BLACK"
     @State private var liveFilterGender: String? = nil     // "FEMALE" / "MALE" / "TRANSGENDER_FEMALE" / "TRANSGENDER_MALE" / "NON_BINARY"
@@ -99,6 +108,253 @@ struct PerformersView: View {
         viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter, liveFilter: activeLiveFilterDict)
     }
 
+    private var catalogFilterSortFABActive: Bool {
+        selectedFilter != nil || isLiveFilterActive
+    }
+
+    private var sortedServerPerformerFilters: [StashDBViewModel.SavedFilter] {
+        viewModel.savedFilters.values
+            .filter { $0.mode == .performers }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var performerLiveChipRowsVisible: Bool {
+        CatalogLiveChipFilterSupport.performerSavedFilterSupportsLiveEditor(selectedFilter)
+    }
+
+    private func refreshPerformerLocalPresets() {
+        localCatalogPresets = PerformerListLiveFilterPresetStore.loadPresets()
+    }
+
+    private func clearPerformerLiveChipsOnly() {
+        liveFilterAgeRange = nil
+        liveFilterHairColor = nil
+        liveFilterGender = nil
+        liveFilterCountry = nil
+        liveFilterImplants = nil
+        liveFilterFavorite = nil
+        liveFilterMissingField = nil
+    }
+
+    private func mapPerformerLiveFragmentToChips(_ frag: [String: Any]) {
+        clearPerformerLiveChipsOnly()
+        if let fav = frag["filter_favorites"] as? Bool {
+            liveFilterFavorite = fav
+        }
+        if let hair = frag["hair_color"] as? [String: Any], let v = hair["value"] as? String {
+            liveFilterHairColor = v
+        }
+        if let g = frag["gender"] as? [String: Any], let v = g["value"] as? String {
+            liveFilterGender = v
+        }
+        if let c = frag["country"] as? [String: Any] {
+            let mod = (c["modifier"] as? String) ?? ""
+            if mod == "NOT_EQUALS", (c["value"] as? String) == "US" {
+                liveFilterCountry = "NOT_US"
+            } else if let v = c["value"] as? String {
+                liveFilterCountry = v
+            }
+        }
+        if let ft = frag["fake_tits"] as? [String: Any], let v = ft["value"] as? String {
+            liveFilterImplants = (v == "FAKE")
+        }
+        if let m = frag["is_missing"] as? String {
+            liveFilterMissingField = m
+        }
+    }
+
+    private func applyPerformerCatalogPreset(_ preset: PerformerListLiveFilterPreset) {
+        if preset.sort != selectedSortOption {
+            if preset.sort == .random && selectedSortOption == .random {
+                viewModel.refreshRandomSeed()
+            }
+            selectedSortOption = preset.sort
+            TabManager.shared.setSortOption(for: .performers, option: preset.sort.rawValue)
+        }
+        if let fid = preset.baseSavedFilterId, let f = viewModel.savedFilters[fid] {
+            selectedFilter = f
+        } else {
+            selectedFilter = nil
+        }
+        if CatalogLiveChipFilterSupport.performerSavedFilterSupportsLiveEditor(selectedFilter) {
+            mapPerformerLiveFragmentToChips(preset.liveFragment)
+        } else {
+            clearPerformerLiveChipsOnly()
+        }
+        applyLiveFilter()
+    }
+
+    private func applyServerPerformerSavedFilter(_ f: StashDBViewModel.SavedFilter) {
+        if let meta = f.stashyCatalogPresetMetadata {
+            if let bid = meta.baseSavedFilterId, let base = viewModel.savedFilters[bid] {
+                selectedFilter = base
+            } else {
+                selectedFilter = nil
+            }
+            if CatalogLiveChipFilterSupport.performerSavedFilterSupportsLiveEditor(selectedFilter) {
+                mapPerformerLiveFragmentToChips(meta.liveFragment)
+            } else {
+                clearPerformerLiveChipsOnly()
+            }
+            if let sr = meta.sortRaw, let parsed = StashDBViewModel.PerformerSortOption(rawValue: sr), parsed != selectedSortOption {
+                if parsed == .random && selectedSortOption == .random {
+                    viewModel.refreshRandomSeed()
+                }
+                selectedSortOption = parsed
+                TabManager.shared.setSortOption(for: .performers, option: parsed.rawValue)
+            }
+        } else {
+            selectedFilter = f
+            if CatalogLiveChipFilterSupport.performerSavedFilterSupportsLiveEditor(f), let raw = f.filterDict {
+                mapPerformerLiveFragmentToChips(raw)
+            } else {
+                clearPerformerLiveChipsOnly()
+            }
+        }
+        applyLiveFilter()
+    }
+
+    private func applyCatalogPresetSelectionFromSheetIfNeeded() {
+        let newId = catalogPresetRowSelection
+        guard !newId.isEmpty else { return }
+        if let sid = ListLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
+            applyServerPerformerSavedFilter(f)
+            return
+        }
+        if let ls = ListLivePresetTag.parseLocalUUIDString(newId),
+           let uuid = UUID(uuidString: ls),
+           let preset = localCatalogPresets.first(where: { $0.id == uuid }) {
+            applyPerformerCatalogPreset(preset)
+            return
+        }
+        if let uuid = UUID(uuidString: newId),
+           let preset = localCatalogPresets.first(where: { $0.id == uuid }) {
+            catalogPresetRowSelection = ListLivePresetTag.localRow(uuid)
+            applyPerformerCatalogPreset(preset)
+        }
+    }
+
+    private var deleteCatalogPresetConfirmationText: String {
+        if let sid = ListLivePresetTag.parseServerId(catalogPresetRowSelection),
+           let f = viewModel.savedFilters[sid] {
+            return "Remove “\(f.name)” from Stash? Other devices will lose this saved filter."
+        }
+        if let ls = ListLivePresetTag.parseLocalUUIDString(catalogPresetRowSelection),
+           let uuid = UUID(uuidString: ls),
+           let p = localCatalogPresets.first(where: { $0.id == uuid }) {
+            return "Remove “\(p.name)” from this device? This cannot be undone."
+        }
+        return "Remove this filter? This cannot be undone."
+    }
+
+    private func savePerformerCatalogPresetOverwrite() {
+        let sel = catalogPresetRowSelection
+        if let sid = ListLivePresetTag.parseServerId(sel) {
+            let name = viewModel.savedFilters[sid]?.name ?? "Filter"
+            viewModel.saveCatalogSavedFilter(
+                mode: .performers,
+                randomSeedKind: .performers,
+                existingId: sid,
+                name: name,
+                sortRaw: selectedSortOption.rawValue,
+                sortField: selectedSortOption.sortField,
+                sortDirection: selectedSortOption.direction,
+                baseFilter: selectedFilter,
+                liveFragment: activeLiveFilterDict
+            ) { _ in }
+            return
+        }
+        guard let ls = ListLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls),
+              let index = localCatalogPresets.firstIndex(where: { $0.id == uuid }) else { return }
+        let old = localCatalogPresets[index]
+        let updated = PerformerListLiveFilterPreset(
+            id: old.id,
+            name: old.name,
+            createdAt: old.createdAt,
+            sort: selectedSortOption,
+            baseSavedFilterId: selectedFilter?.id,
+            liveFragment: activeLiveFilterDict
+        )
+        PerformerListLiveFilterPresetStore.upsert(updated)
+        refreshPerformerLocalPresets()
+    }
+
+    private func savePerformerCatalogPresetAs(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        viewModel.saveCatalogSavedFilter(
+            mode: .performers,
+            randomSeedKind: .performers,
+            existingId: nil,
+            name: trimmed,
+            sortRaw: selectedSortOption.rawValue,
+            sortField: selectedSortOption.sortField,
+            sortDirection: selectedSortOption.direction,
+            baseFilter: selectedFilter,
+            liveFragment: activeLiveFilterDict
+        ) { result in
+            if case .success(let saved) = result {
+                catalogPresetRowSelection = ListLivePresetTag.serverRow(saved.id)
+                showSaveAsCatalogPresetAlert = false
+            }
+        }
+    }
+
+    private func renamePerformerCatalogPreset(to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let sel = catalogPresetRowSelection
+        if let sid = ListLivePresetTag.parseServerId(sel) {
+            viewModel.saveCatalogSavedFilter(
+                mode: .performers,
+                randomSeedKind: .performers,
+                existingId: sid,
+                name: trimmed,
+                sortRaw: selectedSortOption.rawValue,
+                sortField: selectedSortOption.sortField,
+                sortDirection: selectedSortOption.direction,
+                baseFilter: selectedFilter,
+                liveFragment: activeLiveFilterDict
+            ) { result in
+                if case .success = result {
+                    showRenameCatalogPresetAlert = false
+                }
+            }
+            return
+        }
+        guard let ls = ListLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls),
+              let preset = localCatalogPresets.first(where: { $0.id == uuid }) else { return }
+        let renamed = preset.renamed(trimmed)
+        PerformerListLiveFilterPresetStore.upsert(renamed)
+        refreshPerformerLocalPresets()
+        showRenameCatalogPresetAlert = false
+    }
+
+    private func deletePerformerCatalogPreset() {
+        let sel = catalogPresetRowSelection
+        if let sid = ListLivePresetTag.parseServerId(sel) {
+            viewModel.destroySavedSceneFilter(id: sid) { result in
+                if case .success = result {
+                    if selectedFilter?.id == sid {
+                        selectedFilter = nil
+                    }
+                    catalogPresetRowSelection = ""
+                    showDeleteCatalogPresetAlert = false
+                    performSearch()
+                }
+            }
+            return
+        }
+        guard let ls = ListLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls) else { return }
+        PerformerListLiveFilterPresetStore.remove(id: uuid)
+        refreshPerformerLocalPresets()
+        catalogPresetRowSelection = ""
+        showDeleteCatalogPresetAlert = false
+    }
+
     init(initialSort: StashDBViewModel.PerformerSortOption? = nil) {
         let savedSort = StashDBViewModel.PerformerSortOption(rawValue: TabManager.shared.getSortOption(for: .performers) ?? "")
         _selectedSortOption = State(initialValue: initialSort ?? savedSort ?? .sceneCountDesc)
@@ -141,6 +397,99 @@ struct PerformersView: View {
     }
 
     var body: some View {
+        performersCoreChrome
+            .sheet(isPresented: $showFilterSortSheet, content: performersFilterSortSheet)
+            .onChange(of: catalogPresetRowSelection) { _, newId in
+                handlePerformerCatalogPresetSelectionChange(newId)
+            }
+            .alert("Save As", isPresented: $showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $catalogPresetNameInput)
+                Button("Save") { savePerformerCatalogPresetAs(name: catalogPresetNameInput) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save the current sort, filter, and live criteria as a new Stash saved filter.")
+            }
+            .alert("Rename", isPresented: $showRenameCatalogPresetAlert) {
+                TextField("Name", text: $renameCatalogPresetInput)
+                Button("Save") { renamePerformerCatalogPreset(to: renameCatalogPresetInput) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rename this preset or saved filter.")
+            }
+            .alert("Delete filter?", isPresented: $showDeleteCatalogPresetAlert) {
+                Button("Delete", role: .destructive) { deletePerformerCatalogPreset() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(deleteCatalogPresetConfirmationText)
+            }
+            .onAppear {
+                performersOnAppear()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+                selectedFilter = nil
+                catalogPresetRowSelection = ""
+                refreshPerformerLocalPresets()
+                performSearch()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
+                if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.performers.rawValue {
+                    if let defaultId = TabManager.shared.getDefaultFilterId(for: .performers),
+                       let newFilter = viewModel.savedFilters[defaultId] {
+                        selectedFilter = newFilter
+                    } else {
+                        selectedFilter = nil
+                    }
+                    performSearch()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+                if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.performers.rawValue {
+                    let newSort = StashDBViewModel.PerformerSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .performers) ?? "") ?? .sceneCountDesc
+                    changeSortOption(to: newSort)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
+                if let targetId = notification.userInfo?["performerId"] as? String,
+                   let newPath = notification.userInfo?["newImagePath"] as? String {
+                    if let index = viewModel.performers.firstIndex(where: { $0.id == targetId }) {
+                        viewModel.performers[index].imagePath = newPath
+                    }
+                }
+            }
+            .onChange(of: viewModel.savedFilters) { oldValue, newValue in
+                if selectedFilter == nil {
+                    if let defaultId = TabManager.shared.getDefaultFilterId(for: .performers),
+                       let filter = newValue[defaultId] {
+                        selectedFilter = filter
+                        if viewModel.performers.isEmpty {
+                            viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: filter)
+                        }
+                    } else if !viewModel.isLoadingSavedFilters {
+                        if viewModel.performers.isEmpty {
+                            viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: nil)
+                        }
+                    }
+                }
+            }
+            .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
+                if oldValue == true && isLoading == false {
+                    if viewModel.performers.isEmpty && !viewModel.isLoadingPerformers && selectedFilter == nil {
+                        viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: nil)
+                    }
+                }
+            }
+            .navigationDestination(isPresented: Binding(
+                get: { coordinator.performerToOpen != nil },
+                set: { if !$0 { coordinator.performerToOpen = nil } }
+            )) {
+                if let performer = coordinator.performerToOpen {
+                    PerformerDetailView(performer: performer)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var performersCoreChrome: some View {
         Group {
             if configManager.activeConfig == nil {
                 ConnectionErrorView { performSearch() }
@@ -157,9 +506,7 @@ struct PerformersView: View {
         .navigationTitle("Performers")
         .navigationBarTitleDisplayMode(.inline)
         .applyAppBackground()
-
         .onChange(of: searchText) { oldValue, newValue in
-            // Debounce: Nur suchen wenn Nutzer aufhört zu tippen (0.5s Delay)
             NSObject.cancelPreviousPerformRequests(withTarget: self)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if newValue == self.searchText {
@@ -189,211 +536,18 @@ struct PerformersView: View {
                     }
                 }
             }
-            
         }
         .floatingActionBar {
             HStack(spacing: 0) {
-                // Sort Menu with grouped options
-                Menu {
-                        // Random (standalone)
-                        Button(action: { changeSortOption(to: .random) }) {
-                            HStack {
-                                Text("Random")
-                                if selectedSortOption == .random { Image(systemName: "checkmark") }
-                            }
-                        }
-                        
-                        Divider()
-                        
-                        // Name
-                        Menu {
-                            Button(action: { changeSortOption(to: .nameAsc) }) {
-                                HStack {
-                                    Text("A → Z")
-                                    if selectedSortOption == .nameAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: { changeSortOption(to: .nameDesc) }) {
-                                HStack {
-                                    Text("Z → A")
-                                    if selectedSortOption == .nameDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Name")
-                                if selectedSortOption == .nameAsc || selectedSortOption == .nameDesc {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        
-                        // Scene Count
-                        Menu {
-                            Button(action: { changeSortOption(to: .sceneCountDesc) }) {
-                                HStack {
-                                    Text("High → Low")
-                                    if selectedSortOption == .sceneCountDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: { changeSortOption(to: .sceneCountAsc) }) {
-                                HStack {
-                                    Text("Low → High")
-                                    if selectedSortOption == .sceneCountAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Scene Count")
-                                if selectedSortOption == .sceneCountAsc || selectedSortOption == .sceneCountDesc {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-
-                        // Counter
-                        Menu {
-                            Button(action: { changeSortOption(to: .oCountDesc) }) {
-                                HStack {
-                                    Text("High → Low")
-                                    if selectedSortOption == .oCountDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: { changeSortOption(to: .oCountAsc) }) {
-                                HStack {
-                                    Text("Low → High")
-                                    if selectedSortOption == .oCountAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Counter")
-                                if selectedSortOption == .oCountAsc || selectedSortOption == .oCountDesc {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        
-                        // Birthday
-                        Menu {
-                            Button(action: { changeSortOption(to: .birthdateDesc) }) {
-                                HStack {
-                                    Text("Youngest First")
-                                    if selectedSortOption == .birthdateDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: { changeSortOption(to: .birthdateAsc) }) {
-                                HStack {
-                                    Text("Oldest First")
-                                    if selectedSortOption == .birthdateAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Birthday")
-                                if selectedSortOption == .birthdateAsc || selectedSortOption == .birthdateDesc {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        
-                        // Updated
-                        Menu {
-                            Button(action: { changeSortOption(to: .updatedAtDesc) }) {
-                                HStack {
-                                    Text("Newest First")
-                                    if selectedSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: { changeSortOption(to: .updatedAtAsc) }) {
-                                HStack {
-                                    Text("Oldest First")
-                                    if selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Updated")
-                                if selectedSortOption == .updatedAtAsc || selectedSortOption == .updatedAtDesc {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        
-                        // Created
-                        Menu {
-                            Button(action: { changeSortOption(to: .createdAtDesc) }) {
-                                HStack {
-                                    Text("Newest First")
-                                    if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                                }
-                            }
-                            Button(action: { changeSortOption(to: .createdAtAsc) }) {
-                                HStack {
-                                    Text("Oldest First")
-                                    if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text("Created")
-                                if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.primary)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    // Filter Menu
-                    Menu {
-                        Button(action: {
-                            selectedFilter = nil
-                            performSearch()
-                        }) {
-                            HStack {
-                                Text("No Filter")
-                                if selectedFilter == nil {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                        
-                        let performerFilters = viewModel.savedFilters.values
-                            .filter { $0.mode == .performers }
-                            .sorted { $0.name < $1.name }
-                        
-                        ForEach(performerFilters) { filter in
-                            Button(action: {
-                                selectedFilter = filter
-                                performSearch()
-                            }) {
-                                HStack {
-                                    Text(filter.name)
-                                    if selectedFilter?.id == filter.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(selectedFilter != nil ? appearance.tintColor : .primary)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                // Live Filter button
-                Button(action: { showLiveFilterSheet = true }) {
+                Spacer(minLength: 0)
+                Button {
+                    showFilterSortSheet = true
+                } label: {
                     Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 20))
-                        .foregroundColor(isLiveFilterActive ? appearance.tintColor : .primary)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(catalogFilterSortFABActive ? appearance.tintColor : .primary)
                         .overlay(alignment: .topTrailing) {
-                            if isLiveFilterActive {
+                            if catalogFilterSortFABActive {
                                 Circle()
                                     .fill(appearance.tintColor)
                                     .frame(width: 7, height: 7)
@@ -401,116 +555,96 @@ struct PerformersView: View {
                             }
                         }
                 }
-                .frame(maxWidth: .infinity)
-                }
+                .accessibilityLabel("Filter and sort")
+                Spacer(minLength: 0)
             }
-        .sheet(isPresented: $showLiveFilterSheet) {
-            PerformerLiveFilterSheet(
-                ageRange: $liveFilterAgeRange,
-                hairColor: $liveFilterHairColor,
-                gender: $liveFilterGender,
-                country: $liveFilterCountry,
-                implants: $liveFilterImplants,
-                favorite: $liveFilterFavorite,
-                missingField: $liveFilterMissingField,
-                onApply: { applyLiveFilter() },
-                onReset: {
-                    liveFilterAgeRange = nil
-                    liveFilterHairColor = nil
-                    liveFilterGender = nil
-                    liveFilterCountry = nil
-                    liveFilterImplants = nil
-                    liveFilterFavorite = nil
-                    liveFilterMissingField = nil
-                    applyLiveFilter()
-                }
-            )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(Color.appBackground)
         }
+    }
+
+    @ViewBuilder
+    private func performersFilterSortSheet() -> some View {
+        PerformersCatalogFilterSortSheet(
+            serverFilters: sortedServerPerformerFilters,
+            localPresets: localCatalogPresets,
+            selectedPresetRowId: $catalogPresetRowSelection,
+            liveChipRowsVisible: performerLiveChipRowsVisible,
+            sortOption: selectedSortOption,
+            onSortChange: { changeSortOption(to: $0) },
+            liveAgeRange: $liveFilterAgeRange,
+            liveHairColor: $liveFilterHairColor,
+            liveGender: $liveFilterGender,
+            liveCountry: $liveFilterCountry,
+            liveImplants: $liveFilterImplants,
+            liveFavorite: $liveFilterFavorite,
+            liveMissingField: $liveFilterMissingField,
+            onApply: { applyLiveFilter() },
+            onReset: {
+                catalogPresetRowSelection = ""
+                selectedFilter = nil
+                clearPerformerLiveChipsOnly()
+                applyLiveFilter()
+            },
+            onRequestSave: { savePerformerCatalogPresetOverwrite() },
+            onRequestSaveAs: {
+                catalogPresetNameInput = ""
+                showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = localCatalogPresets.first(where: { $0.id == uuid }) {
+                    renameCatalogPresetInput = p.name
+                }
+                showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
         .onAppear {
-            // Check for search text from navigation
-            if !coordinator.activeSearchText.isEmpty {
-                searchText = coordinator.activeSearchText
-                isSearchVisible = true
-                coordinator.activeSearchText = ""
-                viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter)
-                viewModel.fetchSavedFilters()
-                return
-            }
-            
-            // Only search if we don't have a default filter to wait for, or if filters are already loaded
-            if TabManager.shared.getDefaultFilterId(for: .performers) == nil || !viewModel.savedFilters.isEmpty {
-                if viewModel.performers.isEmpty {
-                    performSearch()
-                }
-            }
-            viewModel.fetchSavedFilters()
+            ListLivePresetTag.migrateLegacySelection(&catalogPresetRowSelection)
+            refreshPerformerLocalPresets()
+            applyCatalogPresetSelectionFromSheetIfNeeded()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+    }
+
+    private func handlePerformerCatalogPresetSelectionChange(_ newId: String) {
+        guard showFilterSortSheet else { return }
+        if newId.isEmpty {
             selectedFilter = nil
-            performSearch()
+            clearPerformerLiveChipsOnly()
+            applyLiveFilter()
+            return
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.performers.rawValue {
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .performers),
-                   let newFilter = viewModel.savedFilters[defaultId] {
-                    selectedFilter = newFilter
-                } else {
-                    selectedFilter = nil
-                }
+        if let sid = ListLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
+            applyServerPerformerSavedFilter(f)
+            return
+        }
+        if let ls = ListLivePresetTag.parseLocalUUIDString(newId),
+           let uuid = UUID(uuidString: ls),
+           let preset = localCatalogPresets.first(where: { $0.id == uuid }) {
+            applyPerformerCatalogPreset(preset)
+        }
+    }
+
+    private func performersOnAppear() {
+        if !coordinator.activeSearchText.isEmpty {
+            searchText = coordinator.activeSearchText
+            isSearchVisible = true
+            coordinator.activeSearchText = ""
+            viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: selectedFilter)
+            viewModel.fetchSavedFilters()
+            return
+        }
+        if TabManager.shared.getDefaultFilterId(for: .performers) == nil || !viewModel.savedFilters.isEmpty {
+            if viewModel.performers.isEmpty {
                 performSearch()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
-            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.performers.rawValue {
-                let newSort = StashDBViewModel.PerformerSortOption(rawValue: TabManager.shared.getPersistentSortOption(for: .performers) ?? "") ?? .sceneCountDesc
-                changeSortOption(to: newSort)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
-            if let targetId = notification.userInfo?["performerId"] as? String,
-               let newPath = notification.userInfo?["newImagePath"] as? String {
-                if let index = viewModel.performers.firstIndex(where: { $0.id == targetId }) {
-                    viewModel.performers[index].imagePath = newPath
-                }
-            }
-        }
-        .onChange(of: viewModel.savedFilters) { oldValue, newValue in
-            // Apply default filter if set and none selected yet
-            if selectedFilter == nil {
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .performers),
-                   let filter = newValue[defaultId] {
-                    selectedFilter = filter
-                    // Only fetch if empty to avoid resetting scroll
-                    if viewModel.performers.isEmpty {
-                        viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: filter)
-                    }
-                } else if !viewModel.isLoadingSavedFilters {
-                    // Default filter was set but not found, or filters finished loading and none match
-                    // Only fetch if empty
-                    if viewModel.performers.isEmpty {
-                        viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: nil)
-                    }
-                }
-            }
-        }
-        .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
-            if oldValue == true && isLoading == false {
-                if viewModel.performers.isEmpty && !viewModel.isLoadingPerformers && selectedFilter == nil {
-                    viewModel.fetchPerformers(sortBy: selectedSortOption, searchQuery: searchText, filter: nil)
-                }
-            }
-        }
-        .navigationDestination(isPresented: Binding(
-            get: { coordinator.performerToOpen != nil },
-            set: { if !$0 { coordinator.performerToOpen = nil } }
-        )) {
-            if let performer = coordinator.performerToOpen {
-                PerformerDetailView(performer: performer)
-            }
-        }
+        viewModel.fetchSavedFilters()
     }
 
     private var emptyStateView: some View {
@@ -709,129 +843,5 @@ struct PerformerRowView: View {
 
 #Preview {
     PerformersView()
-}
-
-// MARK: - Performer Live Filter Sheet
-
-struct PerformerLiveFilterSheet: View {
-    @Binding var ageRange: String?
-    @Binding var hairColor: String?
-    @Binding var gender: String?
-    @Binding var country: String?
-    @Binding var implants: Bool?
-    @Binding var favorite: Bool?
-    @Binding var missingField: String?
-    var onApply: () -> Void
-    var onReset: () -> Void
-
-    @ObservedObject private var appearance = AppearanceManager.shared
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationView {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(spacing: 0) {
-                    filterRow(label: "Favorite") {
-                        filterChip("Any", isActive: favorite == nil)   { favorite = nil;   onApply() }
-                        filterChip("Yes", isActive: favorite == true)  { favorite = true;  onApply() }
-                        filterChip("No",  isActive: favorite == false) { favorite = false; onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Missing") {
-                        filterChip("Any",    isActive: missingField == nil)            { missingField = nil;          onApply() }
-                        filterChip("Image",  isActive: missingField == "image")        { missingField = "image";      onApply() }
-                        filterChip("Gender", isActive: missingField == "gender")       { missingField = "gender";     onApply() }
-                        filterChip("Hair",   isActive: missingField == "hair_color")   { missingField = "hair_color"; onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Gender") {
-                        filterChip("Any",    isActive: gender == nil)      { gender = nil;      onApply() }
-                        filterChip("Female", isActive: gender == "FEMALE") { gender = "FEMALE"; onApply() }
-                        filterChip("Male",   isActive: gender == "MALE")   { gender = "MALE";   onApply() }
-                        filterChip("Trans (M)", isActive: gender == "TRANSGENDER_MALE") { gender = "TRANSGENDER_MALE"; onApply() }
-                        filterChip("Trans (F)", isActive: gender == "TRANSGENDER_FEMALE") { gender = "TRANSGENDER_FEMALE"; onApply() }
-                        filterChip("Intersex", isActive: gender == "INTERSEX") { gender = "INTERSEX"; onApply() }
-                        filterChip("Non-binary", isActive: gender == "NON_BINARY") { gender = "NON_BINARY"; onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Age") {
-                        filterChip("Any",   isActive: ageRange == nil)    { ageRange = nil;    onApply() }
-                        filterChip("18–21", isActive: ageRange == "18-21") { ageRange = "18-21"; onApply() }
-                        filterChip("22–26", isActive: ageRange == "22-26") { ageRange = "22-26"; onApply() }
-                        filterChip("26–30", isActive: ageRange == "26-30") { ageRange = "26-30"; onApply() }
-                        filterChip("30+",   isActive: ageRange == "30+")  { ageRange = "30+";  onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Hair") {
-                        filterChip("Any",      isActive: hairColor == nil)         { hairColor = nil;         onApply() }
-                        filterChip("Blonde",   isActive: hairColor == "BLONDE")    { hairColor = "BLONDE";    onApply() }
-                        filterChip("Brunette", isActive: hairColor == "BRUNETTE")  { hairColor = "BRUNETTE";  onApply() }
-                        filterChip("Red",      isActive: hairColor == "RED")       { hairColor = "RED";       onApply() }
-                        filterChip("Black",    isActive: hairColor == "BLACK")     { hairColor = "BLACK";     onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Country") {
-                        filterChip("Any",    isActive: country == nil)       { country = nil;      onApply() }
-                        filterChip("US",     isActive: country == "US")      { country = "US";     onApply() }
-                        filterChip("Non-US", isActive: country == "NOT_US")  { country = "NOT_US"; onApply() }
-                    }
-                    Divider().padding(.leading, 16)
-                    filterRow(label: "Tits") {
-                        filterChip("Any",     isActive: implants == nil)   { implants = nil;   onApply() }
-                        filterChip("Fake",    isActive: implants == true)  { implants = true;  onApply() }
-                        filterChip("Natural", isActive: implants == false) { implants = false; onApply() }
-                    }
-                }
-                .background(Color.secondaryAppBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-
-                Spacer()
-            }
-            .background(Color.appBackground)
-            .navigationTitle("Live Filter")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Reset", role: .destructive) { onReset() }
-                        .foregroundColor(.red)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .fontWeight(.semibold)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func filterRow<Chips: View>(label: String, @ViewBuilder chips: () -> Chips) -> some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.system(size: 15))
-                .frame(width: 80, alignment: .leading)
-                .foregroundColor(.primary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) { chips() }
-                    .padding(.vertical, 12)
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    @ViewBuilder
-    private func filterChip(_ label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(isActive ? appearance.tintColor : Color.secondary.opacity(0.15))
-                .foregroundColor(isActive ? .white : .primary)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
 }
 #endif

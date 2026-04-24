@@ -1041,7 +1041,6 @@ private struct ScenesViewContent: View {
                 },
                 onRequestDelete: { showDeletePresetAlert = true }
             )
-            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
             .presentationBackground(Color.appBackground)
             .onAppear {
@@ -1053,7 +1052,13 @@ private struct ScenesViewContent: View {
                 }
             }
             .onChange(of: liveSheetPresetSelection) { _, newId in
-                guard !newId.isEmpty else { return }
+                guard liveFilterSheetPresented.wrappedValue else { return }
+                if newId.isEmpty {
+                    selectedFilter = nil
+                    clearLiveFilterChipsOnly()
+                    applyLiveFilter()
+                    return
+                }
                 if let sid = SceneLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
                     applyServerSceneSavedFilter(f)
                     return
@@ -1629,6 +1634,7 @@ struct SceneLiveFilterSheet: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
     }
 
     private var serverManagedFilterNotice: some View {

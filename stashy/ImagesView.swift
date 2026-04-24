@@ -12,12 +12,11 @@ struct ImagesView: View {
     let gallery: Gallery?
     
     @StateObject private var viewModel = StashDBViewModel()
+    @StateObject private var imageListFilters: DetailLinkedImagesFilterModel
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var configManager = ServerConfigManager.shared
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
     
-    @State private var selectedSortOption: StashDBViewModel.ImageSortOption = .dateDesc
-    @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
     @State private var lastOpenedImageId: String?
 
     // Multi-Select State
@@ -28,6 +27,8 @@ struct ImagesView: View {
     
     init(gallery: Gallery? = nil) {
         self.gallery = gallery
+        let scope: DetailLinkedImagesScope = gallery.map { .gallery($0.id) } ?? .catalogRoot
+        _imageListFilters = StateObject(wrappedValue: DetailLinkedImagesFilterModel(scope: scope))
     }
     
     // Dynamic Columns to match GalleriesView
@@ -44,43 +45,58 @@ struct ImagesView: View {
         }
     }
     
-    // Safe sort change function
     private func changeSortOption(to newOption: StashDBViewModel.ImageSortOption) {
-        if newOption == .random && selectedSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedSortOption = newOption
-        
-        // Save to TabManager
-        TabManager.shared.setSortOption(for: .images, option: newOption.rawValue)
-        
-        // Fetch new data immediately
-        if let gallery = gallery {
-             viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: newOption)
+        if gallery == nil {
+            TabManager.shared.setSortOption(for: .images, option: newOption.rawValue)
         } else {
-             viewModel.fetchImages(sortBy: newOption, filter: selectedFilter)
+            TabManager.shared.setDetailSortOption(for: DetailViewContext.gallery.rawValue, option: newOption.rawValue)
         }
+        imageListFilters.changeSortOption(to: newOption, viewModel: viewModel)
+    }
+
+    private var catalogFilterSortFABActive: Bool {
+        imageListFilters.catalogFilterSortFABActive
     }
 
     var body: some View {
+        imagesCoreChrome
+            .sheet(isPresented: $imageListFilters.showFilterSortSheet, content: imagesFilterSortSheet)
+            .onChange(of: imageListFilters.catalogPresetRowSelection) { _, newId in
+                imageListFilters.handlePresetSelection(newId, viewModel: viewModel)
+            }
+            .alert("Save As", isPresented: $imageListFilters.showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $imageListFilters.catalogPresetNameInput)
+                Button("Save") { imageListFilters.savePresetAs(name: imageListFilters.catalogPresetNameInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Save the current sort, filter, and live criteria as a new Stash saved filter.")
+            }
+            .alert("Rename", isPresented: $imageListFilters.showRenameCatalogPresetAlert) {
+                TextField("Name", text: $imageListFilters.renameCatalogPresetInput)
+                Button("Save") { imageListFilters.renamePreset(to: imageListFilters.renameCatalogPresetInput, viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rename this preset or saved filter.")
+            }
+            .alert("Delete filter?", isPresented: $imageListFilters.showDeleteCatalogPresetAlert) {
+                Button("Delete", role: .destructive) { imageListFilters.deletePreset(viewModel: viewModel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(imageListFilters.deletePresetConfirmationText(viewModel: viewModel))
+            }
+    }
+
+    private var imagesCoreChrome: some View {
         Group {
             if configManager.activeConfig == nil {
-                ConnectionErrorView { 
-                    if let gallery = gallery {
-                        viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
-                    } else {
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
-                    }
+                ConnectionErrorView {
+                    imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                 }
             } else if (viewModel.isLoadingImages || viewModel.isLoadingGalleryImages) && displayedImages.isEmpty {
                 StandardLoadingView(message: "Loading images...")
             } else if displayedImages.isEmpty && viewModel.errorMessage != nil {
                 ConnectionErrorView {
-                    if let gallery = gallery {
-                        viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
-                    } else {
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
-                    }
+                    imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                 }
             } else if displayedImages.isEmpty {
                 SharedEmptyStateView(
@@ -88,11 +104,7 @@ struct ImagesView: View {
                     title: "No images found",
                     buttonText: "Reload",
                     onRetry: {
-                        if let gallery = gallery {
-                            viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
-                        } else {
-                            viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
-                        }
+                        imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                     }
                 )
             } else {
@@ -111,11 +123,7 @@ struct ImagesView: View {
                     }
                 }
                 .refreshable {
-                    if let gallery = gallery {
-                        viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
-                    } else {
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
-                    }
+                    imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                 }
             }
         }
@@ -145,7 +153,7 @@ struct ImagesView: View {
             }
             
             if let defaultSort = StashDBViewModel.ImageSortOption(rawValue: defaultSortStr) {
-                 selectedSortOption = defaultSort
+                 imageListFilters.selectedSortOption = defaultSort
                  viewModel.currentImageSortOption = defaultSort
                  if gallery != nil {
                      viewModel.currentGalleryImageSortOption = defaultSort
@@ -155,43 +163,61 @@ struct ImagesView: View {
             // Fetch filters
             viewModel.fetchSavedFilters()
 
-            if let gallery = gallery {
-                if viewModel.galleryImages.isEmpty {
-                    viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
-                }
-            } else {
-                // If no default filter is set, fetch immediately ONLY if we don't have images yet
-                if TabManager.shared.getDefaultFilterId(for: .images) == nil {
-                    if viewModel.allImages.isEmpty {
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
-                    }
-                }
+            if let gallery = gallery, viewModel.galleryImages.isEmpty {
+                imageListFilters.refetchImages(viewModel: viewModel, initial: true)
+            } else if gallery == nil,
+                      TabManager.shared.getDefaultFilterId(for: .images) == nil,
+                      viewModel.allImages.isEmpty {
+                imageListFilters.refetchImages(viewModel: viewModel, initial: true)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
+            guard gallery == nil else { return }
             if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.images.rawValue {
                 if let defaultId = TabManager.shared.getDefaultFilterId(for: .images),
                    let newFilter = viewModel.savedFilters[defaultId] {
-                    selectedFilter = newFilter
+                    imageListFilters.selectedFilter = newFilter
                 } else {
-                    selectedFilter = nil
+                    imageListFilters.selectedFilter = nil
                 }
-                viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
+                imageListFilters.refetchImages(viewModel: viewModel, initial: true)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultSortChanged"))) { notification in
+            guard gallery == nil else { return }
+            if let tabId = notification.userInfo?["tab"] as? String, tabId == AppTab.images.rawValue {
+                let raw = TabManager.shared.getPersistentSortOption(for: .images) ?? "dateDesc"
+                let newSort = StashDBViewModel.ImageSortOption(rawValue: raw) ?? .dateDesc
+                changeSortOption(to: newSort)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+            imageListFilters.catalogPresetRowSelection = ""
+            imageListFilters.selectedFilter = nil
+            imageListFilters.clearLiveChipsOnly()
+            imageListFilters.refreshLocalPresets()
+            imageListFilters.refetchImages(viewModel: viewModel, initial: true)
+        }
         .onChange(of: viewModel.savedFilters) { oldValue, newValue in
-            if selectedFilter == nil && gallery == nil {
+            if imageListFilters.selectedFilter == nil && gallery == nil {
                 if let defaultId = TabManager.shared.getDefaultFilterId(for: .images),
                    let filter = newValue[defaultId] {
-                    selectedFilter = filter
+                    imageListFilters.selectedFilter = filter
                     if viewModel.allImages.isEmpty {
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: filter)
+                        imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                     }
                 } else if !viewModel.isLoadingSavedFilters {
                     if viewModel.allImages.isEmpty {
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: nil)
+                        imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                     }
                 }
+            }
+        }
+        .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
+            if oldValue == true && isLoading == false, gallery == nil,
+               viewModel.allImages.isEmpty, !viewModel.isLoadingImages,
+               imageListFilters.selectedFilter == nil {
+                imageListFilters.refetchImages(viewModel: viewModel, initial: true)
             }
         }
         .floatingActionBar {
@@ -213,160 +239,15 @@ struct ImagesView: View {
                             .foregroundColor(.primary)
                     }
                     .frame(maxWidth: .infinity)
-                    
-                    Menu {
-                        // Title
-                        Menu {
-                    Button(action: { changeSortOption(to: .titleAsc) }) {
-                        HStack {
-                            Text("A → Z")
-                            if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .titleDesc) }) {
-                        HStack {
-                            Text("Z → A")
-                            if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Title")
-                        if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Date
-                Menu {
-                    Button(action: { changeSortOption(to: .dateDesc) }) {
-                        HStack {
-                            Text("Newest First")
-                            if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .dateAsc) }) {
-                        HStack {
-                            Text("Oldest First")
-                            if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Date")
-                        if selectedSortOption == .dateDesc || selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Rating
-                Menu {
-                    Button(action: { changeSortOption(to: .ratingDesc) }) {
-                        HStack {
-                            Text("High → Low")
-                            if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .ratingAsc) }) {
-                        HStack {
-                            Text("Low → High")
-                            if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Rating")
-                        if selectedSortOption == .ratingDesc || selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Created
-                Menu {
-                    Button(action: { changeSortOption(to: .createdAtDesc) }) {
-                        HStack {
-                            Text("Newest First")
-                            if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .createdAtAsc) }) {
-                        HStack {
-                            Text("Oldest First")
-                            if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Created")
-                        if selectedSortOption == .createdAtDesc || selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Updated
-                Menu {
-                    Button(action: { changeSortOption(to: .updatedAtDesc) }) {
-                        HStack {
-                            Text("Newest First")
-                            if selectedSortOption == .updatedAtDesc { Image(systemName: "checkmark") }
-                        }
-                    }
-                    Button(action: { changeSortOption(to: .updatedAtAsc) }) {
-                        HStack {
-                            Text("Oldest First")
-                            if selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("Updated")
-                        if selectedSortOption == .updatedAtDesc || selectedSortOption == .updatedAtAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                // Random
-                Button(action: { changeSortOption(to: .random) }) {
-                    HStack {
-                        Text("Random")
-                        if selectedSortOption == .random { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.primary)
-            }
-            .frame(maxWidth: .infinity)
-            
-            // Filter Menu
-            Menu {
-                Button(action: {
-                    selectedFilter = nil
-                    viewModel.fetchImages(sortBy: selectedSortOption, filter: nil)
-                }) {
-                    HStack {
-                        Text("No Filter")
-                        if selectedFilter == nil { Image(systemName: "checkmark") }
-                    }
-                }
 
-                let activeImageFilters = viewModel.savedFilters.values
-                    .filter { $0.mode == .images }
-                    .sorted { $0.name < $1.name }
-                
-                ForEach(activeImageFilters) { filter in
-                    Button(action: {
-                        selectedFilter = filter
-                        viewModel.fetchImages(sortBy: selectedSortOption, filter: filter)
-                    }) {
-                        HStack {
-                            Text(filter.name)
-                            if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
-                        }
+                    Button {
+                        imageListFilters.showFilterSortSheet = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(catalogFilterSortFABActive ? appearanceManager.tintColor : .primary)
                     }
-                }
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(selectedFilter != nil ? appearanceManager.tintColor : .primary)
-            }
-            .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -374,6 +255,54 @@ struct ImagesView: View {
             if let imageId = notification.userInfo?["imageId"] as? String {
                 viewModel.removeImage(id: imageId)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func imagesFilterSortSheet() -> some View {
+        ImagesCatalogFilterSortSheet(
+            serverFilters: imageListFilters.sortedServerImageFilters(viewModel: viewModel),
+            localPresets: imageListFilters.localCatalogPresets,
+            selectedPresetRowId: $imageListFilters.catalogPresetRowSelection,
+            liveChipRowsVisible: imageListFilters.imageLiveChipRowsVisible,
+            sortOption: imageListFilters.selectedSortOption,
+            onSortChange: { changeSortOption(to: $0) },
+            liveMinRating: $imageListFilters.liveFilterMinRating,
+            liveFavorite: $imageListFilters.liveFilterFavorite,
+            liveOrganized: $imageListFilters.liveFilterOrganized,
+            onApply: { imageListFilters.applyLiveFilter(viewModel: viewModel) },
+            onReset: {
+                imageListFilters.catalogPresetRowSelection = ""
+                imageListFilters.selectedFilter = nil
+                imageListFilters.clearLiveChipsOnly()
+                imageListFilters.refetchImages(viewModel: viewModel, initial: true)
+            },
+            onRequestSave: { imageListFilters.savePresetOverwrite(viewModel: viewModel) },
+            onRequestSaveAs: {
+                imageListFilters.catalogPresetNameInput = ""
+                imageListFilters.showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(imageListFilters.catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    imageListFilters.renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(imageListFilters.catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = imageListFilters.localCatalogPresets.first(where: { $0.id == uuid }) {
+                    imageListFilters.renameCatalogPresetInput = p.name
+                }
+                imageListFilters.showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { imageListFilters.showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .onAppear {
+            var sel = imageListFilters.catalogPresetRowSelection
+            ListLivePresetTag.migrateLegacySelection(&sel)
+            imageListFilters.catalogPresetRowSelection = sel
+            imageListFilters.refreshLocalPresets()
+            imageListFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
         }
     }
     
@@ -493,12 +422,7 @@ struct ImagesView: View {
             withAnimation(DesignTokens.Animation.quick) { isSelectionMode = false }
             ToastManager.shared.show("\(count) image\(count == 1 ? "" : "s") deleted", icon: "trash", style: .success)
 
-            // Refresh data
-            if let gallery = gallery {
-                viewModel.fetchGalleryImages(galleryId: gallery.id, sortBy: selectedSortOption)
-            } else {
-                viewModel.fetchImages(sortBy: selectedSortOption, filter: selectedFilter)
-            }
+            imageListFilters.refetchImages(viewModel: viewModel, initial: true)
         }
     }
     
