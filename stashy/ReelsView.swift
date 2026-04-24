@@ -116,6 +116,10 @@ struct ReelsView: View {
     )
     @State private var selectedPreviewFilter: StashDBViewModel.SavedFilter?
     @State private var showReelsSceneFilterSheet = false
+    /// While the scene-style filter sheet hydrates UI (migration / saved-filter list), ignore preset `onChange` so we do not refetch the Reels timeline.
+    @State private var reelsSceneFilterSheetHydrating = false
+    /// Same idea for the clips image filter sheet (`catalogPresetRowSelection` updates).
+    @State private var reelsClipFilterSheetHydrating = false
     @State private var reelsSceneLiveSheetPresetSelection = ""
     @State private var reelsMarkerLiveSheetPresetSelection = ""
     @State private var reelsPreviewLiveSheetPresetSelection = ""
@@ -493,26 +497,6 @@ struct ReelsView: View {
             selectedMarkerFilter = f
         default:
             selectedFilter = f
-        }
-    }
-
-    private func reelsApplySceneLivePresetSelectionIfNeeded() {
-        let newId = reelsActiveSheetPresetIdForRead
-        guard !newId.isEmpty else { return }
-        if let sid = SceneLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
-            reelsApplyServerSceneSavedFilterForReels(f)
-            return
-        }
-        if let ls = SceneLivePresetTag.parseLocalUUIDString(newId),
-           let uuid = UUID(uuidString: ls),
-           let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
-            reelsApplyLiveScenePresetForReels(preset)
-            return
-        }
-        if let uuid = UUID(uuidString: newId),
-           let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
-            reelsSetActiveSheetPresetSelection(SceneLivePresetTag.localRow(uuid))
-            reelsApplyLiveScenePresetForReels(preset)
         }
     }
 
@@ -1820,25 +1804,29 @@ struct ReelsView: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(Color.appBackground)
         .onAppear {
+            reelsSceneFilterSheetHydrating = true
             SceneLivePresetTag.migrateLegacySelection(&reelsSceneLiveSheetPresetSelection)
             SceneLivePresetTag.migrateLegacySelection(&reelsMarkerLiveSheetPresetSelection)
             SceneLivePresetTag.migrateLegacySelection(&reelsPreviewLiveSheetPresetSelection)
             reelsRefreshSceneLivePresets()
-            reelsApplySceneLivePresetSelectionIfNeeded()
+            reelsSyncFilterSheetPresetAndLiveChips(savedFilters: viewModel.savedFilters)
             viewModel.fetchSavedFilters { _ in
-                reelsApplySceneLivePresetSelectionIfNeeded()
+                reelsSyncFilterSheetPresetAndLiveChips(savedFilters: viewModel.savedFilters)
+            }
+            Task { @MainActor in
+                reelsSceneFilterSheetHydrating = false
             }
         }
         .onChange(of: reelsSceneLiveSheetPresetSelection) { _, newId in
-            guard showReelsSceneFilterSheet, reelsMode == .scenes else { return }
+            guard showReelsSceneFilterSheet, !reelsSceneFilterSheetHydrating, reelsMode == .scenes else { return }
             reelsHandleScenePresetSelectionChange(newId)
         }
         .onChange(of: reelsMarkerLiveSheetPresetSelection) { _, newId in
-            guard showReelsSceneFilterSheet, reelsMode == .markers else { return }
+            guard showReelsSceneFilterSheet, !reelsSceneFilterSheetHydrating, reelsMode == .markers else { return }
             reelsHandleScenePresetSelectionChange(newId)
         }
         .onChange(of: reelsPreviewLiveSheetPresetSelection) { _, newId in
-            guard showReelsSceneFilterSheet, reelsMode == .previews else { return }
+            guard showReelsSceneFilterSheet, !reelsSceneFilterSheetHydrating, reelsMode == .previews else { return }
             reelsHandleScenePresetSelectionChange(newId)
         }
     }
@@ -1906,11 +1894,15 @@ struct ReelsView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.appBackground)
                 .onAppear {
+                    reelsClipFilterSheetHydrating = true
                     var sel = reelsClipImageFilters.catalogPresetRowSelection
                     ListLivePresetTag.migrateLegacySelection(&sel)
                     reelsClipImageFilters.catalogPresetRowSelection = sel
                     reelsClipImageFilters.refreshLocalPresets()
-                    reelsClipImageFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
+                    reelsSyncFilterSheetPresetAndLiveChips(savedFilters: viewModel.savedFilters)
+                    Task { @MainActor in
+                        reelsClipFilterSheetHydrating = false
+                    }
                 }
             }
             .alert("Speichern unter", isPresented: $reelsClipImageFilters.showSaveAsCatalogPresetAlert) {
@@ -1961,7 +1953,7 @@ struct ReelsView: View {
                 Text(reelsSceneDeletePresetConfirmationText)
             }
             .onChange(of: reelsClipImageFilters.catalogPresetRowSelection) { _, newId in
-                guard reelsClipImageFilters.showFilterSortSheet else { return }
+                guard reelsClipImageFilters.showFilterSortSheet, !reelsClipFilterSheetHydrating else { return }
                 reelsClipImageFilters.handlePresetSelection(newId, viewModel: viewModel)
             }
             .onChange(of: reelsMode) { oldValue, newValue in handleModeChange(from: oldValue, to: newValue) }
@@ -2099,7 +2091,6 @@ struct ReelsView: View {
         let noCriteriaSet = noSavedSceneStyleFilter && selectedPerformer == nil && selectedTags.isEmpty
 
         if noCriteriaSet && !newValue.isEmpty {
-            print("✅ ReelsView: Saved filters arrived, triggering initial load...")
             let defaultId: String? = {
                 switch reelsMode {
                 case .scenes: return TabManager.shared.getDefaultFilterId(for: .reels)
@@ -2110,40 +2101,46 @@ struct ReelsView: View {
                 }
             }()
 
-            if let defId = defaultId, let filter = newValue[defId] {
-                switch reelsMode {
-                case .scenes:
-                    applySettings(sortBy: selectedSortOption, sceneFilter: filter, performer: selectedPerformer, tags: selectedTags)
-                case .markers:
-                    applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: filter, performer: selectedPerformer, tags: selectedTags)
-                case .clips:
-                    reelsClipImageFilters.selectedFilter = filter
-                    applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: filter, performer: selectedPerformer, tags: selectedTags)
-                case .previews:
-                    selectedPreviewFilter = filter
-                    applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
-                case .pics:
-                    break
-                }
-            } else if isCurrentlyEmpty {
-                let currentModeType = reelsMode.toModeType
-                let savedSortStr = TabManager.shared.getReelsDefaultSort(for: currentModeType)
+            // Only kick an automatic fetch when the timeline is still empty (cold start). If the user is
+            // already browsing with "no saved filter", a later `fetchSavedFilters` (e.g. opening the sheet)
+            // must not inject the default filter and reset the feed.
+            if isCurrentlyEmpty {
+                print("✅ ReelsView: Saved filters arrived, triggering initial load...")
+                if let defId = defaultId, let filter = newValue[defId] {
+                    switch reelsMode {
+                    case .scenes:
+                        applySettings(sortBy: selectedSortOption, sceneFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    case .markers:
+                        applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    case .clips:
+                        reelsClipImageFilters.selectedFilter = filter
+                        applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    case .previews:
+                        selectedPreviewFilter = filter
+                        applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    case .pics:
+                        break
+                    }
+                } else {
+                    let currentModeType = reelsMode.toModeType
+                    let savedSortStr = TabManager.shared.getReelsDefaultSort(for: currentModeType)
 
-                switch reelsMode {
-                case .scenes:
-                    let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(sortBy: savedSort, sceneFilter: nil, performer: selectedPerformer, tags: selectedTags, clearSceneFilter: true)
-                case .markers:
-                    let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(markerSortBy: savedSort, markerFilter: nil, performer: selectedPerformer, tags: selectedTags, clearMarkerFilter: true)
-                case .clips:
-                    let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(clipSortBy: savedSort, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, clearClipFilter: true)
-                case .previews:
-                    let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(previewSortBy: savedSort, previewFilter: nil, performer: selectedPerformer, tags: selectedTags, clearPreviewFilter: true)
-                case .pics:
-                    break
+                    switch reelsMode {
+                    case .scenes:
+                        let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        applySettings(sortBy: savedSort, sceneFilter: nil, performer: selectedPerformer, tags: selectedTags, clearSceneFilter: true)
+                    case .markers:
+                        let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        applySettings(markerSortBy: savedSort, markerFilter: nil, performer: selectedPerformer, tags: selectedTags, clearMarkerFilter: true)
+                    case .clips:
+                        let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        applySettings(clipSortBy: savedSort, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, clearClipFilter: true)
+                    case .previews:
+                        let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                        applySettings(previewSortBy: savedSort, previewFilter: nil, performer: selectedPerformer, tags: selectedTags, clearPreviewFilter: true)
+                    case .pics:
+                        break
+                    }
                 }
             }
             reelsSyncFilterSheetPresetAndLiveChips(savedFilters: newValue)

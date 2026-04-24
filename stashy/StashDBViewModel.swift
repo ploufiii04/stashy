@@ -2067,7 +2067,8 @@ class StashDBViewModel: ObservableObject {
             currentSceneSortOption = sortBy
             currentSceneFilter = filter
             currentSceneSearchQuery = searchQuery
-            if let lf = liveFilter { currentSceneLiveFilter = lf }
+            // `nil` means no live chips — must clear, otherwise a previous fetch's criteria (e.g. performer_favorite) sticks forever.
+            currentSceneLiveFilter = liveFilter ?? [:]
         } else {
             isLoadingScenes = true
         }
@@ -2093,7 +2094,7 @@ class StashDBViewModel: ObservableObject {
             currentPreviewSortOption = sortBy
             currentPreviewFilter = filter
             currentPreviewSearchQuery = searchQuery
-            if let lf = liveFilter { currentPreviewLiveFilter = lf }
+            currentPreviewLiveFilter = liveFilter ?? [:]
             isLoading = true
         } else {
             isLoadingPreviews = true
@@ -2115,7 +2116,7 @@ class StashDBViewModel: ObservableObject {
         currentMarkerSortOption = sortBy
         currentMarkerSearchQuery = searchQuery
         currentMarkerFilter = filter
-        if let lf = liveFilter { currentMarkerLiveFilter = lf }
+        currentMarkerLiveFilter = liveFilter ?? [:]
         hasMoreMarkers = true
         sceneMarkers = []
         isLoading = true // Set global loading for initial markers load
@@ -4836,7 +4837,7 @@ class StashDBViewModel: ObservableObject {
             hasMoreClips = true
             currentClipSortOption = sortBy
             currentClipFilter = filter
-            if let lf = liveFilter { currentClipLiveFilter = lf }
+            currentClipLiveFilter = liveFilter ?? [:]
             isLoading = true // Set global loading for initial clips load
         } else {
             isLoadingClips = true
