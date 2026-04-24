@@ -17,8 +17,7 @@ struct StashLineView: View {
     @Environment(\.dismiss) private var dismiss
 
     @EnvironmentObject private var coordinator: NavigationCoordinator
-    @State private var selectedSortOption: StashDBViewModel.ImageSortOption = .dateDesc
-    @State private var selectedFilter: StashDBViewModel.SavedFilter? = nil
+    @StateObject private var stashLineListFilters = DetailLinkedImagesFilterModel(scope: .reelsStashLine, initialSort: .dateDesc)
     @State private var scrollPositionId: String?
     @State private var pendingRestoreId: String?
     @State private var cachedPosts: [StashLinePost] = []
@@ -33,126 +32,27 @@ struct StashLineView: View {
     }
 
     private func performSearch() {
-        viewModel.fetchImages(
-            sortBy: selectedSortOption,
-            filter: selectedFilter,
-            staticPathFilter: true,
-            performerId: performerFilter?.id
-        )
+        stashLineListFilters.reelsStashLinePerformerId = performerFilter?.id
+        stashLineListFilters.refetchImages(viewModel: viewModel, initial: true)
     }
 
     private func rebuildGroupedPosts() {
         cachedPosts = computeGroupedPosts()
     }
 
-    private func menuLabelText(_ text: String, systemImage: String, tint: Color? = nil) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
-            Text(text)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .minimumScaleFactor(0.85)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
-        }
-        .foregroundColor(tint ?? .primary)
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-    }
-
-    private var sortMenu: some View {
-        Menu {
-            Button(action: { changeSortOption(to: .random) }) {
-                HStack { Text("Random"); if selectedSortOption == .random { Image(systemName: "checkmark") } }
-            }
-            Divider()
-            Menu {
-                Button(action: { changeSortOption(to: .dateDesc) }) {
-                    HStack { Text("Newest First"); if selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
-                }
-                Button(action: { changeSortOption(to: .dateAsc) }) {
-                    HStack { Text("Oldest First"); if selectedSortOption == .dateAsc { Image(systemName: "checkmark") } }
-                }
-            } label: {
-                HStack { Text("Date"); if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") } }
-            }
-            Menu {
-                Button(action: { changeSortOption(to: .ratingDesc) }) {
-                    HStack { Text("High → Low"); if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
-                }
-                Button(action: { changeSortOption(to: .ratingAsc) }) {
-                    HStack { Text("Low → High"); if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") } }
-                }
-            } label: {
-                HStack { Text("Rating"); if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") } }
-            }
-            Menu {
-                Button(action: { changeSortOption(to: .createdAtDesc) }) {
-                    HStack { Text("Newest First"); if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
-                }
-                Button(action: { changeSortOption(to: .createdAtAsc) }) {
-                    HStack { Text("Oldest First"); if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") } }
-                }
-            } label: {
-                HStack { Text("Created"); if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") } }
-            }
-        } label: {
-            menuLabelText(selectedSortOption.displayName, systemImage: "arrow.up.arrow.down")
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var filterMenu: some View {
-        Menu {
-            Button(action: {
-                selectedFilter = nil
-                // Manual timeline change → jump to top after reload
-                viewModel.clearStashLineFrozenSnapshot()
-                shouldScrollToTopAfterReload = true
-                scrollPositionId = nil
-                pendingRestoreId = nil
-                performSearch()
-            }) {
-                HStack { Text("No Filter"); if selectedFilter == nil { Image(systemName: "checkmark") } }
-            }
-
-            let imageFilters = viewModel.savedFilters.values
-                .filter { $0.mode == .images }
-                .sorted { $0.name < $1.name }
-            ForEach(imageFilters) { filter in
-                Button(action: {
-                    selectedFilter = filter
-                    // Manual timeline change → jump to top after reload
-                    viewModel.clearStashLineFrozenSnapshot()
-                    shouldScrollToTopAfterReload = true
-                    scrollPositionId = nil
-                    pendingRestoreId = nil
-                    performSearch()
-                }) {
-                    HStack {
-                        Text(filter.name)
-                        if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
-                    }
-                }
-            }
-        } label: {
-            menuLabelText(
-                selectedFilter?.name ?? "Filter",
-                systemImage: "line.3.horizontal.decrease",
-                tint: selectedFilter != nil ? appearanceManager.tintColor : .primary
-            )
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private var floatingBarContent: some View {
         HStack(spacing: 0) {
-            sortMenu
-            Divider().frame(height: 20)
-            filterMenu
+            Button {
+                stashLineListFilters.refreshLocalPresets()
+                stashLineListFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
+                stashLineListFilters.showFilterSortSheet = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(stashLineListFilters.catalogFilterSortFABActive ? appearanceManager.tintColor : .primary)
+                    .frame(maxWidth: .infinity)
+            }
+            .accessibilityLabel("Filter und Sortierung")
         }
     }
 
@@ -210,10 +110,87 @@ struct StashLineView: View {
         .floatingActionBar {
             floatingBarContent
         }
+        .sheet(isPresented: $stashLineListFilters.showFilterSortSheet) {
+            ImagesCatalogFilterSortSheet(
+                serverFilters: stashLineListFilters.sortedServerImageFilters(viewModel: viewModel),
+                localPresets: stashLineListFilters.localCatalogPresets,
+                selectedPresetRowId: $stashLineListFilters.catalogPresetRowSelection,
+                liveChipRowsVisible: stashLineListFilters.imageLiveChipRowsVisible,
+                sortOption: stashLineListFilters.selectedSortOption,
+                onSortChange: { changeSortOption(to: $0) },
+                liveMinRating: $stashLineListFilters.liveFilterMinRating,
+                livePerformerFavorite: $stashLineListFilters.liveFilterPerformerFavorite,
+                liveOrganized: $stashLineListFilters.liveFilterOrganized,
+                liveOCounterTag: $stashLineListFilters.liveFilterOCounterTag,
+                onApply: { stashLineListFilters.applyLiveFilter(viewModel: viewModel) },
+                onReset: {
+                    stashLineListFilters.catalogPresetRowSelection = ""
+                    stashLineListFilters.selectedFilter = nil
+                    stashLineListFilters.clearLiveChipsOnly()
+                    stashLineListFilters.refetchImages(viewModel: viewModel, initial: true)
+                },
+                onRequestSave: { stashLineListFilters.savePresetOverwrite(viewModel: viewModel) },
+                onRequestSaveAs: {
+                    stashLineListFilters.catalogPresetNameInput = ""
+                    stashLineListFilters.showSaveAsCatalogPresetAlert = true
+                },
+                onRequestRename: {
+                    if let sid = ListLivePresetTag.parseServerId(stashLineListFilters.catalogPresetRowSelection),
+                       let n = viewModel.savedFilters[sid]?.name {
+                        stashLineListFilters.renameCatalogPresetInput = n
+                    } else if let ls = ListLivePresetTag.parseLocalUUIDString(stashLineListFilters.catalogPresetRowSelection),
+                              let uuid = UUID(uuidString: ls),
+                              let p = stashLineListFilters.localCatalogPresets.first(where: { $0.id == uuid }) {
+                        stashLineListFilters.renameCatalogPresetInput = p.name
+                    }
+                    stashLineListFilters.showRenameCatalogPresetAlert = true
+                },
+                onRequestDelete: { stashLineListFilters.showDeleteCatalogPresetAlert = true }
+            )
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
+            .onAppear {
+                var sel = stashLineListFilters.catalogPresetRowSelection
+                ListLivePresetTag.migrateLegacySelection(&sel)
+                stashLineListFilters.catalogPresetRowSelection = sel
+                stashLineListFilters.refreshLocalPresets()
+                stashLineListFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
+            }
+        }
+        .alert("Speichern unter", isPresented: $stashLineListFilters.showSaveAsCatalogPresetAlert) {
+            TextField("Name", text: $stashLineListFilters.catalogPresetNameInput)
+            Button("Speichern") {
+                stashLineListFilters.savePresetAs(name: stashLineListFilters.catalogPresetNameInput, viewModel: viewModel)
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Sortierung, Filter und Live-Kriterien als neuen Stash-Bildfilter speichern.")
+        }
+        .alert("Umbenennen", isPresented: $stashLineListFilters.showRenameCatalogPresetAlert) {
+            TextField("Name", text: $stashLineListFilters.renameCatalogPresetInput)
+            Button("Speichern") {
+                stashLineListFilters.renamePreset(to: stashLineListFilters.renameCatalogPresetInput, viewModel: viewModel)
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Preset oder gespeicherten Filter umbenennen.")
+        }
+        .alert("Filter löschen?", isPresented: $stashLineListFilters.showDeleteCatalogPresetAlert) {
+            Button("Löschen", role: .destructive) {
+                stashLineListFilters.deletePreset(viewModel: viewModel)
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text(stashLineListFilters.deletePresetConfirmationText(viewModel: viewModel))
+        }
+        .onChange(of: stashLineListFilters.catalogPresetRowSelection) { _, newId in
+            guard stashLineListFilters.showFilterSortSheet else { return }
+            stashLineListFilters.handlePresetSelection(newId, viewModel: viewModel)
+        }
         .onAppear {
             let sortStr = TabManager.shared.getSortOption(for: .stashline) ?? "createdAtDesc"
             if let sort = StashDBViewModel.ImageSortOption(rawValue: sortStr) {
-                selectedSortOption = sort
+                stashLineListFilters.selectedSortOption = sort
             }
             if TabManager.shared.getDefaultFilterId(for: .stashline) == nil || !viewModel.savedFilters.isEmpty {
                 if viewModel.allImages.isEmpty {
@@ -229,7 +206,7 @@ struct StashLineView: View {
             }
             rebuildGroupedPosts()
         }
-        .onChange(of: selectedSortOption) { _, _ in
+        .onChange(of: stashLineListFilters.selectedSortOption) { _, _ in
             rebuildGroupedPosts()
         }
         .onChange(of: viewModel.allImages.count) { _, _ in
@@ -242,10 +219,10 @@ struct StashLineView: View {
             rebuildGroupedPosts()
         }
         .onChange(of: viewModel.savedFilters) { _, newValue in
-            if selectedFilter == nil {
+            if stashLineListFilters.selectedFilter == nil {
                 if let defaultId = TabManager.shared.getDefaultFilterId(for: .stashline),
                    let filter = newValue[defaultId] {
-                    selectedFilter = filter
+                    stashLineListFilters.selectedFilter = filter
                     performSearch()
                 } else if !viewModel.isLoadingSavedFilters {
                     if viewModel.allImages.isEmpty {
@@ -256,7 +233,7 @@ struct StashLineView: View {
         }
         .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
             if oldValue == true && isLoading == false {
-                if viewModel.allImages.isEmpty && !viewModel.isLoadingImages && selectedFilter == nil {
+                if viewModel.allImages.isEmpty && !viewModel.isLoadingImages && stashLineListFilters.selectedFilter == nil {
                     performSearch()
                 }
             }
@@ -280,7 +257,7 @@ struct StashLineView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
-            selectedFilter = nil
+            stashLineListFilters.selectedFilter = nil
             performSearch()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
@@ -416,11 +393,7 @@ struct StashLineView: View {
     }
 
     private func changeSortOption(to newOption: StashDBViewModel.ImageSortOption) {
-        if newOption == .random && selectedSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedSortOption = newOption
-        TabManager.shared.setSortOption(for: .stashline, option: newOption.rawValue)
+        stashLineListFilters.changeSortOption(to: newOption, viewModel: viewModel)
         // Reset scroll state so the list cleanly jumps to the top after the reload.
         shouldScrollToTopAfterReload = true
         pendingRestoreId = nil
@@ -430,7 +403,6 @@ struct StashLineView: View {
         } else {
             coordinator.picsGlobalScrollId = nil
         }
-        performSearch()
     }
 
     private func computeGroupedPosts() -> [StashLinePost] {
@@ -440,7 +412,7 @@ struct StashLineView: View {
         //   appending as long as performer-set + gallery-set + orientation stay identical.
         // - No filename/session parsing; no non-consecutive merging.
         let shouldGroupConsecutively: Bool = {
-            switch selectedSortOption {
+            switch stashLineListFilters.selectedSortOption {
             case .dateAsc, .dateDesc, .createdAtAsc, .createdAtDesc:
                 return true
             default:
@@ -525,9 +497,9 @@ struct StashLineView: View {
         // is consecutive, we re-order *within the same date bucket* to keep
         // galleries/sets contiguous, without changing the overall date ordering.
         let imagesForGrouping: [StashImage] = {
-            switch selectedSortOption {
+            switch stashLineListFilters.selectedSortOption {
             case .dateAsc, .dateDesc:
-                let ascending = (selectedSortOption == .dateAsc)
+                let ascending = (stashLineListFilters.selectedSortOption == .dateAsc)
                 func timeKey(_ img: StashImage) -> String {
                     // When sorting by date, fall back to createdAt if date missing.
                     // Both are ISO-like strings, so lexical compare is stable enough here.

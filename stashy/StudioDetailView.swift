@@ -523,6 +523,7 @@ struct StudioDetailView: View {
             liveImplants: $linkedPerformers.liveFilterImplants,
             liveFavorite: $linkedPerformers.liveFilterFavorite,
             liveMissingField: $linkedPerformers.liveFilterMissingField,
+            liveOCounterTag: $linkedPerformers.liveFilterOCounterTag,
             onApply: { linkedPerformers.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 linkedPerformers.catalogPresetRowSelection = ""
@@ -706,8 +707,9 @@ struct StudioDetailView: View {
             sortOption: linkedImages.selectedSortOption,
             onSortChange: { linkedImages.changeSortOption(to: $0, viewModel: viewModel) },
             liveMinRating: $linkedImages.liveFilterMinRating,
-            liveFavorite: $linkedImages.liveFilterFavorite,
+            livePerformerFavorite: $linkedImages.liveFilterPerformerFavorite,
             liveOrganized: $linkedImages.liveFilterOrganized,
+            liveOCounterTag: $linkedImages.liveFilterOCounterTag,
             onApply: { linkedImages.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 linkedImages.catalogPresetRowSelection = ""

@@ -42,11 +42,12 @@ struct PerformersView: View {
     @State private var liveFilterImplants: Bool? = nil     // nil=any, true=has, false=none
     @State private var liveFilterFavorite: Bool? = nil     // nil=any, true=yes, false=no
     @State private var liveFilterMissingField: String? = nil // nil=any, "image" / "gender" / "hair_color"
+    @State private var liveFilterOCounterTag: String? = nil
 
     private var isLiveFilterActive: Bool {
         liveFilterAgeRange != nil || liveFilterHairColor != nil || liveFilterGender != nil
         || liveFilterCountry != nil || liveFilterImplants != nil || liveFilterFavorite != nil
-        || liveFilterMissingField != nil
+        || liveFilterMissingField != nil || liveFilterOCounterTag != nil
     }
 
     private var activeLiveFilterDict: [String: Any] {
@@ -100,6 +101,9 @@ struct PerformersView: View {
             dict.removeValue(forKey: "has_image")
             dict["is_missing"] = missingField
         }
+        if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
+            dict["o_counter"] = oc
+        }
         return dict
     }
 
@@ -134,6 +138,7 @@ struct PerformersView: View {
         liveFilterImplants = nil
         liveFilterFavorite = nil
         liveFilterMissingField = nil
+        liveFilterOCounterTag = nil
     }
 
     private func mapPerformerLiveFragmentToChips(_ frag: [String: Any]) {
@@ -160,6 +165,19 @@ struct PerformersView: View {
         }
         if let m = frag["is_missing"] as? String {
             liveFilterMissingField = m
+        }
+        if let oc = frag["o_counter"] as? [String: Any],
+           let mod = oc["modifier"] as? String,
+           let raw = oc["value"] {
+            let v: Int? = {
+                if let i = raw as? Int { return i }
+                if let d = raw as? Double { return Int(d) }
+                if let n = raw as? NSNumber { return n.intValue }
+                return nil
+            }()
+            if let v {
+                liveFilterOCounterTag = "\(mod):\(v)"
+            }
         }
     }
 
@@ -577,6 +595,7 @@ struct PerformersView: View {
             liveImplants: $liveFilterImplants,
             liveFavorite: $liveFilterFavorite,
             liveMissingField: $liveFilterMissingField,
+            liveOCounterTag: $liveFilterOCounterTag,
             onApply: { applyLiveFilter() },
             onReset: {
                 catalogPresetRowSelection = ""

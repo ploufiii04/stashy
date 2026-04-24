@@ -41,6 +41,7 @@ final class DetailLinkedPerformersFilterModel: ObservableObject {
     @Published var liveFilterImplants: Bool?
     @Published var liveFilterFavorite: Bool?
     @Published var liveFilterMissingField: String?
+    @Published var liveFilterOCounterTag: String?
 
     init(scope: DetailLinkedPerformersScope, initialSort: StashDBViewModel.PerformerSortOption = .nameAsc) {
         self.scope = scope
@@ -51,7 +52,7 @@ final class DetailLinkedPerformersFilterModel: ObservableObject {
     private var isLiveFilterActive: Bool {
         liveFilterAgeRange != nil || liveFilterHairColor != nil || liveFilterGender != nil
             || liveFilterCountry != nil || liveFilterImplants != nil || liveFilterFavorite != nil
-            || liveFilterMissingField != nil
+            || liveFilterMissingField != nil || liveFilterOCounterTag != nil
     }
 
     var catalogFilterSortFABActive: Bool {
@@ -117,6 +118,9 @@ final class DetailLinkedPerformersFilterModel: ObservableObject {
             dict.removeValue(forKey: "has_image")
             dict["is_missing"] = missingField
         }
+        if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
+            dict["o_counter"] = oc
+        }
         return dict
     }
 
@@ -148,6 +152,7 @@ final class DetailLinkedPerformersFilterModel: ObservableObject {
         liveFilterImplants = nil
         liveFilterFavorite = nil
         liveFilterMissingField = nil
+        liveFilterOCounterTag = nil
     }
 
     func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -175,6 +180,12 @@ final class DetailLinkedPerformersFilterModel: ObservableObject {
         if let m = frag["is_missing"] as? String {
             liveFilterMissingField = m
         }
+        if let oc = frag["o_counter"] as? [String: Any],
+           let mod = oc["modifier"] as? String,
+           let raw = oc["value"],
+           let v = Self.intFromLiveFragmentJSON(raw) {
+            liveFilterOCounterTag = "\(mod):\(v)"
+        }
     }
 
     func changeSortOption(to newOption: StashDBViewModel.PerformerSortOption, viewModel: StashDBViewModel) {
@@ -183,6 +194,13 @@ final class DetailLinkedPerformersFilterModel: ObservableObject {
         }
         selectedSortOption = newOption
         refetchPerformers(viewModel: viewModel, initial: true)
+    }
+
+    private static func intFromLiveFragmentJSON(_ raw: Any) -> Int? {
+        if let i = raw as? Int { return i }
+        if let d = raw as? Double { return Int(d) }
+        if let n = raw as? NSNumber { return n.intValue }
+        return nil
     }
 
     func applyCatalogPreset(_ preset: PerformerListLiveFilterPreset, viewModel: StashDBViewModel) {
@@ -1370,11 +1388,20 @@ enum DetailLinkedImagesScope: Equatable {
     case tag(String)
     case group(String)
     case gallery(String)
+    /// Reels „Clips“: `refetchImages` delegates to `fetchClips` (or `externalRefetchClips` when set).
+    case reelsClips
+    /// Embedded StashLine in Reels „Pics“: still images only, optional performer id.
+    case reelsStashLine
 }
 
 @MainActor
 final class DetailLinkedImagesFilterModel: ObservableObject {
     let scope: DetailLinkedImagesScope
+
+    /// Reels clips: parent supplies merged performer/tag filter; when set, replaces default `refetchImages` tail for `.reelsClips`.
+    var externalRefetchClips: ((StashDBViewModel) -> Void)?
+    /// Performer id for `.reelsStashLine` (Reels Pics embedded StashLine).
+    @Published var reelsStashLinePerformerId: String?
 
     @Published var showFilterSortSheet = false
     @Published var catalogPresetRowSelection = ""
@@ -1387,9 +1414,11 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
 
     @Published var selectedSortOption: StashDBViewModel.ImageSortOption
     @Published var selectedFilter: StashDBViewModel.SavedFilter?
-    @Published var liveFilterFavorite: Bool?
+    /// Live chip maps to Stash `ImageFilterType.performer_favorite` (there is no image-level `favorite` in the API).
+    @Published var liveFilterPerformerFavorite: Bool?
     @Published var liveFilterMinRating: Int = 0
     @Published var liveFilterOrganized: String?
+    @Published var liveFilterOCounterTag: String?
 
     init(scope: DetailLinkedImagesScope, initialSort: StashDBViewModel.ImageSortOption = .dateDesc) {
         self.scope = scope
@@ -1398,7 +1427,8 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
     }
 
     private var isLiveFilterActive: Bool {
-        liveFilterFavorite != nil || liveFilterMinRating > 0 || liveFilterOrganized != nil
+        liveFilterPerformerFavorite != nil || liveFilterMinRating > 0 || liveFilterOrganized != nil
+            || liveFilterOCounterTag != nil
     }
 
     var catalogFilterSortFABActive: Bool {
@@ -1417,13 +1447,21 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
 
     private var activeLiveFilterDict: [String: Any] {
         var dict: [String: Any] = [:]
-        if let fav = liveFilterFavorite { dict["favorite"] = fav }
+        if let fav = liveFilterPerformerFavorite { dict["performer_favorite"] = fav }
         if liveFilterMinRating > 0 {
             dict["rating100"] = ["value": (liveFilterMinRating * 20), "modifier": "EQUALS"]
         }
         if liveFilterOrganized == "true" { dict["organized"] = true }
         if liveFilterOrganized == "false" { dict["organized"] = false }
+        if let tag = liveFilterOCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
+            dict["o_counter"] = oc
+        }
         return dict
+    }
+
+    /// Non-nil when any live chip is set; merge into `fetchImages` / `fetchClips`.
+    func imageLiveFragmentForFetch() -> [String: Any]? {
+        isLiveFilterActive ? activeLiveFilterDict : nil
     }
 
     func refetchImages(viewModel: StashDBViewModel, initial: Bool) {
@@ -1448,6 +1486,21 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             viewModel.fetchDetailImages(groupId: id, sortBy: selectedSortOption, isInitialLoad: initial, filter: selectedFilter, liveFilter: live)
         case .gallery(let id):
             viewModel.fetchGalleryImages(galleryId: id, sortBy: selectedSortOption, isInitialLoad: initial, filter: selectedFilter, liveFilter: live)
+        case .reelsStashLine:
+            viewModel.fetchImages(
+                sortBy: selectedSortOption,
+                isInitialLoad: initial,
+                filter: selectedFilter,
+                staticPathFilter: true,
+                performerId: reelsStashLinePerformerId,
+                liveFilter: live
+            )
+        case .reelsClips:
+            if let ext = externalRefetchClips {
+                ext(viewModel)
+            } else {
+                viewModel.fetchClips(sortBy: selectedSortOption, filter: selectedFilter, isInitialLoad: initial, liveFilter: live)
+            }
         }
     }
 
@@ -1460,15 +1513,16 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
     }
 
     func clearLiveChipsOnly() {
-        liveFilterFavorite = nil
+        liveFilterPerformerFavorite = nil
         liveFilterMinRating = 0
         liveFilterOrganized = nil
+        liveFilterOCounterTag = nil
     }
 
     func mapLiveFragmentToChips(_ frag: [String: Any]) {
         clearLiveChipsOnly()
-        if let fav = frag["favorite"] as? Bool {
-            liveFilterFavorite = fav
+        if let fav = frag["performer_favorite"] as? Bool {
+            liveFilterPerformerFavorite = fav
         }
         if let r = frag["rating100"] as? [String: Any], let raw = r["value"] {
             let v: Int? = {
@@ -1484,6 +1538,19 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
         if let o = frag["organized"] as? Bool {
             liveFilterOrganized = o ? "true" : "false"
         }
+        if let oc = frag["o_counter"] as? [String: Any],
+           let mod = oc["modifier"] as? String,
+           let raw = oc["value"] {
+            let v: Int? = {
+                if let i = raw as? Int { return i }
+                if let d = raw as? Double { return Int(d) }
+                if let n = raw as? NSNumber { return n.intValue }
+                return nil
+            }()
+            if let v {
+                liveFilterOCounterTag = "\(mod):\(v)"
+            }
+        }
     }
 
     func changeSortOption(to newOption: StashDBViewModel.ImageSortOption, viewModel: StashDBViewModel) {
@@ -1491,6 +1558,9 @@ final class DetailLinkedImagesFilterModel: ObservableObject {
             viewModel.refreshRandomSeed()
         }
         selectedSortOption = newOption
+        if case .reelsStashLine = scope {
+            TabManager.shared.setSortOption(for: .stashline, option: newOption.rawValue)
+        }
         refetchImages(viewModel: viewModel, initial: true)
     }
 

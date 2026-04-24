@@ -9,6 +9,22 @@
 #if !os(tvOS)
 import Foundation
 
+// MARK: - O Count live chip (`o_counter` / `IntCriterionInput`)
+
+/// Tag encoding for live-filter `o_counter`, used by scene / image / performer chip rows and presets.
+enum SceneLiveOCounterChip {
+    static let equalZero = "EQUALS:0"
+    static let greaterThan0 = "GREATER_THAN:0"
+    static let greaterThan4 = "GREATER_THAN:4"
+    static let greaterThan9 = "GREATER_THAN:9"
+}
+
+func sceneLiveOCounterCriterion(from tag: String) -> [String: Any]? {
+    let parts = tag.split(separator: ":", maxSplits: 1).map(String.init)
+    guard parts.count == 2, let v = Int(parts[1]) else { return nil }
+    return ["value": v, "modifier": parts[0]]
+}
+
 // MARK: - Preset picker row ids (`""` | `server:<stashId>` | `local:<uuid>`)
 
 enum ListLivePresetTag {
@@ -371,7 +387,7 @@ enum CatalogLiveChipFilterSupport {
         if dict.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
         let allowed: Set<String> = [
             "birthdate", "hair_color", "gender", "country", "fake_tits", "filter_favorites",
-            "is_missing", "has_image", "rating100", "scene_count", "tag_count", "stash_ids"
+            "is_missing", "has_image", "rating100", "scene_count", "tag_count", "stash_ids", "o_counter"
         ]
         return dict.keys.allSatisfy { allowed.contains($0) }
     }
@@ -400,7 +416,7 @@ enum CatalogLiveChipFilterSupport {
     static func imageSavedFilterSupportsLiveEditor(_ filter: StashDBViewModel.SavedFilter?) -> Bool {
         guard let dict = filter?.filterDict, !dict.isEmpty else { return true }
         if dict.keys.contains(where: { $0 == "AND" || $0 == "OR" || $0 == "NOT" }) { return false }
-        let allowed: Set<String> = ["favorite", "rating100", "organized", "is_missing", "path", "stash_ids"]
+        let allowed: Set<String> = ["performer_favorite", "rating100", "organized", "is_missing", "path", "stash_ids", "o_counter"]
         return dict.keys.allSatisfy { allowed.contains($0) }
     }
 }

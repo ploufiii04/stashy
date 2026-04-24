@@ -268,8 +268,9 @@ struct ImagesView: View {
             sortOption: imageListFilters.selectedSortOption,
             onSortChange: { changeSortOption(to: $0) },
             liveMinRating: $imageListFilters.liveFilterMinRating,
-            liveFavorite: $imageListFilters.liveFilterFavorite,
+            livePerformerFavorite: $imageListFilters.liveFilterPerformerFavorite,
             liveOrganized: $imageListFilters.liveFilterOrganized,
+            liveOCounterTag: $imageListFilters.liveFilterOCounterTag,
             onApply: { imageListFilters.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 imageListFilters.catalogPresetRowSelection = ""

@@ -93,7 +93,7 @@ private enum PerformerCatalogSortFieldKind: String, CaseIterable, Identifiable {
         case .birthdate: return "Birthday"
         case .updated_at: return "Updated"
         case .created_at: return "Created"
-        case .o_counter: return "O-count"
+        case .o_counter: return "O Count"
         case .random: return "Random"
         }
     }
@@ -285,6 +285,7 @@ struct PerformersCatalogFilterSortSheet: View {
     @Binding var liveImplants: Bool?
     @Binding var liveFavorite: Bool?
     @Binding var liveMissingField: String?
+    @Binding var liveOCounterTag: String?
 
     var onApply: () -> Void
     var onReset: () -> Void
@@ -499,6 +500,22 @@ struct PerformersCatalogFilterSortSheet: View {
                 CatalogFilterChip(title: "Any", isActive: liveImplants == nil) { liveImplants = nil; onApply() }
                 CatalogFilterChip(title: "Fake", isActive: liveImplants == true) { liveImplants = true; onApply() }
                 CatalogFilterChip(title: "Natural", isActive: liveImplants == false) { liveImplants = false; onApply() }
+            }
+            Divider().padding(.leading, 16)
+            CatalogFilterRow(label: "O Count") {
+                CatalogFilterChip(title: "Any", isActive: liveOCounterTag == nil) { liveOCounterTag = nil; onApply() }
+                CatalogFilterChip(title: "0", isActive: liveOCounterTag == SceneLiveOCounterChip.equalZero) {
+                    liveOCounterTag = SceneLiveOCounterChip.equalZero; onApply()
+                }
+                CatalogFilterChip(title: "1+", isActive: liveOCounterTag == SceneLiveOCounterChip.greaterThan0) {
+                    liveOCounterTag = SceneLiveOCounterChip.greaterThan0; onApply()
+                }
+                CatalogFilterChip(title: "5+", isActive: liveOCounterTag == SceneLiveOCounterChip.greaterThan4) {
+                    liveOCounterTag = SceneLiveOCounterChip.greaterThan4; onApply()
+                }
+                CatalogFilterChip(title: "10+", isActive: liveOCounterTag == SceneLiveOCounterChip.greaterThan9) {
+                    liveOCounterTag = SceneLiveOCounterChip.greaterThan9; onApply()
+                }
             }
         }
         .background(Color.secondaryAppBackground)
@@ -1223,8 +1240,9 @@ struct ImagesCatalogFilterSortSheet: View {
     var sortOption: StashDBViewModel.ImageSortOption
     var onSortChange: (StashDBViewModel.ImageSortOption) -> Void
     @Binding var liveMinRating: Int
-    @Binding var liveFavorite: Bool?
+    @Binding var livePerformerFavorite: Bool?
     @Binding var liveOrganized: String?
+    @Binding var liveOCounterTag: String?
     var onApply: () -> Void
     var onReset: () -> Void
     var onRequestSave: () -> Void
@@ -1378,10 +1396,10 @@ struct ImagesCatalogFilterSortSheet: View {
 
     private var imageLiveChipsCard: some View {
         VStack(spacing: 0) {
-            CatalogFilterRow(label: "Favorite") {
-                CatalogFilterChip(title: "Any", isActive: liveFavorite == nil) { liveFavorite = nil; onApply() }
-                CatalogFilterChip(title: "Yes", isActive: liveFavorite == true) { liveFavorite = true; onApply() }
-                CatalogFilterChip(title: "No", isActive: liveFavorite == false) { liveFavorite = false; onApply() }
+            CatalogFilterRow(label: "Perf. fav.") {
+                CatalogFilterChip(title: "Any", isActive: livePerformerFavorite == nil) { livePerformerFavorite = nil; onApply() }
+                CatalogFilterChip(title: "Yes", isActive: livePerformerFavorite == true) { livePerformerFavorite = true; onApply() }
+                CatalogFilterChip(title: "No", isActive: livePerformerFavorite == false) { livePerformerFavorite = false; onApply() }
             }
             Divider().padding(.leading, 16)
             CatalogFilterRow(label: "Rating") {
@@ -1399,11 +1417,181 @@ struct ImagesCatalogFilterSortSheet: View {
                 CatalogFilterChip(title: "Yes", isActive: liveOrganized == "true") { liveOrganized = "true"; onApply() }
                 CatalogFilterChip(title: "No", isActive: liveOrganized == "false") { liveOrganized = "false"; onApply() }
             }
+            Divider().padding(.leading, 16)
+            CatalogFilterRow(label: "O Count") {
+                CatalogFilterChip(title: "Any", isActive: liveOCounterTag == nil) { liveOCounterTag = nil; onApply() }
+                CatalogFilterChip(title: "0", isActive: liveOCounterTag == SceneLiveOCounterChip.equalZero) {
+                    liveOCounterTag = SceneLiveOCounterChip.equalZero; onApply()
+                }
+                CatalogFilterChip(title: "1+", isActive: liveOCounterTag == SceneLiveOCounterChip.greaterThan0) {
+                    liveOCounterTag = SceneLiveOCounterChip.greaterThan0; onApply()
+                }
+                CatalogFilterChip(title: "5+", isActive: liveOCounterTag == SceneLiveOCounterChip.greaterThan4) {
+                    liveOCounterTag = SceneLiveOCounterChip.greaterThan4; onApply()
+                }
+                CatalogFilterChip(title: "10+", isActive: liveOCounterTag == SceneLiveOCounterChip.greaterThan9) {
+                    liveOCounterTag = SceneLiveOCounterChip.greaterThan9; onApply()
+                }
+            }
         }
         .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+}
+
+// MARK: - Scene live chips (shared by Reels + catalog-style callers)
+
+/// Holds the same chip-backed scene criteria as ``ScenesView``’s live filter sheet (subset of `SceneFilterType`).
+struct SceneLiveChipRowState: Equatable {
+    var minRating: Int = 0
+    var organized: Bool? = nil
+    var interactive: Bool? = nil
+    var orientation: String? = nil
+    var performerCount: Int? = nil
+    var resolution: String? = nil
+    var performerFavorite: Bool? = nil
+    var oCounterTag: String? = nil
+
+    var isLiveFilterActive: Bool {
+        minRating > 0 || organized != nil || interactive != nil || orientation != nil
+            || performerCount != nil || resolution != nil || performerFavorite != nil || oCounterTag != nil
+    }
+
+    func activeLiveFilterDict() -> [String: Any] {
+        var dict: [String: Any] = [:]
+        if minRating > 0 {
+            dict["rating100"] = ["value": (minRating * 20), "modifier": "EQUALS"]
+        }
+        if let org = organized { dict["organized"] = org }
+        if let interactive { dict["interactive"] = interactive }
+        if let orientation {
+            dict["orientation"] = ["value": [orientation]]
+        }
+        if let count = performerCount {
+            if count == 3 {
+                dict["performer_count"] = ["value": 2, "modifier": "GREATER_THAN"]
+            } else {
+                dict["performer_count"] = ["value": count, "modifier": "EQUALS"]
+            }
+        }
+        if let resolution {
+            dict["resolution"] = ["value": resolution, "modifier": "EQUALS"]
+        }
+        if let fav = performerFavorite { dict["performer_favorite"] = fav }
+        if let tag = oCounterTag, let oc = sceneLiveOCounterCriterion(from: tag) {
+            dict["o_counter"] = oc
+        }
+        return dict
+    }
+
+    func effectiveLiveFilter(for selectedFilter: StashDBViewModel.SavedFilter?) -> [String: Any] {
+        SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
+            ? activeLiveFilterDict()
+            : [:]
+    }
+
+    mutating func clearChipsOnly() {
+        minRating = 0
+        organized = nil
+        interactive = nil
+        orientation = nil
+        performerCount = nil
+        resolution = nil
+        performerFavorite = nil
+        oCounterTag = nil
+    }
+
+    mutating func mapLiveFragmentToChips(_ frag: [String: Any]) {
+        let frag = FilterMapper.sanitize(frag, isMarker: false)
+        if let rating = frag["rating100"] as? [String: Any], let raw = rating["value"], let v = Self.intFromLiveJSON(raw) {
+            minRating = max(0, min(5, v / 20))
+        } else {
+            minRating = 0
+        }
+        organized = Self.boolFromLiveJSON(frag["organized"])
+        interactive = Self.boolFromLiveJSON(frag["interactive"])
+        if let orient = frag["orientation"] as? [String: Any], let vals = orient["value"] as? [String], let first = vals.first {
+            orientation = first
+        } else if let orient = frag["orientation"] as? [String: Any], let vals = orient["value"] as? [Any] {
+            orientation = vals.compactMap { $0 as? String }.first
+        } else {
+            orientation = nil
+        }
+        if let pc = frag["performer_count"] as? [String: Any], let raw = pc["value"], let v = Self.intFromLiveJSON(raw) {
+            let mod = (pc["modifier"] as? String) ?? "EQUALS"
+            if mod == "GREATER_THAN", v == 2 {
+                performerCount = 3
+            } else {
+                performerCount = v
+            }
+        } else {
+            performerCount = nil
+        }
+        if let res = frag["resolution"] as? [String: Any], let s = res["value"] as? String {
+            resolution = s
+        } else {
+            resolution = nil
+        }
+        performerFavorite = Self.boolFromLiveJSON(frag["performer_favorite"])
+        if let oc = frag["o_counter"] as? [String: Any],
+           let mod = oc["modifier"] as? String,
+           let raw = oc["value"],
+           let v = Self.intFromLiveJSON(raw) {
+            oCounterTag = "\(mod):\(v)"
+        } else {
+            oCounterTag = nil
+        }
+    }
+
+    mutating func syncLiveChipsToMatchSelectedFilter(_ selectedFilter: StashDBViewModel.SavedFilter?, savedFilters: [String: StashDBViewModel.SavedFilter]) {
+        guard let f = selectedFilter else {
+            clearChipsOnly()
+            return
+        }
+        if let meta = f.stashyScenePresetMetadata {
+            let base: StashDBViewModel.SavedFilter?
+            if let bid = meta.baseSavedFilterId, let b = savedFilters[bid] {
+                base = b
+            } else {
+                base = nil
+            }
+            if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(base) {
+                mapLiveFragmentToChips(meta.liveFragment)
+            } else {
+                clearChipsOnly()
+            }
+        } else if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f) {
+            if let raw = f.filterDict {
+                mapLiveFragmentToChips(raw)
+            } else {
+                clearChipsOnly()
+            }
+        } else {
+            clearChipsOnly()
+        }
+    }
+
+    private static func boolFromLiveJSON(_ value: Any?) -> Bool? {
+        guard let value else { return nil }
+        if let b = value as? Bool { return b }
+        if let n = value as? NSNumber { return n.boolValue }
+        if let d = value as? [String: Any], let inner = d["value"] { return boolFromLiveJSON(inner) }
+        if let s = value as? String {
+            let lower = s.lowercased()
+            if ["true", "1", "yes"].contains(lower) { return true }
+            if ["false", "0", "no"].contains(lower) { return false }
+        }
+        return nil
+    }
+
+    private static func intFromLiveJSON(_ value: Any) -> Int? {
+        if let i = value as? Int { return i }
+        if let d = value as? Double { return Int(d) }
+        if let n = value as? NSNumber { return n.intValue }
+        if let s = value as? String { return Int(s) }
+        return nil
     }
 }
 

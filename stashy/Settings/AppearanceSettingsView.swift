@@ -68,7 +68,7 @@ struct AppearanceSettingsView: View {
     }
 
     private var counterIconSection: some View {
-        Section(header: Text("Counter Icon"), footer: Text("Choose which icon to display for the Counter throughout the app.")) {
+        Section(header: Text("O Counter"), footer: Text("Choose which icon to display for the O Counter throughout the app.")) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 56))], spacing: 12) {
                 ForEach(appearanceManager.oCounterIconPresets) { option in
                     counterIconItem(for: option)

@@ -100,6 +100,7 @@ struct ReelsView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .scenes) ?? "") ?? .random
     @State private var selectedFilter: StashDBViewModel.SavedFilter?
+    @State private var selectedMarkerFilter: StashDBViewModel.SavedFilter?
     @State private var selectedPerformer: ScenePerformer?
     @State private var selectedTags: [Tag] = []
     @State private var isMuted = !isHeadphonesConnected() // Shared mute state for Reels
@@ -108,9 +109,23 @@ struct ReelsView: View {
     @State private var sceneToDelete: Scene?
     @State private var reelsMode: ReelsMode = ReelsMode(from: TabManager.shared.enabledReelsModes.first ?? .scenes)
     @State private var selectedMarkerSortOption: StashDBViewModel.SceneMarkerSortOption = StashDBViewModel.SceneMarkerSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .markers) ?? "") ?? .random
-    @State private var selectedClipSortOption: StashDBViewModel.ImageSortOption = StashDBViewModel.ImageSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .clips) ?? "") ?? .random
-    @State private var selectedClipFilter: StashDBViewModel.SavedFilter?
+    @StateObject private var reelsClipImageFilters = DetailLinkedImagesFilterModel(
+        scope: .reelsClips,
+        initialSort: StashDBViewModel.ImageSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .clips) ?? "") ?? .random
+    )
     @State private var selectedPreviewFilter: StashDBViewModel.SavedFilter?
+    @State private var showReelsSceneFilterSheet = false
+    @State private var reelsSceneLiveSheetPresetSelection = ""
+    @State private var reelsMarkerLiveSheetPresetSelection = ""
+    @State private var reelsPreviewLiveSheetPresetSelection = ""
+    @State private var reelsSceneLiveChips = SceneLiveChipRowState()
+    @State private var reelsMarkerLiveChips = SceneLiveChipRowState()
+    @State private var reelsPreviewLiveChips = SceneLiveChipRowState()
+    @State private var reelsSceneLivePresets: [SceneLiveFilterPreset] = SceneLiveFilterPresetStore.loadPresets()
+    @State private var reelsScenePresetNameInput = ""
+    @State private var showReelsSceneSaveAsAlert = false
+    @State private var showReelsSceneRenameAlert = false
+    @State private var showReelsSceneDeleteAlert = false
     @State private var isMenuOpen = false
     @State private var isMediaZoomed = false
     @State private var isRotating = false
@@ -150,7 +165,7 @@ struct ReelsView: View {
             switch mode {
             case .scenes: return selectedSortOption.rawValue
             case .markers: return selectedMarkerSortOption.rawValue
-            case .clips: return selectedClipSortOption.rawValue
+            case .clips: return reelsClipImageFilters.selectedSortOption.rawValue
             case .previews: return selectedSortOption.rawValue
             case .pics: return nil
             }
@@ -162,10 +177,12 @@ struct ReelsView: View {
         // Filter
         let filterId: String? = {
             switch mode {
-            case .scenes, .markers:
+            case .scenes:
                 return selectedFilter?.id
+            case .markers:
+                return selectedMarkerFilter?.id
             case .clips:
-                return selectedClipFilter?.id
+                return reelsClipImageFilters.selectedFilter?.id
             case .previews:
                 return selectedPreviewFilter?.id
             case .pics:
@@ -177,6 +194,389 @@ struct ReelsView: View {
         } else {
             ReelsSessionRAM.setString(nil, forKey: reelsSessionFilterKey(for: mode))
         }
+    }
+
+    /// Saved filter used to decide whether live scene chips may merge into the GraphQL query.
+    private var reelsLiveChipTargetFilter: StashDBViewModel.SavedFilter? {
+        switch reelsMode {
+        case .scenes: return selectedFilter
+        case .markers: return selectedMarkerFilter
+        case .previews: return selectedPreviewFilter
+        default: return nil
+        }
+    }
+
+    private var reelsActiveSceneStyleSheetPresetSelection: Binding<String> {
+        Binding(
+            get: {
+                switch reelsMode {
+                case .scenes: return reelsSceneLiveSheetPresetSelection
+                case .markers: return reelsMarkerLiveSheetPresetSelection
+                case .previews: return reelsPreviewLiveSheetPresetSelection
+                default: return reelsSceneLiveSheetPresetSelection
+                }
+            },
+            set: { new in
+                switch reelsMode {
+                case .scenes: reelsSceneLiveSheetPresetSelection = new
+                case .markers: reelsMarkerLiveSheetPresetSelection = new
+                case .previews: reelsPreviewLiveSheetPresetSelection = new
+                default: reelsSceneLiveSheetPresetSelection = new
+                }
+            }
+        )
+    }
+
+    private var reelsActiveSheetPresetIdForRead: String {
+        switch reelsMode {
+        case .scenes: return reelsSceneLiveSheetPresetSelection
+        case .markers: return reelsMarkerLiveSheetPresetSelection
+        case .previews: return reelsPreviewLiveSheetPresetSelection
+        default: return reelsSceneLiveSheetPresetSelection
+        }
+    }
+
+    private func reelsSetActiveSheetPresetSelection(_ new: String) {
+        switch reelsMode {
+        case .scenes: reelsSceneLiveSheetPresetSelection = new
+        case .markers: reelsMarkerLiveSheetPresetSelection = new
+        case .previews: reelsPreviewLiveSheetPresetSelection = new
+        default: reelsSceneLiveSheetPresetSelection = new
+        }
+    }
+
+    private func reelsClearActiveLiveChipsOnly() {
+        switch reelsMode {
+        case .scenes: reelsSceneLiveChips.clearChipsOnly()
+        case .markers: reelsMarkerLiveChips.clearChipsOnly()
+        case .previews: reelsPreviewLiveChips.clearChipsOnly()
+        default: reelsSceneLiveChips.clearChipsOnly()
+        }
+    }
+
+    private func reelsActiveLiveChipsActiveLiveFilterDict() -> [String: Any] {
+        switch reelsMode {
+        case .scenes: return reelsSceneLiveChips.activeLiveFilterDict()
+        case .markers: return reelsMarkerLiveChips.activeLiveFilterDict()
+        case .previews: return reelsPreviewLiveChips.activeLiveFilterDict()
+        default: return reelsSceneLiveChips.activeLiveFilterDict()
+        }
+    }
+
+    private func reelsMapLiveFragmentToActiveChips(_ frag: [String: Any]) {
+        switch reelsMode {
+        case .scenes: reelsSceneLiveChips.mapLiveFragmentToChips(frag)
+        case .markers: reelsMarkerLiveChips.mapLiveFragmentToChips(frag)
+        case .previews: reelsPreviewLiveChips.mapLiveFragmentToChips(frag)
+        default: reelsSceneLiveChips.mapLiveFragmentToChips(frag)
+        }
+    }
+
+    private func reelChipBinding<Value>(_ keyPath: WritableKeyPath<SceneLiveChipRowState, Value>) -> Binding<Value> {
+        Binding(
+            get: {
+                switch reelsMode {
+                case .scenes: return reelsSceneLiveChips[keyPath: keyPath]
+                case .markers: return reelsMarkerLiveChips[keyPath: keyPath]
+                case .previews: return reelsPreviewLiveChips[keyPath: keyPath]
+                default: return reelsSceneLiveChips[keyPath: keyPath]
+                }
+            },
+            set: { newValue in
+                switch reelsMode {
+                case .scenes: reelsSceneLiveChips[keyPath: keyPath] = newValue
+                case .markers: reelsMarkerLiveChips[keyPath: keyPath] = newValue
+                case .previews: reelsPreviewLiveChips[keyPath: keyPath] = newValue
+                default: reelsSceneLiveChips[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
+    private var sortedServerSceneFiltersForReels: [StashDBViewModel.SavedFilter] {
+        viewModel.savedFilters.values
+            .filter { $0.mode == .scenes }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func refetchReelsClipsFromModel(_ vm: StashDBViewModel) {
+        let merged = vm.mergeFilterWithCriteria(
+            filter: reelsClipImageFilters.selectedFilter,
+            performer: selectedPerformer,
+            tags: selectedTags,
+            mode: .images
+        )
+        vm.fetchClips(
+            sortBy: reelsClipImageFilters.selectedSortOption,
+            filter: merged,
+            isInitialLoad: true,
+            liveFilter: reelsClipImageFilters.imageLiveFragmentForFetch()
+        )
+        vm.clearReelsCriterionFrozenSnapshots()
+        currentVisibleSceneId = nil
+        saveSessionState(for: .clips)
+        playTrigger += 1
+    }
+
+    private func reelsRefreshSceneLivePresets() {
+        reelsSceneLivePresets = SceneLiveFilterPresetStore.loadPresets()
+    }
+
+    private func changeReelsSceneSortFromSheet(_ new: StashDBViewModel.SceneSortOption) {
+        if new == .random && selectedSortOption == .random {
+            if reelsMode == .previews {
+                viewModel.refreshRandomSeed(for: .previews)
+                persistSessionRandomSeed(for: .previews)
+            } else {
+                viewModel.refreshRandomSeed(for: .scenes)
+                persistSessionRandomSeed(for: .scenes)
+            }
+        }
+        selectedSortOption = new
+        switch reelsMode {
+        case .scenes:
+            applySettings(sortBy: new, sceneFilter: selectedFilter, performer: selectedPerformer, tags: selectedTags, sceneLiveRefresh: true)
+        case .previews:
+            applySettings(previewSortBy: new, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, sceneLiveRefresh: true)
+        default:
+            break
+        }
+    }
+
+    private func changeReelsMarkerSortFromSheet(_ new: StashDBViewModel.SceneMarkerSortOption) {
+        if new == .random && selectedMarkerSortOption == .random {
+            viewModel.refreshRandomSeed(for: .markers)
+            persistSessionRandomSeed(for: .markers)
+        }
+        selectedMarkerSortOption = new
+        applySettings(markerSortBy: new, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: selectedTags, sceneLiveRefresh: true)
+    }
+
+    private func reelsApplySceneLiveFromSheet() {
+        switch reelsMode {
+        case .scenes:
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: selectedTags, sceneLiveRefresh: true)
+        case .markers:
+            applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: selectedTags, sceneLiveRefresh: true)
+        case .previews:
+            applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, sceneLiveRefresh: true)
+        default:
+            break
+        }
+    }
+
+    private var reelsSceneDeletePresetConfirmationText: String {
+        let sel = reelsActiveSheetPresetIdForRead
+        if let sid = SceneLivePresetTag.parseServerId(sel),
+           let f = viewModel.savedFilters[sid] {
+            return "„\(f.name)“ in Stash entfernen? Andere Clients verlieren diesen gespeicherten Filter."
+        }
+        if let ls = SceneLivePresetTag.parseLocalUUIDString(sel),
+           let uuid = UUID(uuidString: ls),
+           let p = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
+            return "„\(p.name)“ von diesem Gerät entfernen? Das kann nicht rückgängig gemacht werden."
+        }
+        return "Diesen Filter entfernen? Das kann nicht rückgängig gemacht werden."
+    }
+
+    private func reelsSetPrimarySceneishSavedFilter(_ f: StashDBViewModel.SavedFilter?) {
+        switch reelsMode {
+        case .previews:
+            selectedPreviewFilter = f
+        case .markers:
+            selectedMarkerFilter = f
+        default:
+            selectedFilter = f
+        }
+    }
+
+    private func reelsApplySceneLivePresetSelectionIfNeeded() {
+        let newId = reelsActiveSheetPresetIdForRead
+        guard !newId.isEmpty else { return }
+        if let sid = SceneLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
+            reelsApplyServerSceneSavedFilterForReels(f)
+            return
+        }
+        if let ls = SceneLivePresetTag.parseLocalUUIDString(newId),
+           let uuid = UUID(uuidString: ls),
+           let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
+            reelsApplyLiveScenePresetForReels(preset)
+            return
+        }
+        if let uuid = UUID(uuidString: newId),
+           let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
+            reelsSetActiveSheetPresetSelection(SceneLivePresetTag.localRow(uuid))
+            reelsApplyLiveScenePresetForReels(preset)
+        }
+    }
+
+    private func reelsHandleScenePresetSelectionChange(_ newId: String) {
+        if newId.isEmpty {
+            reelsSetPrimarySceneishSavedFilter(nil)
+            reelsClearActiveLiveChipsOnly()
+            reelsApplySceneLiveFromSheet()
+            return
+        }
+        if let sid = SceneLivePresetTag.parseServerId(newId), let f = viewModel.savedFilters[sid] {
+            reelsApplyServerSceneSavedFilterForReels(f)
+            return
+        }
+        if let ls = SceneLivePresetTag.parseLocalUUIDString(newId),
+           let uuid = UUID(uuidString: ls),
+           let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
+            reelsApplyLiveScenePresetForReels(preset)
+            return
+        }
+        if let uuid = UUID(uuidString: newId),
+           let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
+            reelsSetActiveSheetPresetSelection(SceneLivePresetTag.localRow(uuid))
+            reelsApplyLiveScenePresetForReels(preset)
+        }
+    }
+
+    private func reelsApplyLiveScenePresetForReels(_ preset: SceneLiveFilterPreset) {
+        let sort = StashDBViewModel.SceneSortOption(rawValue: preset.sortRaw) ?? selectedSortOption
+        if sort != selectedSortOption {
+            selectedSortOption = sort
+        }
+        if let fid = preset.baseSavedFilterId, let f = viewModel.savedFilters[fid] {
+            reelsSetPrimarySceneishSavedFilter(f)
+        } else {
+            reelsSetPrimarySceneishSavedFilter(nil)
+        }
+        if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(reelsLiveChipTargetFilter) {
+            reelsMapLiveFragmentToActiveChips(preset.liveFragment)
+        } else {
+            reelsClearActiveLiveChipsOnly()
+        }
+        reelsApplySceneLiveFromSheet()
+    }
+
+    private func reelsApplyServerSceneSavedFilterForReels(_ f: StashDBViewModel.SavedFilter) {
+        if let meta = f.stashyScenePresetMetadata {
+            if let bid = meta.baseSavedFilterId, let base = viewModel.savedFilters[bid] {
+                reelsSetPrimarySceneishSavedFilter(base)
+            } else {
+                reelsSetPrimarySceneishSavedFilter(nil)
+            }
+            if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(reelsLiveChipTargetFilter) {
+                reelsMapLiveFragmentToActiveChips(meta.liveFragment)
+            } else {
+                reelsClearActiveLiveChipsOnly()
+            }
+            if let sr = meta.sortRaw, let parsed = StashDBViewModel.SceneSortOption(rawValue: sr) {
+                selectedSortOption = parsed
+            }
+        } else {
+            reelsSetPrimarySceneishSavedFilter(f)
+            if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f), let raw = f.filterDict {
+                reelsMapLiveFragmentToActiveChips(raw)
+            } else {
+                reelsClearActiveLiveChipsOnly()
+            }
+        }
+        reelsApplySceneLiveFromSheet()
+    }
+
+    private func reelsSaveSceneLivePresetOverwrite() {
+        let sel = reelsActiveSheetPresetIdForRead
+        let liveDict = reelsActiveLiveChipsActiveLiveFilterDict()
+        if let sid = SceneLivePresetTag.parseServerId(sel) {
+            let currentName = viewModel.savedFilters[sid]?.name ?? "Filter"
+            viewModel.saveSceneSavedFilter(
+                existingId: sid,
+                name: currentName,
+                sort: selectedSortOption,
+                baseFilter: reelsLiveChipTargetFilter,
+                liveFragment: liveDict
+            ) { _ in }
+            return
+        }
+        guard let ls = SceneLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls),
+              let index = reelsSceneLivePresets.firstIndex(where: { $0.id == uuid }) else { return }
+        let old = reelsSceneLivePresets[index]
+        let updated = SceneLiveFilterPreset(
+            id: old.id,
+            name: old.name,
+            createdAt: old.createdAt,
+            sort: selectedSortOption,
+            baseSavedFilterId: reelsLiveChipTargetFilter?.id,
+            liveFragment: liveDict
+        )
+        SceneLiveFilterPresetStore.upsert(updated)
+        reelsRefreshSceneLivePresets()
+    }
+
+    private func reelsSaveSceneLivePresetAs(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        viewModel.saveSceneSavedFilter(
+            existingId: nil,
+            name: trimmed,
+            sort: selectedSortOption,
+            baseFilter: reelsLiveChipTargetFilter,
+            liveFragment: reelsActiveLiveChipsActiveLiveFilterDict()
+        ) { result in
+            if case .success(let saved) = result {
+                reelsSetActiveSheetPresetSelection(SceneLivePresetTag.serverRow(saved.id))
+                showReelsSceneSaveAsAlert = false
+            }
+        }
+    }
+
+    private func reelsRenameSceneLivePreset(to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let sel = reelsActiveSheetPresetIdForRead
+        if let sid = SceneLivePresetTag.parseServerId(sel) {
+            viewModel.saveSceneSavedFilter(
+                existingId: sid,
+                name: trimmed,
+                sort: selectedSortOption,
+                baseFilter: reelsLiveChipTargetFilter,
+                liveFragment: reelsActiveLiveChipsActiveLiveFilterDict()
+            ) { result in
+                if case .success = result {
+                    showReelsSceneRenameAlert = false
+                }
+            }
+            return
+        }
+        guard let ls = SceneLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls),
+              let preset = reelsSceneLivePresets.first(where: { $0.id == uuid }) else { return }
+        let renamed = preset.renamed(trimmed)
+        SceneLiveFilterPresetStore.upsert(renamed)
+        reelsRefreshSceneLivePresets()
+        showReelsSceneRenameAlert = false
+    }
+
+    private func reelsDeleteSceneLivePreset() {
+        let sel = reelsActiveSheetPresetIdForRead
+        if let sid = SceneLivePresetTag.parseServerId(sel) {
+            viewModel.destroySavedSceneFilter(id: sid) { result in
+                if case .success = result {
+                    if reelsMode == .previews, selectedPreviewFilter?.id == sid {
+                        selectedPreviewFilter = nil
+                    } else if reelsMode == .markers, selectedMarkerFilter?.id == sid {
+                        selectedMarkerFilter = nil
+                    } else if selectedFilter?.id == sid {
+                        selectedFilter = nil
+                    }
+                    reelsSetActiveSheetPresetSelection("")
+                    showReelsSceneDeleteAlert = false
+                    reelsApplySceneLiveFromSheet()
+                }
+            }
+            return
+        }
+        guard let ls = SceneLivePresetTag.parseLocalUUIDString(sel),
+              let uuid = UUID(uuidString: ls) else { return }
+        SceneLiveFilterPresetStore.remove(id: uuid)
+        reelsRefreshSceneLivePresets()
+        reelsSetActiveSheetPresetSelection("")
+        showReelsSceneDeleteAlert = false
     }
 
     /// Maps a ReelsMode to the VM's per-kind random-seed bucket.
@@ -599,49 +999,49 @@ struct ReelsView: View {
     private func applyPerformerFilter(_ performer: ScenePerformer) {
         switch reelsMode {
         case .scenes:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: performer, tags: selectedTags)
         case .markers:
-            applySettings(markerSortBy: selectedMarkerSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
+            applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: performer, tags: selectedTags)
         case .clips:
-            applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: selectedClipFilter, performer: performer, tags: selectedTags)
+            applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: performer, tags: selectedTags)
         case .previews:
-            applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: selectedPreviewFilter, performer: performer, tags: selectedTags)
+            applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: performer, tags: selectedTags)
         case .pics:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: performer, tags: selectedTags)
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: performer, tags: selectedTags)
         }
     }
 
     private func applyTagsChange(_ newTags: [Tag]) {
         switch reelsMode {
         case .scenes:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: newTags)
         case .markers:
-            applySettings(markerSortBy: selectedMarkerSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+            applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: newTags)
         case .clips:
-            applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: newTags)
+            applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: selectedPerformer, tags: newTags)
         case .previews:
-            applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: newTags)
+            applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: newTags)
         case .pics:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: newTags)
         }
     }
 
     private func applyClearPerformerOnly() {
         switch reelsMode {
         case .scenes:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: nil, tags: selectedTags)
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: nil, tags: selectedTags)
         case .markers:
-            applySettings(markerSortBy: selectedMarkerSortOption, filter: selectedFilter, performer: nil, tags: selectedTags)
+            applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: nil, tags: selectedTags)
         case .clips:
-            applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: selectedClipFilter, performer: nil, tags: selectedTags)
+            applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: nil, tags: selectedTags)
         case .previews:
-            applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: selectedPreviewFilter, performer: nil, tags: selectedTags)
+            applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: nil, tags: selectedTags)
         case .pics:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: nil, tags: selectedTags)
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: nil, tags: selectedTags)
         }
     }
 
-    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, previewSortBy: StashDBViewModel.SceneSortOption? = nil, filter: StashDBViewModel.SavedFilter?, clipFilter: StashDBViewModel.SavedFilter? = nil, previewFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false, clearPreviewFilter: Bool = false, rerollRandom: Bool = false) {
+    private func applySettings(sortBy: StashDBViewModel.SceneSortOption? = nil, markerSortBy: StashDBViewModel.SceneMarkerSortOption? = nil, clipSortBy: StashDBViewModel.ImageSortOption? = nil, previewSortBy: StashDBViewModel.SceneSortOption? = nil, sceneFilter: StashDBViewModel.SavedFilter? = nil, markerFilter: StashDBViewModel.SavedFilter? = nil, clipFilter: StashDBViewModel.SavedFilter? = nil, previewFilter: StashDBViewModel.SavedFilter? = nil, performer: ScenePerformer? = nil, tags: [Tag] = [], mode: ReelsMode? = nil, clearClipFilter: Bool = false, clearSceneFilter: Bool = false, clearMarkerFilter: Bool = false, clearPreviewFilter: Bool = false, rerollRandom: Bool = false, sceneLiveRefresh: Bool = false, clipImageLiveRefresh: Bool = false) {
         let priorMode = reelsMode
         let currentMode = mode ?? reelsMode
         if let providedMode = mode {
@@ -657,7 +1057,25 @@ struct ReelsView: View {
         } else if clipFilter != nil {
             resolvedClipFilter = clipFilter
         } else {
-            resolvedClipFilter = selectedClipFilter
+            resolvedClipFilter = reelsClipImageFilters.selectedFilter
+        }
+
+        let resolvedSceneFilterEarly: StashDBViewModel.SavedFilter?
+        if clearSceneFilter {
+            resolvedSceneFilterEarly = nil
+        } else if sceneFilter != nil {
+            resolvedSceneFilterEarly = sceneFilter
+        } else {
+            resolvedSceneFilterEarly = selectedFilter
+        }
+
+        let resolvedMarkerFilterEarly: StashDBViewModel.SavedFilter?
+        if clearMarkerFilter {
+            resolvedMarkerFilterEarly = nil
+        } else if markerFilter != nil {
+            resolvedMarkerFilterEarly = markerFilter
+        } else {
+            resolvedMarkerFilterEarly = selectedMarkerFilter
         }
 
         let resolvedPreviewFilterEarly: StashDBViewModel.SavedFilter?
@@ -673,12 +1091,13 @@ struct ReelsView: View {
         let sortMutated =
             (sortBy != nil && sortBy != selectedSortOption) ||
             (markerSortBy != nil && markerSortBy != selectedMarkerSortOption) ||
-            (clipSortBy != nil && clipSortBy != selectedClipSortOption) ||
+            (clipSortBy != nil && clipSortBy != reelsClipImageFilters.selectedSortOption) ||
             (previewSortBy != nil && previewSortBy != selectedSortOption)
-        let sceneSavedFilterMutated = filter?.id != selectedFilter?.id
-        let clipSavedFilterMutated = resolvedClipFilter?.id != selectedClipFilter?.id
+        let sceneSavedFilterMutated = resolvedSceneFilterEarly?.id != selectedFilter?.id
+        let markerSavedFilterMutated = resolvedMarkerFilterEarly?.id != selectedMarkerFilter?.id
+        let clipSavedFilterMutated = resolvedClipFilter?.id != reelsClipImageFilters.selectedFilter?.id
         let previewSavedFilterMutated = resolvedPreviewFilterEarly?.id != selectedPreviewFilter?.id
-        let timelineMutated = sortMutated || sceneSavedFilterMutated || clipSavedFilterMutated || previewSavedFilterMutated
+        let timelineMutated = sortMutated || sceneSavedFilterMutated || markerSavedFilterMutated || clipSavedFilterMutated || previewSavedFilterMutated || sceneLiveRefresh || clipImageLiveRefresh
         if timelineMutated {
             viewModel.clearReelsCriterionFrozenSnapshots()
         }
@@ -755,11 +1174,11 @@ struct ReelsView: View {
         }
 
         if let clipSortBy = clipSortBy {
-            if rerollRandom && clipSortBy == .random && selectedClipSortOption == .random && reelsMode == .clips {
+            if rerollRandom && clipSortBy == .random && reelsClipImageFilters.selectedSortOption == .random && reelsMode == .clips {
                 viewModel.refreshRandomSeed(for: .images)
                 persistSessionRandomSeed(for: .clips)
             }
-            selectedClipSortOption = clipSortBy
+            reelsClipImageFilters.selectedSortOption = clipSortBy
             if !usedFrozenRestore { currentVisibleSceneId = nil }
         }
 
@@ -772,8 +1191,8 @@ struct ReelsView: View {
             if !usedFrozenRestore { currentVisibleSceneId = nil }
         }
 
-        selectedClipFilter = resolvedClipFilter
-        
+        reelsClipImageFilters.selectedFilter = resolvedClipFilter
+
         let resolvedPreviewFilter: StashDBViewModel.SavedFilter?
         if clearPreviewFilter {
             resolvedPreviewFilter = nil
@@ -783,28 +1202,37 @@ struct ReelsView: View {
             resolvedPreviewFilter = selectedPreviewFilter
         }
         selectedPreviewFilter = resolvedPreviewFilter
-        
-        selectedFilter = filter
+
+        selectedFilter = resolvedSceneFilterEarly
+        selectedMarkerFilter = resolvedMarkerFilterEarly
         selectedPerformer = performer
         selectedTags = tags
 
         // Merge performer and tags into filter if needed
-        // IMPORTANT: Use the arguments (filter/clipFilter) instead of @State (selectedFilter/selectedClipFilter)
-        // because @State might not have propagated yet.
-        let mergedFilter = viewModel.mergeFilterWithCriteria(filter: filter, performer: performer, tags: tags, mode: .scenes)
+        // IMPORTANT: Use resolved filters (not stale @State) so merges match the fetch below.
+        let mergedSceneFilter = viewModel.mergeFilterWithCriteria(filter: resolvedSceneFilterEarly, performer: performer, tags: tags, mode: .scenes)
+        let mergedMarkerFilter = viewModel.mergeFilterWithCriteria(filter: resolvedMarkerFilterEarly, performer: performer, tags: tags, mode: .scenes)
         let mergedClipFilter = viewModel.mergeFilterWithCriteria(filter: resolvedClipFilter, performer: performer, tags: tags, mode: .images)
         let mergedPreviewFilter = viewModel.mergeFilterWithCriteria(filter: resolvedPreviewFilter, performer: performer, tags: tags, mode: .scenes)
+        let sceneLiveForScenes = reelsSceneLiveChips.effectiveLiveFilter(for: resolvedSceneFilterEarly)
+        let sceneLiveForMarkers = reelsMarkerLiveChips.effectiveLiveFilter(for: resolvedMarkerFilterEarly)
+        let sceneLiveForPreviews = reelsPreviewLiveChips.effectiveLiveFilter(for: resolvedPreviewFilter)
 
         if !usedFrozenRestore {
             switch currentMode {
             case .scenes:
-                viewModel.fetchScenes(sortBy: selectedSortOption, filter: mergedFilter)
+                viewModel.fetchScenes(sortBy: selectedSortOption, filter: mergedSceneFilter, liveFilter: sceneLiveForScenes)
             case .markers:
-                viewModel.fetchSceneMarkers(sortBy: selectedMarkerSortOption, filter: mergedFilter)
+                viewModel.fetchSceneMarkers(sortBy: selectedMarkerSortOption, filter: mergedMarkerFilter, liveFilter: sceneLiveForMarkers)
             case .clips:
-                viewModel.fetchClips(sortBy: selectedClipSortOption, filter: mergedClipFilter, isInitialLoad: true)
+                viewModel.fetchClips(
+                    sortBy: reelsClipImageFilters.selectedSortOption,
+                    filter: mergedClipFilter,
+                    isInitialLoad: true,
+                    liveFilter: reelsClipImageFilters.imageLiveFragmentForFetch()
+                )
             case .previews:
-                viewModel.fetchPreviews(sortBy: selectedSortOption, isInitialLoad: true, filter: mergedPreviewFilter)
+                viewModel.fetchPreviews(sortBy: selectedSortOption, isInitialLoad: true, filter: mergedPreviewFilter, liveFilter: sceneLiveForPreviews)
             case .pics:
                 break
             }
@@ -1194,6 +1622,87 @@ struct ReelsView: View {
     }
 
     @ViewBuilder
+    private var reelsSceneStyleFilterSheet: some View {
+        SceneLiveFilterSheet(
+            serverSceneFilters: sortedServerSceneFiltersForReels,
+            localPresets: reelsSceneLivePresets,
+            selectedPresetId: reelsActiveSceneStyleSheetPresetSelection,
+            liveChipRowsVisible: SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(reelsLiveChipTargetFilter),
+            sortOption: selectedSortOption,
+            onSortChange: { changeReelsSceneSortFromSheet($0) },
+            minRating: reelChipBinding(\.minRating),
+            organized: reelChipBinding(\.organized),
+            interactive: reelChipBinding(\.interactive),
+            orientation: reelChipBinding(\.orientation),
+            performerCount: reelChipBinding(\.performerCount),
+            resolution: reelChipBinding(\.resolution),
+            performerFavorite: reelChipBinding(\.performerFavorite),
+            oCounterTag: reelChipBinding(\.oCounterTag),
+            onApply: { reelsApplySceneLiveFromSheet() },
+            onReset: {
+                reelsSetActiveSheetPresetSelection("")
+                reelsClearActiveLiveChipsOnly()
+                switch reelsMode {
+                case .scenes:
+                    applySettings(sortBy: selectedSortOption, sceneFilter: nil, performer: selectedPerformer, tags: selectedTags, clearSceneFilter: true, sceneLiveRefresh: true)
+                case .markers:
+                    applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: nil, performer: selectedPerformer, tags: selectedTags, clearMarkerFilter: true, sceneLiveRefresh: true)
+                case .previews:
+                    applySettings(previewSortBy: selectedSortOption, previewFilter: nil, performer: selectedPerformer, tags: selectedTags, clearPreviewFilter: true, sceneLiveRefresh: true)
+                default:
+                    break
+                }
+            },
+            onRequestSave: { reelsSaveSceneLivePresetOverwrite() },
+            onRequestSaveAs: {
+                reelsScenePresetNameInput = ""
+                showReelsSceneSaveAsAlert = true
+            },
+            onRequestRename: {
+                let sel = reelsActiveSheetPresetIdForRead
+                if let sid = SceneLivePresetTag.parseServerId(sel),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    reelsScenePresetNameInput = n
+                } else if let ls = SceneLivePresetTag.parseLocalUUIDString(sel),
+                          let uuid = UUID(uuidString: ls),
+                          let p = reelsSceneLivePresets.first(where: { $0.id == uuid }) {
+                    reelsScenePresetNameInput = p.name
+                }
+                showReelsSceneRenameAlert = true
+            },
+            onRequestDelete: { showReelsSceneDeleteAlert = true },
+            showsSortControls: reelsMode != .markers,
+            useMarkerSort: reelsMode == .markers,
+            markerSortOption: $selectedMarkerSortOption,
+            onMarkerSortChange: { changeReelsMarkerSortFromSheet($0) }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .onAppear {
+            SceneLivePresetTag.migrateLegacySelection(&reelsSceneLiveSheetPresetSelection)
+            SceneLivePresetTag.migrateLegacySelection(&reelsMarkerLiveSheetPresetSelection)
+            SceneLivePresetTag.migrateLegacySelection(&reelsPreviewLiveSheetPresetSelection)
+            reelsRefreshSceneLivePresets()
+            reelsApplySceneLivePresetSelectionIfNeeded()
+            viewModel.fetchSavedFilters { _ in
+                reelsApplySceneLivePresetSelectionIfNeeded()
+            }
+        }
+        .onChange(of: reelsSceneLiveSheetPresetSelection) { _, newId in
+            guard showReelsSceneFilterSheet, reelsMode == .scenes else { return }
+            reelsHandleScenePresetSelectionChange(newId)
+        }
+        .onChange(of: reelsMarkerLiveSheetPresetSelection) { _, newId in
+            guard showReelsSceneFilterSheet, reelsMode == .markers else { return }
+            reelsHandleScenePresetSelectionChange(newId)
+        }
+        .onChange(of: reelsPreviewLiveSheetPresetSelection) { _, newId in
+            guard showReelsSceneFilterSheet, reelsMode == .previews else { return }
+            reelsHandleScenePresetSelectionChange(newId)
+        }
+    }
+
+    @ViewBuilder
     private var premiumContentBase: some View {
         premiumContentLayout
             .toolbar(reelsMode == .pics || isUIVisible ? .visible : .hidden, for: .tabBar)
@@ -1203,6 +1712,112 @@ struct ReelsView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
                 #endif
+            }
+            .sheet(isPresented: $showReelsSceneFilterSheet) {
+                reelsSceneStyleFilterSheet
+            }
+            .sheet(isPresented: $reelsClipImageFilters.showFilterSortSheet) {
+                ImagesCatalogFilterSortSheet(
+                    serverFilters: reelsClipImageFilters.sortedServerImageFilters(viewModel: viewModel),
+                    localPresets: reelsClipImageFilters.localCatalogPresets,
+                    selectedPresetRowId: $reelsClipImageFilters.catalogPresetRowSelection,
+                    liveChipRowsVisible: reelsClipImageFilters.imageLiveChipRowsVisible,
+                    sortOption: reelsClipImageFilters.selectedSortOption,
+                    onSortChange: { new in
+                        reelsClipImageFilters.changeSortOption(to: new, viewModel: viewModel)
+                        refetchReelsClipsFromModel(viewModel)
+                    },
+                    liveMinRating: $reelsClipImageFilters.liveFilterMinRating,
+                    livePerformerFavorite: $reelsClipImageFilters.liveFilterPerformerFavorite,
+                    liveOrganized: $reelsClipImageFilters.liveFilterOrganized,
+                    liveOCounterTag: $reelsClipImageFilters.liveFilterOCounterTag,
+                    onApply: {
+                        refetchReelsClipsFromModel(viewModel)
+                    },
+                    onReset: {
+                        reelsClipImageFilters.catalogPresetRowSelection = ""
+                        reelsClipImageFilters.selectedFilter = nil
+                        reelsClipImageFilters.clearLiveChipsOnly()
+                        refetchReelsClipsFromModel(viewModel)
+                    },
+                    onRequestSave: { reelsClipImageFilters.savePresetOverwrite(viewModel: viewModel) },
+                    onRequestSaveAs: {
+                        reelsClipImageFilters.catalogPresetNameInput = ""
+                        reelsClipImageFilters.showSaveAsCatalogPresetAlert = true
+                    },
+                    onRequestRename: {
+                        if let sid = ListLivePresetTag.parseServerId(reelsClipImageFilters.catalogPresetRowSelection),
+                           let n = viewModel.savedFilters[sid]?.name {
+                            reelsClipImageFilters.renameCatalogPresetInput = n
+                        } else if let ls = ListLivePresetTag.parseLocalUUIDString(reelsClipImageFilters.catalogPresetRowSelection),
+                                  let uuid = UUID(uuidString: ls),
+                                  let p = reelsClipImageFilters.localCatalogPresets.first(where: { $0.id == uuid }) {
+                            reelsClipImageFilters.renameCatalogPresetInput = p.name
+                        }
+                        reelsClipImageFilters.showRenameCatalogPresetAlert = true
+                    },
+                    onRequestDelete: { reelsClipImageFilters.showDeleteCatalogPresetAlert = true }
+                )
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color.appBackground)
+                .onAppear {
+                    var sel = reelsClipImageFilters.catalogPresetRowSelection
+                    ListLivePresetTag.migrateLegacySelection(&sel)
+                    reelsClipImageFilters.catalogPresetRowSelection = sel
+                    reelsClipImageFilters.refreshLocalPresets()
+                    reelsClipImageFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
+                }
+            }
+            .alert("Speichern unter", isPresented: $reelsClipImageFilters.showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $reelsClipImageFilters.catalogPresetNameInput)
+                Button("Speichern") {
+                    reelsClipImageFilters.savePresetAs(name: reelsClipImageFilters.catalogPresetNameInput, viewModel: viewModel)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Sortierung, Filter und Live-Kriterien als neuen Stash-Bildfilter speichern.")
+            }
+            .alert("Umbenennen", isPresented: $reelsClipImageFilters.showRenameCatalogPresetAlert) {
+                TextField("Name", text: $reelsClipImageFilters.renameCatalogPresetInput)
+                Button("Speichern") {
+                    reelsClipImageFilters.renamePreset(to: reelsClipImageFilters.renameCatalogPresetInput, viewModel: viewModel)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Preset oder gespeicherten Filter umbenennen.")
+            }
+            .alert("Filter löschen?", isPresented: $reelsClipImageFilters.showDeleteCatalogPresetAlert) {
+                Button("Löschen", role: .destructive) {
+                    reelsClipImageFilters.deletePreset(viewModel: viewModel)
+                    refetchReelsClipsFromModel(viewModel)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text(reelsClipImageFilters.deletePresetConfirmationText(viewModel: viewModel))
+            }
+            .alert("Speichern unter", isPresented: $showReelsSceneSaveAsAlert) {
+                TextField("Name", text: $reelsScenePresetNameInput)
+                Button("Speichern") { reelsSaveSceneLivePresetAs(name: reelsScenePresetNameInput) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Neuen Szenen-Filter auf dem Stash-Server anlegen.")
+            }
+            .alert("Umbenennen", isPresented: $showReelsSceneRenameAlert) {
+                TextField("Name", text: $reelsScenePresetNameInput)
+                Button("Speichern") { reelsRenameSceneLivePreset(to: reelsScenePresetNameInput) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Preset oder gespeicherten Filter umbenennen.")
+            }
+            .alert("Filter löschen?", isPresented: $showReelsSceneDeleteAlert) {
+                Button("Löschen", role: .destructive) { reelsDeleteSceneLivePreset() }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text(reelsSceneDeletePresetConfirmationText)
+            }
+            .onChange(of: reelsClipImageFilters.catalogPresetRowSelection) { _, newId in
+                guard reelsClipImageFilters.showFilterSortSheet else { return }
+                reelsClipImageFilters.handlePresetSelection(newId, viewModel: viewModel)
             }
             .onChange(of: reelsMode) { oldValue, newValue in handleModeChange(from: oldValue, to: newValue) }
             .onChange(of: currentVisibleSceneId) { _, _ in
@@ -1290,21 +1905,21 @@ struct ReelsView: View {
             case .scenes:
                 let defaultId = TabManager.shared.getDefaultFilterId(for: .reels)
                 let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
-                applySettings(sortBy: selectedSortOption, filter: newFilter, performer: selectedPerformer, tags: selectedTags)
+                applySettings(sortBy: selectedSortOption, sceneFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
             case .markers:
                 let defaultId = TabManager.shared.getDefaultMarkerFilterId(for: .reels)
                 let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
-                applySettings(markerSortBy: selectedMarkerSortOption, filter: newFilter, performer: selectedPerformer, tags: selectedTags)
+                applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
             case .clips:
                 let defaultId = TabManager.shared.getDefaultClipFilterId(for: .reels)
                 let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
-                selectedClipFilter = newFilter
-                applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
+                reelsClipImageFilters.selectedFilter = newFilter
+                applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
             case .previews:
                 let defaultId = TabManager.shared.getDefaultPreviewFilterId(for: .reels)
                 let newFilter = defaultId != nil ? viewModel.savedFilters[defaultId!] : nil
                 selectedPreviewFilter = newFilter
-                applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, filter: nil, previewFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
+                applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, previewFilter: newFilter, performer: selectedPerformer, tags: selectedTags)
             case .pics:
                 break
             }
@@ -1322,11 +1937,25 @@ struct ReelsView: View {
             }
         }()
 
-        let noCriteriaSet = (reelsMode == .clips ? selectedClipFilter == nil : selectedFilter == nil) && selectedPerformer == nil && selectedTags.isEmpty
+        let noSavedSceneStyleFilter: Bool = {
+            switch reelsMode {
+            case .clips: return reelsClipImageFilters.selectedFilter == nil
+            case .scenes: return selectedFilter == nil
+            case .markers: return selectedMarkerFilter == nil
+            case .previews: return selectedPreviewFilter == nil
+            case .pics: return true
+            }
+        }()
+        let noCriteriaSet = noSavedSceneStyleFilter && selectedPerformer == nil && selectedTags.isEmpty
 
-        if selectedFilter == nil && reelsMode != .clips && !newValue.isEmpty {
+        if reelsMode == .scenes, selectedFilter == nil, !newValue.isEmpty {
             if let defId = TabManager.shared.getDefaultFilterId(for: .reels), let filter = newValue[defId] {
                 selectedFilter = filter
+            }
+        }
+        if reelsMode == .markers, selectedMarkerFilter == nil, !newValue.isEmpty {
+            if let defId = TabManager.shared.getDefaultMarkerFilterId(for: .reels), let filter = newValue[defId] {
+                selectedMarkerFilter = filter
             }
         }
 
@@ -1345,15 +1974,15 @@ struct ReelsView: View {
             if let defId = defaultId, let filter = newValue[defId] {
                 switch reelsMode {
                 case .scenes:
-                    applySettings(sortBy: selectedSortOption, filter: filter, performer: selectedPerformer, tags: selectedTags)
+                    applySettings(sortBy: selectedSortOption, sceneFilter: filter, performer: selectedPerformer, tags: selectedTags)
                 case .markers:
-                    applySettings(markerSortBy: selectedMarkerSortOption, filter: filter, performer: selectedPerformer, tags: selectedTags)
+                    applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: filter, performer: selectedPerformer, tags: selectedTags)
                 case .clips:
-                    selectedClipFilter = filter
-                    applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    reelsClipImageFilters.selectedFilter = filter
+                    applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: filter, performer: selectedPerformer, tags: selectedTags)
                 case .previews:
                     selectedPreviewFilter = filter
-                    applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, filter: nil, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
+                    applySettings(previewSortBy: StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .previews) ?? "") ?? selectedSortOption, previewFilter: filter, performer: selectedPerformer, tags: selectedTags)
                 case .pics:
                     break
                 }
@@ -1364,16 +1993,16 @@ struct ReelsView: View {
                 switch reelsMode {
                 case .scenes:
                     let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(sortBy: savedSort, filter: nil, performer: selectedPerformer, tags: selectedTags)
+                    applySettings(sortBy: savedSort, sceneFilter: nil, performer: selectedPerformer, tags: selectedTags, clearSceneFilter: true)
                 case .markers:
                     let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(markerSortBy: savedSort, filter: nil, performer: selectedPerformer, tags: selectedTags)
+                    applySettings(markerSortBy: savedSort, markerFilter: nil, performer: selectedPerformer, tags: selectedTags, clearMarkerFilter: true)
                 case .clips:
                     let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(clipSortBy: savedSort, filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, clearClipFilter: true)
+                    applySettings(clipSortBy: savedSort, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, clearClipFilter: true)
                 case .previews:
                     let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-                    applySettings(previewSortBy: savedSort, filter: nil, previewFilter: nil, performer: selectedPerformer, tags: selectedTags, clearPreviewFilter: true)
+                    applySettings(previewSortBy: savedSort, previewFilter: nil, performer: selectedPerformer, tags: selectedTags, clearPreviewFilter: true)
                 case .pics:
                     break
                 }
@@ -1383,6 +2012,9 @@ struct ReelsView: View {
 
     private func handleOnAppear() {
         UIApplication.shared.isIdleTimerDisabled = true
+        reelsClipImageFilters.externalRefetchClips = { vm in
+            refetchReelsClipsFromModel(vm)
+        }
 
         ReelsSessionRAM.clearLegacyUserDefaultsIfNeeded()
         
@@ -1432,14 +2064,14 @@ struct ReelsView: View {
                 selectedMarkerSortOption = opt
             }
             if let fid = sessionFilterId(for: .markers) {
-                selectedFilter = viewModel.savedFilters[fid]
+                selectedMarkerFilter = viewModel.savedFilters[fid]
             }
         case .clips:
             if let raw = sessionSortRaw(for: .clips), let opt = StashDBViewModel.ImageSortOption(rawValue: raw) {
-                selectedClipSortOption = opt
+                reelsClipImageFilters.selectedSortOption = opt
             }
             if let fid = sessionFilterId(for: .clips) {
-                selectedClipFilter = viewModel.savedFilters[fid]
+                reelsClipImageFilters.selectedFilter = viewModel.savedFilters[fid]
             }
         case .previews:
             if let raw = sessionSortRaw(for: .previews), let opt = StashDBViewModel.SceneSortOption(rawValue: raw) {
@@ -1491,7 +2123,7 @@ struct ReelsView: View {
         if let performer = picsPerformer {
             coordinator.picsPerformerFilter = nil
             reelsMode = .pics
-            applySettings(sortBy: .dateDesc, filter: nil, performer: performer.toScenePerformer())
+            applySettings(sortBy: .dateDesc, sceneFilter: nil, performer: performer.toScenePerformer(), clearSceneFilter: true)
             isInitialized = true
             return
         }
@@ -1513,17 +2145,43 @@ struct ReelsView: View {
             coordinator.reelsPerformer = nil
             coordinator.reelsTags = []
 
-            // Load saved sort for Scenes mode (default for nav context)
-            let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .scenes)
-            let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
-
-            // Resolve default filter so removing the performer/tag pill reverts to it (not nil)
-            var baseFilter = selectedFilter
-            if baseFilter == nil, let defId = TabManager.shared.getDefaultFilterId(for: .reels) {
-                baseFilter = viewModel.savedFilters[defId]
+            switch currentEffectiveMode {
+            case .scenes:
+                let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .scenes)
+                let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                var baseFilter = selectedFilter
+                if baseFilter == nil, let defId = TabManager.shared.getDefaultFilterId(for: .reels) {
+                    baseFilter = viewModel.savedFilters[defId]
+                }
+                applySettings(sortBy: savedSort, sceneFilter: baseFilter, performer: initialPerformer, tags: initialTags, mode: .scenes)
+            case .markers:
+                let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .markers)
+                let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
+                var baseFilter = selectedMarkerFilter
+                if baseFilter == nil, let defId = TabManager.shared.getDefaultMarkerFilterId(for: .reels) {
+                    baseFilter = viewModel.savedFilters[defId]
+                }
+                applySettings(markerSortBy: savedSort, markerFilter: baseFilter, performer: initialPerformer, tags: initialTags, mode: .markers)
+            case .previews:
+                let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .previews)
+                let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
+                var baseFilter = selectedPreviewFilter
+                if baseFilter == nil, let defId = TabManager.shared.getDefaultPreviewFilterId(for: .reels) {
+                    baseFilter = viewModel.savedFilters[defId]
+                }
+                applySettings(previewSortBy: savedSort, previewFilter: baseFilter, performer: initialPerformer, tags: initialTags, mode: .previews)
+            case .clips:
+                let savedSortStr = TabManager.shared.getReelsDefaultSort(for: .clips)
+                let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
+                var clipF = reelsClipImageFilters.selectedFilter
+                if clipF == nil, let defId = TabManager.shared.getDefaultClipFilterId(for: .reels) {
+                    clipF = viewModel.savedFilters[defId]
+                }
+                reelsClipImageFilters.selectedFilter = clipF
+                applySettings(clipSortBy: savedSort, clipFilter: clipF, performer: initialPerformer, tags: initialTags, mode: .clips)
+            case .pics:
+                break
             }
-
-            applySettings(sortBy: savedSort, filter: baseFilter, performer: initialPerformer, tags: initialTags, mode: currentEffectiveMode)
             isInitialized = true
         } else {
             let isCurrentlyEmpty: Bool = {
@@ -1555,9 +2213,21 @@ struct ReelsView: View {
                     print("🕓 ReelsView: Waiting for filters before initial load...")
                 } else {
                     // Filters are ready OR no default filter is configured
-                    var initialFilter = selectedFilter
-                    if initialFilter == nil, let defId = defaultId {
-                        initialFilter = viewModel.savedFilters[defId]
+                    var initialSceneFilter = selectedFilter
+                    var initialMarkerFilter = selectedMarkerFilter
+                    switch reelsMode {
+                    case .scenes:
+                        if initialSceneFilter == nil, let defId = defaultId {
+                            initialSceneFilter = viewModel.savedFilters[defId]
+                        }
+                    case .markers:
+                        if initialMarkerFilter == nil, let defId = defaultId {
+                            initialMarkerFilter = viewModel.savedFilters[defId]
+                        }
+                    default:
+                        if initialSceneFilter == nil, let defId = defaultId {
+                            initialSceneFilter = viewModel.savedFilters[defId]
+                        }
                     }
                     
                     // Load saved sort for current mode
@@ -1569,20 +2239,20 @@ struct ReelsView: View {
                     case .scenes:
                         let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
                         selectedSortOption = savedSort
-                        applySettings(sortBy: savedSort, filter: initialFilter, performer: selectedPerformer, tags: selectedTags)
+                        applySettings(sortBy: savedSort, sceneFilter: initialSceneFilter, performer: selectedPerformer, tags: selectedTags)
                     case .markers:
                         let savedSort = StashDBViewModel.SceneMarkerSortOption(rawValue: savedSortStr ?? "") ?? .random
                         selectedMarkerSortOption = savedSort
-                        applySettings(markerSortBy: savedSort, filter: initialFilter, performer: selectedPerformer, tags: selectedTags)
+                        applySettings(markerSortBy: savedSort, markerFilter: initialMarkerFilter, performer: selectedPerformer, tags: selectedTags)
                     case .clips:
                         let savedSort = StashDBViewModel.ImageSortOption(rawValue: savedSortStr ?? "") ?? .random
-                        selectedClipSortOption = savedSort
-                        var clipFilter = selectedClipFilter
+                        reelsClipImageFilters.selectedSortOption = savedSort
+                        var clipFilter = reelsClipImageFilters.selectedFilter
                         if clipFilter == nil, let defId = defaultId {
                             clipFilter = viewModel.savedFilters[defId]
                         }
-                        selectedClipFilter = clipFilter
-                        applySettings(clipSortBy: savedSort, filter: nil, clipFilter: clipFilter)
+                        reelsClipImageFilters.selectedFilter = clipFilter
+                        applySettings(clipSortBy: savedSort, clipFilter: clipFilter)
                     case .previews:
                         let savedSort = StashDBViewModel.SceneSortOption(rawValue: savedSortStr ?? "") ?? .random
                         selectedSortOption = savedSort
@@ -1591,7 +2261,7 @@ struct ReelsView: View {
                             prevFilter = viewModel.savedFilters[defId]
                         }
                         selectedPreviewFilter = prevFilter
-                        applySettings(previewSortBy: savedSort, filter: nil, previewFilter: prevFilter)
+                        applySettings(previewSortBy: savedSort, previewFilter: prevFilter)
                     case .pics:
                         break
                     }
@@ -1640,12 +2310,12 @@ struct ReelsView: View {
             selectedMarkerSortOption = StashDBViewModel.SceneMarkerSortOption(rawValue: sortRaw) ?? selectedMarkerSortOption
             let fid = sessionFilterId(for: .markers) ?? TabManager.shared.getDefaultMarkerFilterId(for: .reels)
             let f = fid != nil ? viewModel.savedFilters[fid!] : nil
-            selectedFilter = f
+            selectedMarkerFilter = f
         case .clips:
             let sortRaw = sessionSortRaw(for: .clips) ?? TabManager.shared.getReelsDefaultSort(for: .clips) ?? ""
-            selectedClipSortOption = StashDBViewModel.ImageSortOption(rawValue: sortRaw) ?? selectedClipSortOption
+            reelsClipImageFilters.selectedSortOption = StashDBViewModel.ImageSortOption(rawValue: sortRaw) ?? reelsClipImageFilters.selectedSortOption
             let fid = sessionFilterId(for: .clips) ?? TabManager.shared.getDefaultClipFilterId(for: .reels)
-            selectedClipFilter = (fid != nil ? viewModel.savedFilters[fid!] : nil)
+            reelsClipImageFilters.selectedFilter = (fid != nil ? viewModel.savedFilters[fid!] : nil)
         case .previews:
             let sortRaw = sessionSortRaw(for: .previews) ?? TabManager.shared.getReelsDefaultSort(for: .previews) ?? ""
             selectedSortOption = StashDBViewModel.SceneSortOption(rawValue: sortRaw) ?? selectedSortOption
@@ -1656,14 +2326,25 @@ struct ReelsView: View {
         }
 
         switch newValue {
-        case .markers:
-            applySettings(markerSortBy: selectedMarkerSortOption, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-        case .scenes:
-            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
-        case .clips:
-            applySettings(clipSortBy: selectedClipSortOption, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
         case .previews:
-            applySettings(previewSortBy: selectedSortOption, filter: nil, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+            reelsPreviewLiveChips.syncLiveChipsToMatchSelectedFilter(selectedPreviewFilter, savedFilters: viewModel.savedFilters)
+        case .scenes:
+            reelsSceneLiveChips.syncLiveChipsToMatchSelectedFilter(selectedFilter, savedFilters: viewModel.savedFilters)
+        case .markers:
+            reelsMarkerLiveChips.syncLiveChipsToMatchSelectedFilter(selectedMarkerFilter, savedFilters: viewModel.savedFilters)
+        default:
+            break
+        }
+
+        switch newValue {
+        case .markers:
+            applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+        case .scenes:
+            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+        case .clips:
+            applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
+        case .previews:
+            applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags, mode: newValue)
         case .pics:
             break
         }
@@ -1679,7 +2360,18 @@ struct ReelsView: View {
         VStack {
             Spacer()
             ConnectionErrorView(onRetry: {
-                applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags)
+                switch reelsMode {
+                case .scenes:
+                    applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: selectedTags)
+                case .markers:
+                    applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: selectedTags)
+                case .clips:
+                    applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: selectedPerformer, tags: selectedTags)
+                case .previews:
+                    applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags)
+                case .pics:
+                    break
+                }
             }, isDark: true)
             Spacer()
         }
@@ -1894,7 +2586,7 @@ struct ReelsView: View {
                 HStack(spacing: 8) {
                     if let performer = selectedPerformer {
                         Button(action: {
-                            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: nil, tags: selectedTags)
+                            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: nil, tags: selectedTags)
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
@@ -1910,7 +2602,7 @@ struct ReelsView: View {
                         Button(action: {
                             var newTags = selectedTags
                             newTags.removeAll { $0.id == tag.id }
-                            applySettings(sortBy: selectedSortOption, filter: selectedFilter, performer: selectedPerformer, tags: newTags)
+                            applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: newTags)
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
@@ -2001,12 +2693,10 @@ struct ReelsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
-            // Middle Group: Sort + Filter (distributed across remaining width)
+            // Middle: unified „Filter & Sort“ (sort + live chips in sheet for scenes / markers / previews / clips)
             HStack(spacing: 12) {
-                sortMenu
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                filterMenu
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                reelsFilterSortFAB
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             .frame(maxWidth: .infinity)
             
@@ -2276,14 +2966,62 @@ struct ReelsView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 12) {
                     modeMenu
-                    sortMenu
-                    filterMenu
+                    reelsFilterSortFAB
                 }
             }
         }
 
-    private var filterColor: Color {
-        selectedFilter != nil ? appearanceManager.tintColor : .white
+    private var reelsFilterSortFABActive: Bool {
+        switch reelsMode {
+        case .scenes:
+            return reelsSceneLiveChips.isLiveFilterActive || selectedFilter != nil || !reelsSceneLiveSheetPresetSelection.isEmpty
+        case .markers:
+            return reelsMarkerLiveChips.isLiveFilterActive || selectedMarkerFilter != nil || !reelsMarkerLiveSheetPresetSelection.isEmpty
+        case .previews:
+            return reelsPreviewLiveChips.isLiveFilterActive || selectedPreviewFilter != nil || !reelsPreviewLiveSheetPresetSelection.isEmpty
+        case .clips:
+            return reelsClipImageFilters.catalogFilterSortFABActive
+        case .pics:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private var reelsFilterSortFAB: some View {
+        if reelsMode == .pics {
+            EmptyView()
+        } else {
+            Button {
+                switch reelsMode {
+                case .scenes, .markers, .previews:
+                    reelsRefreshSceneLivePresets()
+                    SceneLivePresetTag.migrateLegacySelection(&reelsSceneLiveSheetPresetSelection)
+                    SceneLivePresetTag.migrateLegacySelection(&reelsMarkerLiveSheetPresetSelection)
+                    SceneLivePresetTag.migrateLegacySelection(&reelsPreviewLiveSheetPresetSelection)
+                    switch reelsMode {
+                    case .scenes:
+                        reelsSceneLiveChips.syncLiveChipsToMatchSelectedFilter(selectedFilter, savedFilters: viewModel.savedFilters)
+                    case .markers:
+                        reelsMarkerLiveChips.syncLiveChipsToMatchSelectedFilter(selectedMarkerFilter, savedFilters: viewModel.savedFilters)
+                    case .previews:
+                        reelsPreviewLiveChips.syncLiveChipsToMatchSelectedFilter(selectedPreviewFilter, savedFilters: viewModel.savedFilters)
+                    default:
+                        break
+                    }
+                    showReelsSceneFilterSheet = true
+                case .clips:
+                    reelsClipImageFilters.refreshLocalPresets()
+                    reelsClipImageFilters.showFilterSortSheet = true
+                case .pics:
+                    break
+                }
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(reelsFilterSortFABActive ? appearanceManager.tintColor : .white)
+            }
+            .accessibilityLabel("Filter und Sortierung")
+        }
     }
 
     @ViewBuilder
@@ -2306,640 +3044,6 @@ struct ReelsView: View {
         }
     }
 
-    @ViewBuilder
-    private var sortMenu: some View {
-        Menu {
-            switch reelsMode {
-            case .scenes:
-                sceneSortOptions
-            case .markers:
-                markerSortOptions
-            case .clips:
-                clipSortOptions
-            case .previews:
-                previewSortOptions
-            case .pics:
-                EmptyView()
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
-        }
-    }
-
-    @ViewBuilder
-    private var sceneSortOptions: some View {
-        // Random
-        Button(action: {
-            applySettings(
-                sortBy: .random,
-                filter: selectedFilter,
-                performer: selectedPerformer,
-                tags: selectedTags,
-                rerollRandom: selectedSortOption == .random
-            )
-        }) {
-            HStack {
-                Text("Random")
-                if selectedSortOption == .random { Image(systemName: "checkmark") }
-            }
-        }
-        
-        Divider()
-        
-        // Date
-        Menu {
-            Button(action: { applySettings(sortBy: .dateDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .dateAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Date")
-                if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Title
-        Menu {
-            Button(action: { applySettings(sortBy: .titleAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("A → Z")
-                    if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .titleDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Z → A")
-                    if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Title")
-                if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Duration
-        Menu {
-            Button(action: { applySettings(sortBy: .durationDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Longest First")
-                    if selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .durationAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Shortest First")
-                    if selectedSortOption == .durationAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Duration")
-                if selectedSortOption == .durationAsc || selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Play Count
-        Menu {
-            Button(action: { applySettings(sortBy: .playCountDesc, filter: selectedFilter, performer: selectedPerformer) }) {
-                HStack {
-                    Text("Most Viewed")
-                    if selectedSortOption == .playCountDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .playCountAsc, filter: selectedFilter, performer: selectedPerformer) }) {
-                HStack {
-                    Text("Least Viewed")
-                    if selectedSortOption == .playCountAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Views")
-                if selectedSortOption == .playCountAsc || selectedSortOption == .playCountDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Last Played
-        Menu {
-            Button(action: { applySettings(sortBy: .lastPlayedAtDesc, filter: selectedFilter, performer: selectedPerformer) }) {
-                HStack {
-                    Text("Recently Played")
-                    if selectedSortOption == .lastPlayedAtDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .lastPlayedAtAsc, filter: selectedFilter, performer: selectedPerformer) }) {
-                HStack {
-                    Text("Least Recently")
-                    if selectedSortOption == .lastPlayedAtAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Last Played")
-                if selectedSortOption == .lastPlayedAtAsc || selectedSortOption == .lastPlayedAtDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Created
-        Menu {
-            Button(action: { applySettings(sortBy: .createdAtDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .createdAtAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Created")
-                if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Counter (O-Counter)
-        Menu {
-            Button(action: { applySettings(sortBy: .oCounterDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("High → Low")
-                    if selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .oCounterAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Low → High")
-                    if selectedSortOption == .oCounterAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("O-Counter")
-                if selectedSortOption == .oCounterAsc || selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Rating
-        Menu {
-            Button(action: { applySettings(sortBy: .ratingDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("High → Low")
-                    if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(sortBy: .ratingAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Low → High")
-                    if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Rating")
-                if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var markerSortOptions: some View {
-        // Random
-        Button(action: {
-            applySettings(
-                markerSortBy: .random,
-                filter: selectedFilter,
-                performer: selectedPerformer,
-                tags: selectedTags,
-                rerollRandom: selectedMarkerSortOption == .random
-            )
-        }) {
-            HStack {
-                Text("Random")
-                if selectedMarkerSortOption == .random { Image(systemName: "checkmark") }
-            }
-        }
-        
-        Divider()
-        
-        // Created
-        Menu {
-            Button(action: { applySettings(markerSortBy: .createdAtDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedMarkerSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(markerSortBy: .createdAtAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedMarkerSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Created")
-                if selectedMarkerSortOption == .createdAtAsc || selectedMarkerSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Title
-        Menu {
-            Button(action: { applySettings(markerSortBy: .titleAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("A → Z")
-                    if selectedMarkerSortOption == .titleAsc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(markerSortBy: .titleDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Z → A")
-                    if selectedMarkerSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Title")
-                if selectedMarkerSortOption == .titleAsc || selectedMarkerSortOption == .titleDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Time
-        Menu {
-            Button(action: { applySettings(markerSortBy: .secondsAsc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Start Time")
-                    if selectedMarkerSortOption == .secondsAsc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(markerSortBy: .secondsDesc, filter: selectedFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("End Time")
-                    if selectedMarkerSortOption == .secondsDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Time")
-                if selectedMarkerSortOption == .secondsAsc || selectedMarkerSortOption == .secondsDesc { Image(systemName: "checkmark") }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var previewSortOptions: some View {
-        // Previews are scenes — same sort options as sceneSortOptions
-        Button(action: {
-            applySettings(
-                previewSortBy: .random,
-                filter: selectedFilter,
-                previewFilter: selectedPreviewFilter,
-                performer: selectedPerformer,
-                tags: selectedTags,
-                rerollRandom: selectedSortOption == .random
-            )
-        }) {
-            HStack {
-                Text("Random")
-                if selectedSortOption == .random { Image(systemName: "checkmark") }
-            }
-        }
-
-        Divider()
-
-        // Date
-        Menu {
-            Button(action: { applySettings(previewSortBy: .dateDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .dateAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Date")
-                if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // Title
-        Menu {
-            Button(action: { applySettings(previewSortBy: .titleAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("A → Z")
-                    if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .titleDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Z → A")
-                    if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Title")
-                if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // Duration
-        Menu {
-            Button(action: { applySettings(previewSortBy: .durationDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Longest First")
-                    if selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .durationAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Shortest First")
-                    if selectedSortOption == .durationAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Duration")
-                if selectedSortOption == .durationAsc || selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // Last Played
-        Menu {
-            Button(action: { applySettings(previewSortBy: .lastPlayedAtDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Recently Played")
-                    if selectedSortOption == .lastPlayedAtDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .lastPlayedAtAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Least Recently")
-                    if selectedSortOption == .lastPlayedAtAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Last Played")
-                if selectedSortOption == .lastPlayedAtAsc || selectedSortOption == .lastPlayedAtDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // Created
-        Menu {
-            Button(action: { applySettings(previewSortBy: .createdAtDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .createdAtAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Created")
-                if selectedSortOption == .createdAtAsc || selectedSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // O-Counter
-        Menu {
-            Button(action: { applySettings(previewSortBy: .oCounterDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("High → Low")
-                    if selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .oCounterAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Low → High")
-                    if selectedSortOption == .oCounterAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("O-Counter")
-                if selectedSortOption == .oCounterAsc || selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // Rating
-        Menu {
-            Button(action: { applySettings(previewSortBy: .ratingDesc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("High → Low")
-                    if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(previewSortBy: .ratingAsc, filter: selectedFilter, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Low → High")
-                    if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Rating")
-                if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var clipSortOptions: some View {
-        // Random
-        Button(action: {
-            applySettings(
-                clipSortBy: .random,
-                filter: nil,
-                clipFilter: selectedClipFilter,
-                performer: selectedPerformer,
-                tags: selectedTags,
-                rerollRandom: selectedClipSortOption == .random
-            )
-        }) {
-            HStack {
-                Text("Random")
-                if selectedClipSortOption == .random { Image(systemName: "checkmark") }
-            }
-        }
-        
-        Divider()
-        
-        // Date
-        Menu {
-            Button(action: { applySettings(clipSortBy: .dateDesc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedClipSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(clipSortBy: .dateAsc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedClipSortOption == .dateAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Date")
-                if selectedClipSortOption == .dateAsc || selectedClipSortOption == .dateDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Title
-        Menu {
-            Button(action: { applySettings(clipSortBy: .titleAsc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("A → Z")
-                    if selectedClipSortOption == .titleAsc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(clipSortBy: .titleDesc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Z → A")
-                    if selectedClipSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Title")
-                if selectedClipSortOption == .titleAsc || selectedClipSortOption == .titleDesc { Image(systemName: "checkmark") }
-            }
-        }
-        
-        // Rating
-        Menu {
-            Button(action: { applySettings(clipSortBy: .ratingDesc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Highest First")
-                    if selectedClipSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(clipSortBy: .ratingAsc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Lowest First")
-                    if selectedClipSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Rating")
-                if selectedClipSortOption == .ratingAsc || selectedClipSortOption == .ratingDesc { Image(systemName: "checkmark") }
-            }
-        }
-
-        // Created
-        Menu {
-            Button(action: { applySettings(clipSortBy: .createdAtDesc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Newest First")
-                    if selectedClipSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-                }
-            }
-            Button(action: { applySettings(clipSortBy: .createdAtAsc, filter: nil, clipFilter: selectedClipFilter, performer: selectedPerformer, tags: selectedTags) }) {
-                HStack {
-                    Text("Oldest First")
-                    if selectedClipSortOption == .createdAtAsc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            HStack {
-                Text("Created")
-                if selectedClipSortOption == .createdAtAsc || selectedClipSortOption == .createdAtDesc { Image(systemName: "checkmark") }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var filterMenu: some View {
-        Menu {
-            if reelsMode == .clips {
-                // Clips uses image filters
-                Button(action: {
-                    selectedClipFilter = nil
-                    applySettings(filter: nil, clipFilter: nil, performer: selectedPerformer, tags: selectedTags, mode: .clips, clearClipFilter: true)
-                }) {
-                    HStack {
-                        Text("No Filter")
-                        if selectedClipFilter == nil { Image(systemName: "checkmark") }
-                    }
-                }
-                
-                let imageFilters = viewModel.savedFilters.values
-                    .filter { $0.mode == .images && $0.id != "reels_temp" && $0.id != "reels_merged" }
-                    .sorted { $0.name < $1.name }
-                
-                ForEach(imageFilters) { filter in
-                    Button(action: {
-                        selectedClipFilter = filter
-                        applySettings(filter: nil, clipFilter: filter, performer: selectedPerformer, tags: selectedTags, mode: .clips)
-                    }) {
-                        HStack {
-                            Text(filter.name)
-                            if selectedClipFilter?.id == filter.id { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            } else {
-                // Scenes/Markers share scene or sceneMarker filters
-                Button(action: {
-                    applySettings(filter: nil, performer: selectedPerformer, tags: selectedTags)
-                }) {
-                    HStack {
-                        Text("No Filter")
-                        if selectedFilter == nil { Image(systemName: "checkmark") }
-                    }
-                }
-
-                let mode: StashDBViewModel.FilterMode = (reelsMode == .scenes || reelsMode == .previews) ? .scenes : .sceneMarkers
-                let activeFilters = viewModel.savedFilters.values
-                    .filter { $0.mode == mode && $0.id != "reels_temp" && $0.id != "reels_merged" }
-                    .sorted { $0.name < $1.name }
-
-                ForEach(activeFilters) { filter in
-                    Button(action: {
-                        applySettings(filter: filter, performer: selectedPerformer, tags: selectedTags)
-                    }) {
-                        HStack {
-                            Text(filter.name)
-                            if selectedFilter?.id == filter.id { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            }
-        } label: {
-            let hasActiveFilter = (reelsMode == .clips ? selectedClipFilter != nil : selectedFilter != nil)
-            Image(systemName: "line.3.horizontal.decrease")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(hasActiveFilter ? appearanceManager.tintColor : .white)
-        }
-    }
 }
 
 struct ReelItemView: View {

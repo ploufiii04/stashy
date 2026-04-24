@@ -654,8 +654,8 @@ class StashDBViewModel: ObservableObject {
             case .updatedAtAsc: return "Updated (Oldest First)"
             case .createdAtDesc: return "Created (Newest First)"
             case .createdAtAsc: return "Created (Oldest First)"
-            case .oCountDesc: return "O-Count (High-Low)"
-            case .oCountAsc: return "O-Count (Low-High)"
+            case .oCountDesc: return "O Count (High-Low)"
+            case .oCountAsc: return "O Count (Low-High)"
             case .random: return "Random"
             }
         }
@@ -2039,6 +2039,12 @@ class StashDBViewModel: ObservableObject {
     // Search query state for scenes
     private var currentSceneSearchQuery: String = ""
     var currentSceneLiveFilter: [String: Any] = [:]
+    /// Live scene-style chips merged into Reels previews (`findScenes` previewOnly path).
+    private var currentPreviewLiveFilter: [String: Any] = [:]
+    /// Live scene criteria merged under `scene_marker_filter` → `scene_filter` for markers.
+    private var currentMarkerLiveFilter: [String: Any] = [:]
+    /// Live image chips merged into Reels clips (`findImages` + video path regex).
+    private var currentClipLiveFilter: [String: Any] = [:]
     
     func fetchScenes(sortBy: SceneSortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
@@ -2067,7 +2073,7 @@ class StashDBViewModel: ObservableObject {
         loadScenesPage(page: currentScenePage, sortBy: currentSceneSortOption, searchQuery: currentSceneSearchQuery)
     }
 
-    func fetchPreviews(sortBy: SceneSortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchPreviews(sortBy: SceneSortOption = .dateDesc, searchQuery: String = "", isInitialLoad: Bool = true, filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentPreviewPage = 1
             previews = []
@@ -2077,6 +2083,7 @@ class StashDBViewModel: ObservableObject {
             currentPreviewSortOption = sortBy
             currentPreviewFilter = filter
             currentPreviewSearchQuery = searchQuery
+            if let lf = liveFilter { currentPreviewLiveFilter = lf }
             isLoading = true
         } else {
             isLoadingPreviews = true
@@ -2093,11 +2100,12 @@ class StashDBViewModel: ObservableObject {
         loadScenesPage(page: currentPreviewPage, sortBy: currentPreviewSortOption, searchQuery: currentPreviewSearchQuery, previewOnly: true)
     }
 
-    func fetchSceneMarkers(sortBy: SceneMarkerSortOption = .createdAtDesc, searchQuery: String = "", filter: SavedFilter? = nil) {
+    func fetchSceneMarkers(sortBy: SceneMarkerSortOption = .createdAtDesc, searchQuery: String = "", filter: SavedFilter? = nil, liveFilter: [String: Any]? = nil) {
         currentMarkerPage = 1
         currentMarkerSortOption = sortBy
         currentMarkerSearchQuery = searchQuery
         currentMarkerFilter = filter
+        if let lf = liveFilter { currentMarkerLiveFilter = lf }
         hasMoreMarkers = true
         sceneMarkers = []
         isLoading = true // Set global loading for initial markers load
@@ -2136,12 +2144,24 @@ class StashDBViewModel: ObservableObject {
             "filter": filterDict
         ]
         
+        var markerFilter: [String: Any] = [:]
         if let savedFilter = currentMarkerFilter {
             if let dict = savedFilter.filterDict {
-                variables["scene_marker_filter"] = sanitizeFilter(dict, isMarker: true)
+                markerFilter = sanitizeFilter(dict, isMarker: true)
             } else if let obj = savedFilter.object_filter, let objDict = obj.value as? [String: Any] {
-                variables["scene_marker_filter"] = sanitizeFilter(objDict, isMarker: true)
+                markerFilter = sanitizeFilter(objDict, isMarker: true)
             }
+        }
+        if !currentMarkerLiveFilter.isEmpty {
+            var sceneNested = (markerFilter["scene_filter"] as? [String: Any]) ?? [:]
+            let liveSan = sanitizeFilter(currentMarkerLiveFilter, isMarker: false)
+            for (k, v) in liveSan {
+                sceneNested[k] = v
+            }
+            markerFilter["scene_filter"] = sanitizeFilter(sceneNested, isMarker: false)
+        }
+        if !markerFilter.isEmpty {
+            variables["scene_marker_filter"] = sanitizeFilter(markerFilter, isMarker: true)
         }
 
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
@@ -2225,10 +2245,11 @@ class StashDBViewModel: ObservableObject {
             }
         }
 
-        // Merge live filter on top of saved filter
-        if !previewOnly && !currentSceneLiveFilter.isEmpty {
+        // Merge live filter on top of saved filter (Reels scenes vs previews use separate live dicts).
+        let liveForThisQuery: [String: Any] = previewOnly ? currentPreviewLiveFilter : currentSceneLiveFilter
+        if !liveForThisQuery.isEmpty {
             var merged = (variables["scene_filter"] as? [String: Any]) ?? [:]
-            for (key, value) in currentSceneLiveFilter {
+            for (key, value) in liveForThisQuery {
                 merged[key] = value
             }
             variables["scene_filter"] = sanitizeFilter(merged)
@@ -4796,7 +4817,7 @@ class StashDBViewModel: ObservableObject {
         return s.visibleItemId
     }
 
-    func fetchClips(sortBy: ImageSortOption = .dateDesc, filter: SavedFilter? = nil, isInitialLoad: Bool = true) {
+    func fetchClips(sortBy: ImageSortOption = .dateDesc, filter: SavedFilter? = nil, isInitialLoad: Bool = true, liveFilter: [String: Any]? = nil) {
         if isInitialLoad {
             currentClipsPage = 1
             clips = []
@@ -4805,6 +4826,7 @@ class StashDBViewModel: ObservableObject {
             hasMoreClips = true
             currentClipSortOption = sortBy
             currentClipFilter = filter
+            if let lf = liveFilter { currentClipLiveFilter = lf }
             isLoading = true // Set global loading for initial clips load
         } else {
             isLoadingClips = true
@@ -4848,14 +4870,21 @@ class StashDBViewModel: ObservableObject {
             }
         }
         
+        if !currentClipLiveFilter.isEmpty {
+            let liveSan = sanitizeFilter(currentClipLiveFilter)
+            for (key, value) in liveSan where key != "path" {
+                imageFilter[key] = value
+            }
+        }
+
         let variables: [String: Any] = [
             "filter": [
                 "page": page,
                 "per_page": 20,
-                "sort": currentClipSortOption.sortField,
+                "sort": currentClipSortOption.sortField == "random" ? randomSort(.images) : currentClipSortOption.sortField,
                 "direction": currentClipSortOption.direction
             ],
-            "image_filter": imageFilter
+            "image_filter": sanitizeFilter(imageFilter)
         ]
         
         print("🔍 fetchClips: Variables = \(variables)")

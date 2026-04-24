@@ -8,22 +8,8 @@
 #if !os(tvOS)
 import SwiftUI
 
-/// Tag encoding for scene live filter `o_counter` (`IntCriterionInput`), used in presets and chips.
-private enum SceneLiveOCounterChip {
-    static let equalZero = "EQUALS:0"
-    static let greaterThan0 = "GREATER_THAN:0"
-    static let greaterThan4 = "GREATER_THAN:4"
-    static let greaterThan9 = "GREATER_THAN:9"
-}
-
-private func sceneLiveOCounterCriterion(from tag: String) -> [String: Any]? {
-    let parts = tag.split(separator: ":", maxSplits: 1).map(String.init)
-    guard parts.count == 2, let v = Int(parts[1]) else { return nil }
-    return ["value": v, "modifier": parts[0]]
-}
-
 /// Preset picker row id: `""` | `server:<stashId>` | `local:<uuid>`
-private enum SceneLivePresetTag {
+enum SceneLivePresetTag {
     static let serverPrefix = "server:"
     static let localPrefix = "local:"
 
@@ -69,7 +55,7 @@ private enum SceneLiveSortFieldKind: String, CaseIterable, Identifiable {
         case .duration: return "Duration"
         case .last_played_at: return "Last played"
         case .play_count: return "Play count"
-        case .o_counter: return "O-count"
+        case .o_counter: return "O Count"
         case .rating: return "Rating"
         case .random: return "Random"
         }
@@ -129,9 +115,70 @@ private enum SceneLiveSortPickerValue: Hashable {
     }
 }
 
+// MARK: - Marker sort (Reels „Markers“ + `SceneLiveFilterSheet`)
+
+/// Maps to `SceneMarkerSortOption` for the live-filter sheet (dropdown + asc/desc), same layout as scene sort.
+private enum MarkerLiveSortFieldKind: String, CaseIterable, Identifiable {
+    case created_at
+    case updated_at
+    case title
+    case seconds
+    case random
+
+    var id: String { rawValue }
+
+    var menuLabel: String {
+        switch self {
+        case .created_at: return "Created"
+        case .updated_at: return "Updated"
+        case .title: return "Title"
+        case .seconds: return "Time"
+        case .random: return "Random"
+        }
+    }
+
+    static func from(_ option: StashDBViewModel.SceneMarkerSortOption) -> MarkerLiveSortFieldKind {
+        switch option {
+        case .random: return .random
+        case .createdAtAsc, .createdAtDesc: return .created_at
+        case .updatedAtAsc, .updatedAtDesc: return .updated_at
+        case .titleAsc, .titleDesc: return .title
+        case .secondsAsc, .secondsDesc: return .seconds
+        }
+    }
+
+    func markerSortOption(ascending: Bool) -> StashDBViewModel.SceneMarkerSortOption {
+        switch self {
+        case .created_at: return ascending ? .createdAtAsc : .createdAtDesc
+        case .updated_at: return ascending ? .updatedAtAsc : .updatedAtDesc
+        case .title: return ascending ? .titleAsc : .titleDesc
+        case .seconds: return ascending ? .secondsAsc : .secondsDesc
+        case .random: return .random
+        }
+    }
+}
+
+private enum MarkerLiveSortPickerValue: Hashable {
+    case known(MarkerLiveSortFieldKind)
+
+    static func from(_ option: StashDBViewModel.SceneMarkerSortOption) -> MarkerLiveSortPickerValue {
+        .known(MarkerLiveSortFieldKind.from(option))
+    }
+
+    var isRandom: Bool {
+        if case .known(.random) = self { return true }
+        return false
+    }
+
+    var knownKind: MarkerLiveSortFieldKind? {
+        if case .known(let k) = self { return k }
+        return nil
+    }
+}
+
 /// Chip rows only cover part of Stash’s `SceneFilterType`. We reject explicit non-chip / combinatorial
 /// keys and ignore unknown future keys (instead of whitelisting only eight fields).
-private enum SceneLiveChipFilterSupport {
+enum SceneLiveChipFilterSupport {
     /// Scene filter keys the chip UI cannot represent (see Stash `SceneFilterType`).
     private static let unsupportedSceneFilterKeys: Set<String> = [
         "AND", "OR", "NOT",
@@ -1039,7 +1086,10 @@ private struct ScenesViewContent: View {
                         showRenamePresetAlert = true
                     }
                 },
-                onRequestDelete: { showDeletePresetAlert = true }
+                onRequestDelete: { showDeletePresetAlert = true },
+                useMarkerSort: false,
+                markerSortOption: .constant(StashDBViewModel.SceneMarkerSortOption.createdAtDesc),
+                onMarkerSortChange: { _ in }
             )
             .presentationDragIndicator(.visible)
             .presentationBackground(Color.appBackground)
@@ -1466,6 +1516,12 @@ struct SceneLiveFilterSheet: View {
     var onRequestSaveAs: () -> Void
     var onRequestRename: () -> Void
     var onRequestDelete: () -> Void
+    /// When `false`, hides the scene sort card (e.g. when ``useMarkerSort`` shows marker sort instead).
+    var showsSortControls: Bool = true
+    /// When `true`, shows marker sort (Asc/Desc + field); scene sort bindings are ignored for the sort card.
+    var useMarkerSort: Bool = false
+    @Binding var markerSortOption: StashDBViewModel.SceneMarkerSortOption
+    var onMarkerSortChange: (StashDBViewModel.SceneMarkerSortOption) -> Void
 
     @ObservedObject private var appearance = AppearanceManager.shared
 
@@ -1510,7 +1566,11 @@ struct SceneLiveFilterSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 16)
 
-                    sortControlsCard
+                    if useMarkerSort {
+                        markerSortControlsCard
+                    } else if showsSortControls {
+                        sortControlsCard
+                    }
 
                     if liveChipRowsVisible {
                         VStack(spacing: 0) {
@@ -1563,7 +1623,7 @@ struct SceneLiveFilterSheet: View {
                                 filterChip("No",  isActive: performerFavorite == false) { performerFavorite = false; onApply() }
                             }
                             Divider().padding(.leading, 16)
-                            filterRow(label: "O-count") {
+                            filterRow(label: "O Count") {
                                 filterChip("Any", isActive: oCounterTag == nil) { oCounterTag = nil; onApply() }
                                 filterChip("0", isActive: oCounterTag == SceneLiveOCounterChip.equalZero) {
                                     oCounterTag = SceneLiveOCounterChip.equalZero; onApply()
@@ -1651,6 +1711,67 @@ struct SceneLiveFilterSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var markerSortControlsCard: some View {
+        let pickerValue = MarkerLiveSortPickerValue.from(markerSortOption)
+        let ascending = markerSortOption.direction == "ASC"
+        let randomMode = pickerValue.isRandom
+        let orderControlsDisabled = randomMode
+
+        return HStack(alignment: .center, spacing: 12) {
+            Text("Sort")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+                .frame(width: Self.labelColumnWidth, alignment: .leading)
+
+            HStack(spacing: 6) {
+                filterChip("Asc", isActive: ascending && !orderControlsDisabled) {
+                    guard let k = pickerValue.knownKind, !orderControlsDisabled else { return }
+                    onMarkerSortChange(k.markerSortOption(ascending: true))
+                }
+                .accessibilityLabel("Ascending")
+
+                filterChip("Desc", isActive: !ascending && !orderControlsDisabled) {
+                    guard let k = pickerValue.knownKind, !orderControlsDisabled else { return }
+                    onMarkerSortChange(k.markerSortOption(ascending: false))
+                }
+                .accessibilityLabel("Descending")
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .opacity(orderControlsDisabled ? 0.4 : 1)
+            .allowsHitTesting(!orderControlsDisabled)
+
+            Spacer(minLength: 8)
+
+            Picker("Sort type", selection: Binding(
+                get: { MarkerLiveSortPickerValue.from(markerSortOption) },
+                set: { newVal in
+                    guard case .known(let newKind) = newVal else { return }
+                    if newKind == .random {
+                        onMarkerSortChange(.random)
+                    } else if MarkerLiveSortPickerValue.from(markerSortOption).isRandom {
+                        onMarkerSortChange(newKind.markerSortOption(ascending: false))
+                    } else {
+                        onMarkerSortChange(newKind.markerSortOption(ascending: markerSortOption.direction == "ASC"))
+                    }
+                }
+            )) {
+                ForEach(MarkerLiveSortFieldKind.allCases) { k in
+                    Text(k.menuLabel).tag(MarkerLiveSortPickerValue.known(k))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .accessibilityLabel("Sort field")
+            .tint(appearance.tintColor)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondaryAppBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
     }
 
     private var sortControlsCard: some View {

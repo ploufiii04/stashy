@@ -609,8 +609,9 @@ struct PerformerDetailView: View {
             sortOption: linkedImages.selectedSortOption,
             onSortChange: { linkedImages.changeSortOption(to: $0, viewModel: viewModel) },
             liveMinRating: $linkedImages.liveFilterMinRating,
-            liveFavorite: $linkedImages.liveFilterFavorite,
+            livePerformerFavorite: $linkedImages.liveFilterPerformerFavorite,
             liveOrganized: $linkedImages.liveFilterOrganized,
+            liveOCounterTag: $linkedImages.liveFilterOCounterTag,
             onApply: { linkedImages.applyLiveFilter(viewModel: viewModel) },
             onReset: {
                 linkedImages.catalogPresetRowSelection = ""
