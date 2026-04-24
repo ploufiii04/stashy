@@ -917,8 +917,8 @@ struct StashLinePostView: View {
             // Performers
             HStack(spacing: 0) {
                 ForEach(Array(performers.enumerated()), id: \.element.id) { idx, performer in
-                    if let onPerformerTap = onPerformerTap {
-                        Button(action: { onPerformerTap(performer) }) {
+                    if onPerformerTap != nil {
+                        NavigationLink(destination: PerformerDetailView(performer: performer.toPerformer())) {
                             performerAvatar(performer, offset: idx)
                         }
                         .buttonStyle(.plain)

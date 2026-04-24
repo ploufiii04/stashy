@@ -223,8 +223,7 @@ struct ReelsModeSettingsView: View {
     private func filterPicker(for type: ReelsModeType) -> some View {
         let filterMode: StashDBViewModel.FilterMode = {
             switch type {
-            case .scenes: return .scenes
-            case .markers: return .sceneMarkers
+            case .scenes, .markers: return .scenes
             case .clips: return .images
             case .previews: return .scenes
             case .pics: return .images
@@ -241,7 +240,8 @@ struct ReelsModeSettingsView: View {
                 .font(.subheadline)
         } else {
             switch type {
-            case .scenes:
+            case .scenes, .markers:
+                // Markers use the same saved scene filters and the same reels default as Scenes (not `sceneMarkers` / `defaultMarkerFilterId`).
                 Picker("", selection: Binding(
                     get: { tabManager.getDefaultFilterId(for: .reels) ?? "" },
                     set: { newId in
@@ -249,25 +249,6 @@ struct ReelsModeSettingsView: View {
                             tabManager.setDefaultFilter(for: .reels, filterId: nil, filterName: nil)
                         } else if let filter = filters.first(where: { $0.id == newId }) {
                             tabManager.setDefaultFilter(for: .reels, filterId: filter.id, filterName: filter.name)
-                        }
-                    }
-                )) {
-                    Text("None").tag("")
-                    ForEach(filters) { filter in
-                        Text(filter.name).tag(filter.id)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-
-            case .markers:
-                Picker("", selection: Binding(
-                    get: { tabManager.getDefaultMarkerFilterId(for: .reels) ?? "" },
-                    set: { newId in
-                        if newId.isEmpty {
-                            tabManager.setDefaultMarkerFilter(for: .reels, filterId: nil, filterName: nil)
-                        } else if let filter = filters.first(where: { $0.id == newId }) {
-                            tabManager.setDefaultMarkerFilter(for: .reels, filterId: filter.id, filterName: filter.name)
                         }
                     }
                 )) {

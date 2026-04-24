@@ -188,7 +188,7 @@ enum SceneLiveChipFilterSupport {
         "duplicated",
         "duration", "framerate", "bitrate", "video_codec", "audio_codec",
         "has_markers", "is_missing",
-        "movies", "groups", "galleries", "tags", "tag_count", "performers", "performer_tags", "performer_age",
+        "movies", "galleries", "tag_count", "performers", "performer_tags", "performer_age",
         "stash_id_endpoint", "stash_ids_endpoint", "stash_id_count",
         "url", "interactive_speed", "captions", "resume_time", "play_count", "play_duration", "last_played_at",
         "date", "created_at", "updated_at",
@@ -214,7 +214,15 @@ enum SceneLiveChipFilterSupport {
         let flat = flattenedForChipSupportInspection(dict)
         for key in flat.keys {
             if key == "studios" {
-                if !studiosCriterionIsChipRepresentable(flat["studios"]) { return false }
+                if !multiIdINCLUDESCriterionIsChipRepresentable(flat["studios"]) { return false }
+                continue
+            }
+            if key == "tags" {
+                if !multiIdINCLUDESCriterionIsChipRepresentable(flat["tags"]) { return false }
+                continue
+            }
+            if key == "groups" {
+                if !multiIdINCLUDESCriterionIsChipRepresentable(flat["groups"]) { return false }
                 continue
             }
             if unsupportedSceneFilterKeys.contains(key) { return false }
@@ -248,8 +256,8 @@ enum SceneLiveChipFilterSupport {
         return studioIdStrings(from: d["value"]).first
     }
 
-    /// Chip UI supports at most one studio (`INCLUDES` with zero or one id).
-    private static func studiosCriterionIsChipRepresentable(_ value: Any?) -> Bool {
+    /// `studios` / `tags` / `groups` with `INCLUDES`: at most one id (same shape as Stash multi-id criteria).
+    private static func multiIdINCLUDESCriterionIsChipRepresentable(_ value: Any?) -> Bool {
         guard let value else { return true }
         guard let d = value as? [String: Any] else { return false }
         let mod = (d["modifier"] as? String) ?? ""
@@ -361,6 +369,14 @@ private struct ScenesViewContent: View {
     @State private var liveFilterStudioId: String? = nil
     @State private var studioPickerOptions: [Studio] = []
     @State private var studioPickerLoading = false
+    /// Live `tags` `INCLUDES` (single id); tag picker lists only tags with scenes.
+    @State private var liveFilterTagId: String? = nil
+    @State private var tagPickerOptions: [Tag] = []
+    @State private var tagPickerLoading = false
+    /// Live `groups` `INCLUDES` (single id).
+    @State private var liveFilterGroupId: String? = nil
+    @State private var groupPickerOptions: [StashGroup] = []
+    @State private var groupPickerLoading = false
     @State private var liveFilterPresets: [SceneLiveFilterPreset] = SceneLiveFilterPresetStore.loadPresets()
     /// Selected preset UUID string in the sheet; empty = none.
     @State private var liveSheetPresetSelection: String = ""
@@ -463,7 +479,7 @@ private struct ScenesViewContent: View {
         liveFilterMinRating > 0 || liveFilterOrganized != nil
         || liveFilterInteractive != nil || liveFilterOrientation != nil || liveFilterPerformerCount != nil
         || liveFilterResolution != nil || liveFilterPerformerFavorite != nil || liveFilterOCounterTag != nil
-        || liveFilterStudioId != nil
+        || liveFilterStudioId != nil || liveFilterTagId != nil || liveFilterGroupId != nil
     }
 
     /// Chips, saved scene filter, or a preset row in the sheet — drives FAB tint/dot now that toolbar filter/sort are gone.
@@ -520,10 +536,16 @@ private struct ScenesViewContent: View {
         if let sid = liveFilterStudioId {
             dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
         }
+        if let tid = liveFilterTagId {
+            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        }
+        if let gid = liveFilterGroupId {
+            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        }
         return dict
     }
-
-    /// Live chip criteria merge only when the saved filter is chip-safe; the studio picker always merges when set.
+    
+    /// Live chip criteria merge only when the saved filter is chip-safe; studio / tag / group pickers always merge when set.
     private var effectiveSceneLiveFilterForFetch: [String: Any] {
         var dict: [String: Any] = SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(selectedFilter)
             ? activeLiveFilterDict
@@ -531,7 +553,21 @@ private struct ScenesViewContent: View {
         if let sid = liveFilterStudioId {
             dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
         }
+        if let tid = liveFilterTagId {
+            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        }
+        if let gid = liveFilterGroupId {
+            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        }
         return dict
+    }
+
+    /// Reads at most one `INCLUDES` id each for `studios`, `tags`, `groups` (after clearing other live chips).
+    private func applyLiveAuxIdsFromFragment(_ frag: [String: Any]) {
+        let f = FilterMapper.sanitize(frag, isMarker: false)
+        liveFilterStudioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["studios"])
+        liveFilterTagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["tags"])
+        liveFilterGroupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: f["groups"])
     }
 
     /// Does not change sort: syncs chip state to `selectedFilter` / stashy metadata (e.g. deep link).
@@ -548,9 +584,7 @@ private struct ScenesViewContent: View {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveFilterChipsOnly()
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
-                    liveFilterStudioId = id
-                }
+                applyLiveAuxIdsFromFragment(meta.liveFragment)
             }
         } else if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f) {
             if let raw = f.filterDict {
@@ -567,8 +601,8 @@ private struct ScenesViewContent: View {
                 }
                 return nil
             }()
-            if let flat, let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
-                liveFilterStudioId = id
+            if let flat {
+                applyLiveAuxIdsFromFragment(flat)
             }
         }
     }
@@ -614,6 +648,8 @@ private struct ScenesViewContent: View {
             liveFilterOCounterTag = nil
         }
         liveFilterStudioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
+        liveFilterTagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["tags"])
+        liveFilterGroupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["groups"])
     }
 
     private func boolFromLiveJSON(_ value: Any?) -> Bool? {
@@ -652,9 +688,7 @@ private struct ScenesViewContent: View {
             mapLiveFragmentToChips(preset.liveFragment)
         } else {
             clearLiveFilterChipsOnly()
-            if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: preset.liveFragment["studios"]) {
-                liveFilterStudioId = id
-            }
+            applyLiveAuxIdsFromFragment(preset.liveFragment)
         }
         applyLiveFilter()
     }
@@ -669,6 +703,8 @@ private struct ScenesViewContent: View {
         liveFilterPerformerFavorite = nil
         liveFilterOCounterTag = nil
         liveFilterStudioId = nil
+        liveFilterTagId = nil
+        liveFilterGroupId = nil
     }
 
     private func loadStudiosForSceneLivePicker() {
@@ -677,6 +713,24 @@ private struct ScenesViewContent: View {
         viewModel.fetchStudiosForLiveFilterPicker(mode: .scenesHasScenes) { list in
             studioPickerOptions = list
             studioPickerLoading = false
+        }
+    }
+
+    private func loadTagsForSceneLivePicker() {
+        guard !tagPickerLoading else { return }
+        tagPickerLoading = true
+        viewModel.fetchTagsForSceneLiveFilterPicker { list in
+            tagPickerOptions = list
+            tagPickerLoading = false
+        }
+    }
+
+    private func loadGroupsForSceneLivePicker() {
+        guard !groupPickerLoading else { return }
+        groupPickerLoading = true
+        viewModel.fetchGroupsForSceneLiveFilterPicker { list in
+            groupPickerOptions = list
+            groupPickerLoading = false
         }
     }
 
@@ -691,9 +745,7 @@ private struct ScenesViewContent: View {
                 mapLiveFragmentToChips(meta.liveFragment)
             } else {
                 clearLiveFilterChipsOnly()
-                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
-                    liveFilterStudioId = id
-                }
+                applyLiveAuxIdsFromFragment(meta.liveFragment)
             }
             let resolvedSort: StashDBViewModel.SceneSortOption
             if let sr = meta.sortRaw, let parsed = StashDBViewModel.SceneSortOption(rawValue: sr) {
@@ -722,8 +774,8 @@ private struct ScenesViewContent: View {
                     }
                     return nil
                 }()
-                if let flat, let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
-                    liveFilterStudioId = id
+                if let flat {
+                    applyLiveAuxIdsFromFragment(flat)
                 }
             }
         }
@@ -1117,19 +1169,19 @@ private struct ScenesViewContent: View {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(liveFilterBarButtonTint)
-                        .overlay(alignment: .topTrailing) {
+                            .overlay(alignment: .topTrailing) {
                             if liveFilterFABHasSomethingSet {
-                                Circle()
-                                    .fill(appearanceManager.tintColor)
-                                    .frame(width: 7, height: 7)
-                                    .offset(x: 3, y: -3)
+                                    Circle()
+                                        .fill(appearanceManager.tintColor)
+                                        .frame(width: 7, height: 7)
+                                        .offset(x: 3, y: -3)
+                                }
                             }
-                        }
-                }
+                    }
                 .accessibilityLabel("Filter and sort")
                 Spacer(minLength: 0)
+                }
             }
-        }
         .sheet(isPresented: liveFilterSheetPresented) {
             SceneLiveFilterSheet(
                 serverSceneFilters: sortedServerSceneFilters,
@@ -1150,6 +1202,14 @@ private struct ScenesViewContent: View {
                 studioPickerOptions: studioPickerOptions,
                 studioPickerLoading: studioPickerLoading,
                 onStudioPickerSectionAppear: { loadStudiosForSceneLivePicker() },
+                tagSelectionId: $liveFilterTagId,
+                tagPickerOptions: tagPickerOptions,
+                tagPickerLoading: tagPickerLoading,
+                onTagPickerSectionAppear: { loadTagsForSceneLivePicker() },
+                groupSelectionId: $liveFilterGroupId,
+                groupPickerOptions: groupPickerOptions,
+                groupPickerLoading: groupPickerLoading,
+                onGroupPickerSectionAppear: { loadGroupsForSceneLivePicker() },
                 onApply: { applyLiveFilter() },
                 onReset: {
                     liveFilterMinRating = 0
@@ -1161,6 +1221,8 @@ private struct ScenesViewContent: View {
                     liveFilterPerformerFavorite = nil
                     liveFilterOCounterTag = nil
                     liveFilterStudioId = nil
+                    liveFilterTagId = nil
+                    liveFilterGroupId = nil
                     liveSheetPresetSelection = ""
                     selectedFilter = nil
                     applyLiveFilter()
@@ -1610,6 +1672,14 @@ struct SceneLiveFilterSheet: View {
     var studioPickerOptions: [Studio]
     var studioPickerLoading: Bool
     var onStudioPickerSectionAppear: () -> Void
+    @Binding var tagSelectionId: String?
+    var tagPickerOptions: [Tag]
+    var tagPickerLoading: Bool
+    var onTagPickerSectionAppear: () -> Void
+    @Binding var groupSelectionId: String?
+    var groupPickerOptions: [StashGroup]
+    var groupPickerLoading: Bool
+    var onGroupPickerSectionAppear: () -> Void
     var onApply: () -> Void
     var onReset: () -> Void
     var onRequestSave: () -> Void
@@ -1672,7 +1742,7 @@ struct SceneLiveFilterSheet: View {
                         sortControlsCard
                     }
 
-                    VStack(spacing: 0) {
+                VStack(spacing: 0) {
                         CatalogStudioLiveFilterPickerRow(
                             selectedStudioId: $studioSelectionId,
                             studios: studioPickerOptions,
@@ -1680,49 +1750,69 @@ struct SceneLiveFilterSheet: View {
                             onAppearLoad: onStudioPickerSectionAppear,
                             onSelectionChange: onApply
                         )
+                        Divider().padding(.leading, 16)
+                        CatalogNamedEntityLiveFilterPickerRow(
+                            title: "Tag",
+                            selectedId: $tagSelectionId,
+                            items: tagPickerOptions,
+                            displayName: { $0.name },
+                            isLoading: tagPickerLoading,
+                            onAppearLoad: onTagPickerSectionAppear,
+                            onSelectionChange: onApply
+                        )
+                        Divider().padding(.leading, 16)
+                        CatalogNamedEntityLiveFilterPickerRow(
+                            title: "Group",
+                            selectedId: $groupSelectionId,
+                            items: groupPickerOptions,
+                            displayName: { $0.name },
+                            isLoading: groupPickerLoading,
+                            onAppearLoad: onGroupPickerSectionAppear,
+                            onSelectionChange: onApply
+                        )
                         if liveChipRowsVisible {
                             Divider().padding(.leading, 16)
-                            filterRow(label: "Rating") {
-                                filterChip("Any", isActive: minRating == 0) { minRating = 0; onApply() }
+                    filterRow(label: "Rating") {
+                        filterChip("Any", isActive: minRating == 0) { minRating = 0; onApply() }
                                 ForEach([5, 4, 3, 2, 1], id: \.self) { star in
-                                    filterChip("\(star)★", isActive: minRating == star) { minRating = star; onApply() }
-                                }
-                            }
-                            Divider().padding(.leading, 16)
-                            filterRow(label: "Organized") {
-                                filterChip("Any", isActive: organized == nil)   { organized = nil;   onApply() }
-                                filterChip("Yes", isActive: organized == true)  { organized = true;  onApply() }
-                                filterChip("No",  isActive: organized == false) { organized = false; onApply() }
-                            }
-                            Divider().padding(.leading, 16)
-                            filterRow(label: "Interactive") {
-                                filterChip("Any",  isActive: interactive == nil)   { interactive = nil;   onApply() }
-                                filterChip("Yes",  isActive: interactive == true)  { interactive = true;  onApply() }
-                                filterChip("No",   isActive: interactive == false) { interactive = false; onApply() }
-                            }
-                            Divider().padding(.leading, 16)
-                            filterRow(label: "Orientation") {
-                                filterChip("Any",       isActive: orientation == nil)          { orientation = nil;         onApply() }
-                                filterChip("Landscape", isActive: orientation == "LANDSCAPE") { orientation = "LANDSCAPE"; onApply() }
-                                filterChip("Portrait",  isActive: orientation == "PORTRAIT")  { orientation = "PORTRAIT";  onApply() }
-                            }
-                            Divider().padding(.leading, 16)
-                            filterRow(label: "Performers") {
-                                filterChip("Any", isActive: performerCount == nil) { performerCount = nil; onApply() }
-                                filterChip("1",   isActive: performerCount == 1)   { performerCount = 1;   onApply() }
-                                filterChip("2",   isActive: performerCount == 2)   { performerCount = 2;   onApply() }
-                                filterChip("3+",  isActive: performerCount == 3)   { performerCount = 3;   onApply() }
-                            }
-                            Divider().padding(.leading, 16)
-                            filterRow(label: "Resolution") {
-                                filterChip("Any", isActive: resolution == nil) { resolution = nil; onApply() }
-                                // Descending order (high → low)
-                                filterChip("4K",    isActive: resolution == "FOUR_K")      { resolution = "FOUR_K";      onApply() }
-                                filterChip("1440p", isActive: resolution == "QUAD_HD")     { resolution = "QUAD_HD";     onApply() }
-                                filterChip("1080p", isActive: resolution == "FULL_HD")     { resolution = "FULL_HD";     onApply() }
-                                filterChip("720p",  isActive: resolution == "STANDARD_HD") { resolution = "STANDARD_HD"; onApply() }
-                                filterChip("540p",  isActive: resolution == "WEB_HD")      { resolution = "WEB_HD";      onApply() }
-                                filterChip("480p",  isActive: resolution == "STANDARD")    { resolution = "STANDARD";    onApply() }
+                            filterChip("\(star)★", isActive: minRating == star) { minRating = star; onApply() }
+                        }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Organized") {
+                        filterChip("Any", isActive: organized == nil)   { organized = nil;   onApply() }
+                        filterChip("Yes", isActive: organized == true)  { organized = true;  onApply() }
+                        filterChip("No",  isActive: organized == false) { organized = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Interactive") {
+                        filterChip("Any",  isActive: interactive == nil)   { interactive = nil;   onApply() }
+                        filterChip("Yes",  isActive: interactive == true)  { interactive = true;  onApply() }
+                        filterChip("No",   isActive: interactive == false) { interactive = false; onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Orientation") {
+                        filterChip("Any",       isActive: orientation == nil)          { orientation = nil;         onApply() }
+                        filterChip("Landscape", isActive: orientation == "LANDSCAPE") { orientation = "LANDSCAPE"; onApply() }
+                        filterChip("Portrait",  isActive: orientation == "PORTRAIT")  { orientation = "PORTRAIT";  onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Performers") {
+                        filterChip("Any", isActive: performerCount == nil) { performerCount = nil; onApply() }
+                        filterChip("1",   isActive: performerCount == 1)   { performerCount = 1;   onApply() }
+                        filterChip("2",   isActive: performerCount == 2)   { performerCount = 2;   onApply() }
+                        filterChip("3+",  isActive: performerCount == 3)   { performerCount = 3;   onApply() }
+                    }
+                    Divider().padding(.leading, 16)
+                    filterRow(label: "Resolution") {
+                        filterChip("Any", isActive: resolution == nil) { resolution = nil; onApply() }
+                        // Descending order (high → low)
+                        filterChip("4K",    isActive: resolution == "FOUR_K")      { resolution = "FOUR_K";      onApply() }
+                        filterChip("1440p", isActive: resolution == "QUAD_HD")     { resolution = "QUAD_HD";     onApply() }
+                        filterChip("1080p", isActive: resolution == "FULL_HD")     { resolution = "FULL_HD";     onApply() }
+                        filterChip("720p",  isActive: resolution == "STANDARD_HD") { resolution = "STANDARD_HD"; onApply() }
+                        filterChip("540p",  isActive: resolution == "WEB_HD")      { resolution = "WEB_HD";      onApply() }
+                        filterChip("480p",  isActive: resolution == "STANDARD")    { resolution = "STANDARD";    onApply() }
                             }
                             Divider().padding(.leading, 16)
                             filterRow(label: "Perf. fav.") {
@@ -1749,11 +1839,11 @@ struct SceneLiveFilterSheet: View {
                         } else {
                             Divider().padding(.leading, 16)
                             serverManagedFilterNoticeInline
-                        }
                     }
-                    .background(Color.secondaryAppBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
+                }
+                .background(Color.secondaryAppBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
                     .padding(.bottom, 8)
                 }
             }
@@ -1781,8 +1871,8 @@ struct SceneLiveFilterSheet: View {
                         }
                     } label: {
                         Image(systemName: "arrow.down.doc")
-                            .fontWeight(.semibold)
-                    }
+                        .fontWeight(.semibold)
+                }
                     .accessibilityLabel("Save")
 
                     Button(action: onRequestRename) {

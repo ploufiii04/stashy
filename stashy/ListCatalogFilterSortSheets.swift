@@ -102,6 +102,54 @@ struct CatalogStudioLiveFilterPickerRow: View {
     }
 }
 
+/// Single-select tag / group / other named entity for scene live filters (`nil` = any).
+struct CatalogNamedEntityLiveFilterPickerRow<Item: Identifiable & Equatable>: View where Item.ID == String {
+    let title: String
+    @Binding var selectedId: String?
+    let items: [Item]
+    let displayName: (Item) -> String
+    let isLoading: Bool
+    var onAppearLoad: () -> Void
+    var onSelectionChange: () -> Void
+
+    @ObservedObject private var appearance = AppearanceManager.shared
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+                .frame(width: CatalogFilterSortSheetLayout.labelColumnWidth, alignment: .leading)
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                Picker(title, selection: Binding(
+                    get: { selectedId ?? "" },
+                    set: { new in
+                        let next = new.isEmpty ? nil : new
+                        guard next != selectedId else { return }
+                        selectedId = next
+                        onSelectionChange()
+                    }
+                )) {
+                    Text("Any").tag("")
+                    ForEach(items) { item in
+                        Text(displayName(item)).tag(item.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(appearance.tintColor)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .onAppear { onAppearLoad() }
+    }
+}
+
 struct CatalogServerManagedFilterNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1526,11 +1574,15 @@ struct SceneLiveChipRowState: Equatable {
     var oCounterTag: String? = nil
     /// Single studio id for `studios` `INCLUDES`; nil = any.
     var studioId: String? = nil
+    /// Single tag id for `tags` `INCLUDES`; nil = any.
+    var tagId: String? = nil
+    /// Single group id for `groups` `INCLUDES`; nil = any.
+    var groupId: String? = nil
 
     var isLiveFilterActive: Bool {
         minRating > 0 || organized != nil || interactive != nil || orientation != nil
             || performerCount != nil || resolution != nil || performerFavorite != nil || oCounterTag != nil
-            || studioId != nil
+            || studioId != nil || tagId != nil || groupId != nil
     }
 
     func activeLiveFilterDict() -> [String: Any] {
@@ -1560,6 +1612,12 @@ struct SceneLiveChipRowState: Equatable {
         if let sid = studioId {
             dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
         }
+        if let tid = tagId {
+            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        }
+        if let gid = groupId {
+            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
+        }
         return dict
     }
 
@@ -1569,6 +1627,12 @@ struct SceneLiveChipRowState: Equatable {
             : [:]
         if let sid = studioId {
             dict["studios"] = ["modifier": "INCLUDES", "value": [sid]]
+        }
+        if let tid = tagId {
+            dict["tags"] = ["modifier": "INCLUDES", "value": [tid]]
+        }
+        if let gid = groupId {
+            dict["groups"] = ["modifier": "INCLUDES", "value": [gid]]
         }
         return dict
     }
@@ -1583,6 +1647,8 @@ struct SceneLiveChipRowState: Equatable {
         performerFavorite = nil
         oCounterTag = nil
         studioId = nil
+        tagId = nil
+        groupId = nil
     }
 
     mutating func mapLiveFragmentToChips(_ frag: [String: Any]) {
@@ -1626,6 +1692,8 @@ struct SceneLiveChipRowState: Equatable {
             oCounterTag = nil
         }
         studioId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["studios"])
+        tagId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["tags"])
+        groupId = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: frag["groups"])
     }
 
     mutating func syncLiveChipsToMatchSelectedFilter(_ selectedFilter: StashDBViewModel.SavedFilter?, savedFilters: [String: StashDBViewModel.SavedFilter]) {
@@ -1647,6 +1715,12 @@ struct SceneLiveChipRowState: Equatable {
                 if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["studios"]) {
                     studioId = id
                 }
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["tags"]) {
+                    tagId = id
+                }
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: meta.liveFragment["groups"]) {
+                    groupId = id
+                }
             }
         } else if SceneLiveChipFilterSupport.savedFilterSupportsLiveChipEditor(f) {
             if let raw = f.filterDict {
@@ -1663,8 +1737,16 @@ struct SceneLiveChipRowState: Equatable {
                 }
                 return nil
             }()
-            if let flat, let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
-                studioId = id
+            if let flat {
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["studios"]) {
+                    studioId = id
+                }
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["tags"]) {
+                    tagId = id
+                }
+                if let id = SceneLiveChipFilterSupport.studioIncludesFirstId(fromCriterion: flat["groups"]) {
+                    groupId = id
+                }
             }
         }
     }

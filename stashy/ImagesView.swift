@@ -163,7 +163,7 @@ struct ImagesView: View {
             // Fetch filters
             viewModel.fetchSavedFilters()
 
-            if let gallery = gallery, viewModel.galleryImages.isEmpty {
+            if gallery != nil, viewModel.galleryImages.isEmpty {
                 imageListFilters.refetchImages(viewModel: viewModel, initial: true)
             } else if gallery == nil,
                       TabManager.shared.getDefaultFilterId(for: .images) == nil,

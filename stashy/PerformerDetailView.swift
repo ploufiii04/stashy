@@ -39,8 +39,8 @@ struct PerformerDetailView: View {
     init(performer: Performer) {
         _performer = State(initialValue: performer)
         let sc = performer.sceneCount
-        let gal = performer.galleryCount ?? 0
-        let initialTab: DetailTab = sc > 0 ? .scenes : (gal > 0 ? .galleries : .scenes)
+        // Do not open the Scenes stack when we have no scene signal; galleries (or other tabs after load) avoid an empty default.
+        let initialTab: DetailTab = sc > 0 ? .scenes : .galleries
         _selectedDetailTab = State(initialValue: initialTab)
         _linkedStudios = StateObject(wrappedValue: DetailLinkedStudiosFilterModel(scope: .performer(performer.id)))
         _linkedTags = StateObject(wrappedValue: DetailLinkedTagsFilterModel(scope: .performer(performer.id)))
@@ -137,6 +137,10 @@ struct PerformerDetailView: View {
                     groupGrid
                 } else if selectedDetailTab == .images {
                     imageGrid
+                } else if selectedDetailTab == .scenes {
+                    Text("No scenes found")
+                        .foregroundColor(.secondary)
+                        .padding(.top, 40)
                 }
             }
             .padding(16)
@@ -263,9 +267,14 @@ struct PerformerDetailView: View {
             }
     }
 
+    /// Scenes stack only when we know or assume scenes exist; avoids landing on an empty `ScenesView` when counts are zero.
+    private var showsPerformerScenesStack: Bool {
+        selectedDetailTab == .scenes && (effectiveScenes > 0 || viewModel.isLoadingPerformerScenes)
+    }
+
     private var performerDetailCoreChrome: some View {
         Group {
-            if selectedDetailTab == .scenes {
+            if showsPerformerScenesStack {
                 performerScenesStack
             } else {
                 nonScenesScrollContent
@@ -286,6 +295,15 @@ struct PerformerDetailView: View {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .scenes }
             } else if shouldAutoSwitchToPerformerGalleriesForEmptyScenes {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
+            } else if newValue == 0, !viewModel.isLoadingPerformerScenes, selectedDetailTab == .scenes, effectiveScenes == 0 {
+                if let first = availableTabs.first {
+                    withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = first }
+                }
+            }
+        }
+        .onChange(of: viewModel.isLoadingPerformerScenes) { _, loading in
+            if !loading, selectedDetailTab == .scenes, effectiveScenes == 0, let first = availableTabs.first {
+                withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = first }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneDeleted"))) { _ in

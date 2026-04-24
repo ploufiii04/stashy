@@ -5694,24 +5694,31 @@ struct GenerateData: Codable {
         }
     }
 
-    /// Studios suitable for live-filter dropdowns (has scenes / images / galleries); sorted client-side by the relevant count.
+    /// Max rows returned for studio/tag live-filter dropdown queries — top N by the relevant count on the server (groups use a separate larger page size).
+    private static let sceneLiveFilterPickerMaxResults = 50
+
+    /// Studios suitable for live-filter dropdowns (has scenes / images / galleries); top ``sceneLiveFilterPickerMaxResults`` by the relevant count.
     func fetchStudiosForLiveFilterPicker(mode: LiveFilterStudioPickerMode, completion: @escaping ([Studio]) -> Void) {
         let query = GraphQLQueries.queryWithFragments("findStudios")
         let studioFilter: [String: Any]
+        let sortField: String
         switch mode {
         case .scenesHasScenes:
             studioFilter = ["scene_count": ["value": 0, "modifier": "GREATER_THAN"]]
+            sortField = "scenes_count"
         case .imagesHasImages:
             studioFilter = ["image_count": ["value": 0, "modifier": "GREATER_THAN"]]
+            sortField = "images_count"
         case .galleriesHasGalleries:
             studioFilter = ["gallery_count": ["value": 0, "modifier": "GREATER_THAN"]]
+            sortField = "galleries_count"
         }
         let variables: [String: Any] = [
             "filter": [
                 "page": 1,
-                "per_page": 1000,
-                "sort": "name",
-                "direction": "ASC"
+                "per_page": Self.sceneLiveFilterPickerMaxResults,
+                "sort": sortField,
+                "direction": "DESC"
             ],
             "studio_filter": sanitizeFilter(studioFilter)
         ]
@@ -5730,6 +5737,57 @@ struct GenerateData: Codable {
             case .galleriesHasGalleries:
                 list.sort { ($0.galleryCount ?? 0) > ($1.galleryCount ?? 0) }
             }
+            Task { @MainActor in completion(list) }
+        }
+    }
+
+    /// Tags that appear on at least one scene — for scene live-filter pickers; sorted by `scene_count` desc.
+    func fetchTagsForSceneLiveFilterPicker(completion: @escaping ([Tag]) -> Void) {
+        let query = GraphQLQueries.queryWithFragments("findTags")
+        let variables: [String: Any] = [
+            "filter": [
+                "page": 1,
+                "per_page": Self.sceneLiveFilterPickerMaxResults,
+                "sort": "scenes_count",
+                "direction": "DESC"
+            ],
+            "tag_filter": sanitizeFilter([
+                "scene_count": ["value": 0, "modifier": "GREATER_THAN"]
+            ])
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            Task { @MainActor in completion([]) }
+            return
+        }
+        performGraphQLQuery(query: bodyString) { (response: TagsResponse?) in
+            let list = response?.data?.findTags.tags ?? []
+            Task { @MainActor in completion(list) }
+        }
+    }
+
+    /// Groups with at least one scene — for scene live-filter pickers (no 50-cap; large `per_page` like catalog).
+    func fetchGroupsForSceneLiveFilterPicker(completion: @escaping ([StashGroup]) -> Void) {
+        let query = GraphQLQueries.queryWithFragments("findGroups")
+        let variables: [String: Any] = [
+            "filter": [
+                "page": 1,
+                "per_page": 1000,
+                "sort": "scenes_count",
+                "direction": "DESC"
+            ],
+            "group_filter": sanitizeFilter([
+                "scene_count": ["value": 0, "modifier": "GREATER_THAN"]
+            ])
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            Task { @MainActor in completion([]) }
+            return
+        }
+        performGraphQLQuery(query: bodyString) { (response: GroupsResponse?) in
+            var list = response?.data?.findGroups.groups ?? []
+            list.sort { ($0.scene_count ?? 0) > ($1.scene_count ?? 0) }
             Task { @MainActor in completion(list) }
         }
     }
