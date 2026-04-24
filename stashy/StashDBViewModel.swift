@@ -187,6 +187,8 @@ class StashDBViewModel: ObservableObject {
         let mode: FilterMode
         let filter: String?
         let object_filter: StashJSONValue?
+        /// Stash UI / plugin metadata; stashy uses `stashy` key for live-preset round-trip (see ScenesView).
+        let ui_options: StashJSONValue?
         
         var filterDict: [String: Any]? {
             if let obj = object_filter {
@@ -213,6 +215,28 @@ class StashDBViewModel: ObservableObject {
 
     struct SavedFiltersResponse: Codable {
         let data: SavedFiltersData?
+    }
+
+    private struct SaveFilterGraphQLData: Codable {
+        let saveFilter: SavedFilter
+    }
+
+    private struct SaveFilterGraphQLEnvelope: Codable {
+        let data: SaveFilterGraphQLData?
+        let errors: [GraphQLSavedFilterError]?
+    }
+
+    private struct DestroyFilterGraphQLData: Codable {
+        let destroySavedFilter: Bool
+    }
+
+    private struct DestroyFilterGraphQLEnvelope: Codable {
+        let data: DestroyFilterGraphQLData?
+        let errors: [GraphQLSavedFilterError]?
+    }
+
+    private struct GraphQLSavedFilterError: Codable {
+        let message: String
     }
 
     init() {
@@ -913,6 +937,9 @@ class StashDBViewModel: ObservableObject {
     private var currentGroupScenePage = 1
     private let groupDetailPerPage = 20
     private var currentGroupDetailFilter: SavedFilter? = nil
+    private var currentGroupSceneSortOption: SceneSortOption = .dateDesc
+    private var currentGroupSceneSearchQuery: String = ""
+    var currentGroupDetailSceneLiveFilter: [String: Any] = [:]
 
     // Detail View: Performer Galleries
     @Published var performerGalleries: [Gallery] = []
@@ -946,6 +973,9 @@ class StashDBViewModel: ObservableObject {
     private var currentPerformerScenePage = 1
     private var currentPerformerSceneSortOption: SceneSortOption = .dateDesc
     private var currentPerformerDetailFilter: SavedFilter? = nil
+    private var currentPerformerSceneSearchQuery: String = ""
+    /// Live scene criteria merged into performer-detail fetches; pagination reuses this until the next initial load.
+    var currentPerformerDetailSceneLiveFilter: [String: Any] = [:]
     
 
     // Studio scenes
@@ -956,6 +986,8 @@ class StashDBViewModel: ObservableObject {
     private var currentStudioScenePage = 1
     private var currentStudioSceneSortOption: SceneSortOption = .dateDesc
     private var currentStudioDetailFilter: SavedFilter? = nil
+    private var currentStudioSceneSearchQuery: String = ""
+    var currentStudioDetailSceneLiveFilter: [String: Any] = [:]
     
     // Tag Scenes
     @Published var tagScenes: [Scene] = []
@@ -965,6 +997,32 @@ class StashDBViewModel: ObservableObject {
     private var currentTagScenePage = 1
     private var currentTagSceneSortOption: SceneSortOption = .dateDesc
     private var currentTagDetailFilter: SavedFilter? = nil
+    private var currentTagSceneSearchQuery: String = ""
+    var currentTagDetailSceneLiveFilter: [String: Any] = [:]
+
+    /// True when tag-detail scene fetches include criteria beyond the tag scope (saved filter, live filter, or search).
+    var isTagDetailSceneListConstrained: Bool {
+        if currentTagDetailFilter != nil { return true }
+        if !currentTagDetailSceneLiveFilter.isEmpty { return true }
+        if !currentTagSceneSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        return false
+    }
+
+    /// True when performer-detail scene fetches include criteria beyond the performer scope.
+    var isPerformerDetailSceneListConstrained: Bool {
+        if currentPerformerDetailFilter != nil { return true }
+        if !currentPerformerDetailSceneLiveFilter.isEmpty { return true }
+        if !currentPerformerSceneSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        return false
+    }
+
+    /// True when studio-detail scene fetches include criteria beyond the studio scope.
+    var isStudioDetailSceneListConstrained: Bool {
+        if currentStudioDetailFilter != nil { return true }
+        if !currentStudioDetailSceneLiveFilter.isEmpty { return true }
+        if !currentStudioSceneSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        return false
+    }
     
     @Published var tagGalleries: [Gallery] = []
     @Published var totalTagGalleries: Int = 0
@@ -1100,10 +1158,22 @@ class StashDBViewModel: ObservableObject {
         totalScenes = max(0, totalScenes - 1)
 
         // Remove from performer/studio scenes
-        performerScenes.removeAll { $0.id == id }
-        studioScenes.removeAll { $0.id == id }
-        tagScenes.removeAll { $0.id == id }
-        groupScenes.removeAll { $0.id == id }
+        if performerScenes.contains(where: { $0.id == id }) {
+            performerScenes.removeAll { $0.id == id }
+            totalPerformerScenes = max(0, totalPerformerScenes - 1)
+        }
+        if studioScenes.contains(where: { $0.id == id }) {
+            studioScenes.removeAll { $0.id == id }
+            totalStudioScenes = max(0, totalStudioScenes - 1)
+        }
+        if tagScenes.contains(where: { $0.id == id }) {
+            tagScenes.removeAll { $0.id == id }
+            totalTagScenes = max(0, totalTagScenes - 1)
+        }
+        if groupScenes.contains(where: { $0.id == id }) {
+            groupScenes.removeAll { $0.id == id }
+            totalGroupScenes = max(0, totalGroupScenes - 1)
+        }
 
         // Remove from home row caches
         for rowType in homeRowScenes.keys {
@@ -1214,7 +1284,7 @@ class StashDBViewModel: ObservableObject {
         
         let query = """
         {
-          "query": "query GetAllFilterDefinitions { findSavedFilters { id name mode filter object_filter } }"
+          "query": "query GetAllFilterDefinitions { findSavedFilters { id name mode filter object_filter ui_options } }"
         }
         """
         
@@ -1238,6 +1308,131 @@ class StashDBViewModel: ObservableObject {
                     print("❌ Error fetching saved filters: \(error.localizedDescription)")
                     self.errorMessage = "Failed to load filters: \(error.localizedDescription)"
                     completion?(false)
+                }
+            }
+        }
+    }
+
+    /// Merges a base scene saved filter with live chip criteria (same rules as `findScenes`).
+    func mergedSceneObjectFilterForSave(base: SavedFilter?, live: [String: Any]) -> [String: Any] {
+        var merged: [String: Any] = [:]
+        if let base = base, let dict = base.filterDict {
+            merged = dict
+        }
+        for (k, v) in live {
+            merged[k] = v
+        }
+        return sanitizeFilter(merged)
+    }
+
+    /// Creates or updates a **scene** saved filter on the Stash server (`saveFilter`).
+    /// Stores stashy metadata in `ui_options` so the live-filter sheet can restore base filter, chips, and sort.
+    func saveSceneSavedFilter(
+        existingId: String?,
+        name: String,
+        sort: SceneSortOption,
+        baseFilter: SavedFilter?,
+        liveFragment: [String: Any],
+        completion: @escaping (Result<SavedFilter, Error>) -> Void
+    ) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            completion(.failure(NSError(domain: "stashy", code: -2, userInfo: [NSLocalizedDescriptionKey: "Name is empty"])))
+            return
+        }
+        let merged = mergedSceneObjectFilterForSave(base: baseFilter, live: liveFragment)
+        var stashy: [String: Any] = [
+            "liveFragment": liveFragment,
+            "sortRaw": sort.rawValue
+        ]
+        if let bid = baseFilter?.id {
+            stashy["baseSavedFilterId"] = bid
+        }
+        let uiOptions: [String: Any] = ["stashy": stashy]
+        let sortField = sort.sortField == "random" ? "random" : sort.sortField
+        let findFilter: [String: Any] = [
+            "sort": sortField,
+            "direction": sort.direction
+        ]
+        var input: [String: Any] = [
+            "mode": FilterMode.scenes.rawValue,
+            "name": trimmedName,
+            "find_filter": findFilter,
+            "object_filter": merged,
+            "ui_options": uiOptions
+        ]
+        if let existingId = existingId {
+            input["id"] = existingId
+        }
+        let variables: [String: Any] = ["input": input]
+        let mutation = """
+        mutation SaveSceneFilter($input: SaveFilterInput!) {
+          saveFilter(input: $input) {
+            id
+            name
+            mode
+            filter
+            object_filter
+            ui_options
+          }
+        }
+        """
+        GraphQLClient.shared.execute(query: mutation, variables: variables) { [weak self] (result: Result<SaveFilterGraphQLEnvelope, GraphQLNetworkError>) in
+            guard let self = self else { return }
+            Task { @MainActor in
+                switch result {
+                case .success(let env):
+                    if let err = env.errors?.first?.message {
+                        self.errorMessage = err
+                        completion(.failure(NSError(domain: "graphql", code: -1, userInfo: [NSLocalizedDescriptionKey: err])))
+                        return
+                    }
+                    guard let saved = env.data?.saveFilter else {
+                        let msg = "Save filter response missing data"
+                        self.errorMessage = msg
+                        completion(.failure(NSError(domain: "graphql", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])))
+                        return
+                    }
+                    self.savedFilters[saved.id] = saved
+                    self.fetchSavedFilters()
+                    completion(.success(saved))
+                case .failure(let error):
+                    self.handleNetworkError(error)
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func destroySavedSceneFilter(id: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        let mutation = """
+        mutation DestroySavedSceneFilter($input: DestroyFilterInput!) {
+          destroySavedFilter(input: $input)
+        }
+        """
+        let variables: [String: Any] = ["input": ["id": id]]
+        GraphQLClient.shared.execute(query: mutation, variables: variables) { [weak self] (result: Result<DestroyFilterGraphQLEnvelope, GraphQLNetworkError>) in
+            guard let self = self else { return }
+            Task { @MainActor in
+                switch result {
+                case .success(let env):
+                    if let err = env.errors?.first?.message {
+                        self.errorMessage = err
+                        completion(.failure(NSError(domain: "graphql", code: -1, userInfo: [NSLocalizedDescriptionKey: err])))
+                        return
+                    }
+                    guard env.data?.destroySavedFilter == true else {
+                        let msg = "Could not delete saved filter"
+                        self.errorMessage = msg
+                        completion(.failure(NSError(domain: "graphql", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])))
+                        return
+                    }
+                    self.savedFilters.removeValue(forKey: id)
+                    self.fetchSavedFilters()
+                    completion(.success(()))
+                case .failure(let error):
+                    self.handleNetworkError(error)
+                    completion(.failure(error))
                 }
             }
         }
@@ -2427,7 +2622,8 @@ class StashDBViewModel: ObservableObject {
             name: filter?.name ?? "Merged Filter",
             mode: mode,
             filter: nil,
-            object_filter: jsonValue
+            object_filter: jsonValue,
+            ui_options: nil
         )
     }
     
@@ -2580,13 +2776,23 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchPerformerScenes(performerId: String, sortBy: SceneSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchPerformerScenes(
+        performerId: String,
+        sortBy: SceneSortOption = .dateDesc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil,
+        searchQuery: String? = nil
+    ) {
         if isInitialLoad {
             currentPerformerScenePage = 1
             currentPerformerSceneSortOption = sortBy
             currentPerformerDetailFilter = filter
+            currentPerformerDetailSceneLiveFilter = liveFilter ?? [:]
+            if let sq = searchQuery {
+                currentPerformerSceneSearchQuery = sq
+            }
             // performerScenes = [] <-- Don't clear to keep navigation stable
-            totalPerformerScenes = 0
             isLoadingPerformerScenes = true
         } else {
             isLoadingPerformerScenes = true
@@ -2597,12 +2803,15 @@ class StashDBViewModel: ObservableObject {
         
         let query = GraphQLQueries.queryWithFragments("findScenes")
         
-        let filterDict: [String: Any] = [
+        var filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
             "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
+        if !currentPerformerSceneSearchQuery.isEmpty {
+            filterDict["q"] = currentPerformerSceneSearchQuery
+        }
         
         var sceneFilter: [String: Any] = [:]
         
@@ -2614,10 +2823,18 @@ class StashDBViewModel: ObservableObject {
             }
         }
         
+        if !currentPerformerDetailSceneLiveFilter.isEmpty {
+            for (key, value) in currentPerformerDetailSceneLiveFilter {
+                sceneFilter[key] = value
+            }
+        }
+        
+        // Hard bind: always last so saved/live criteria cannot drop the performer scope.
         sceneFilter["performers"] = [
             "modifier": "INCLUDES",
             "value": [performerId]
         ]
+        sceneFilter = sanitizeFilter(sceneFilter)
         
         let variables: [String: Any] = [
             "filter": filterDict,
@@ -2959,13 +3176,22 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchStudioScenes(studioId: String, sortBy: SceneSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchStudioScenes(
+        studioId: String,
+        sortBy: SceneSortOption = .dateDesc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil,
+        searchQuery: String? = nil
+    ) {
         if isInitialLoad {
             currentStudioScenePage = 1
             currentStudioSceneSortOption = sortBy
             currentStudioDetailFilter = filter
-            // studioScenes = []
-            totalStudioScenes = 0
+            currentStudioDetailSceneLiveFilter = liveFilter ?? [:]
+            if let sq = searchQuery {
+                currentStudioSceneSearchQuery = sq
+            }
             isLoadingStudioScenes = true
         } else {
             isLoadingStudioScenes = true
@@ -2976,12 +3202,15 @@ class StashDBViewModel: ObservableObject {
         
         let query = GraphQLQueries.queryWithFragments("findScenes")
         
-        let filterDict: [String: Any] = [
+        var filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
             "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
+        if !currentStudioSceneSearchQuery.isEmpty {
+            filterDict["q"] = currentStudioSceneSearchQuery
+        }
         
         var sceneFilter: [String: Any] = [:]
         
@@ -2993,10 +3222,17 @@ class StashDBViewModel: ObservableObject {
             }
         }
         
+        if !currentStudioDetailSceneLiveFilter.isEmpty {
+            for (key, value) in currentStudioDetailSceneLiveFilter {
+                sceneFilter[key] = value
+            }
+        }
+        
         sceneFilter["studios"] = [
             "modifier": "INCLUDES",
             "value": [studioId]
         ]
+        sceneFilter = sanitizeFilter(sceneFilter)
         
         let variables: [String: Any] = [
             "filter": filterDict,
@@ -3507,50 +3743,68 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchGroupScenes(groupId: String, sortBy: SceneSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchGroupScenes(
+        groupId: String,
+        sortBy: SceneSortOption = .dateDesc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil,
+        searchQuery: String? = nil
+    ) {
         if isInitialLoad {
             currentGroupScenePage = 1
+            currentGroupSceneSortOption = sortBy
+            currentGroupDetailFilter = filter
+            currentGroupDetailSceneLiveFilter = liveFilter ?? [:]
+            if let sq = searchQuery {
+                currentGroupSceneSearchQuery = sq
+            }
             groupScenes = []
-        }
-        currentGroupDetailFilter = filter
-        hasMoreGroupScenes = true
-        
-        loadGroupScenesPage(groupId: groupId, page: currentGroupScenePage, sortBy: sortBy, isInitialLoad: isInitialLoad, filter: filter)
-    }
-    
-    func loadMoreGroupScenes(groupId: String) {
-        guard !isLoadingGroupScenes && hasMoreGroupScenes else { return }
-        currentGroupScenePage += 1
-        loadGroupScenesPage(groupId: groupId, page: currentGroupScenePage, sortBy: .dateDesc, isInitialLoad: false, filter: currentGroupDetailFilter)
-    }
-
-    private func loadGroupScenesPage(groupId: String, page: Int, sortBy: SceneSortOption, isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
-        if isInitialLoad {
+            hasMoreGroupScenes = true
+            isLoadingGroupScenes = true
+        } else {
             isLoadingGroupScenes = true
         }
         
-        var sceneFilter: [String: Any] = [:]
-        if let savedFilter = filter, let dict = savedFilter.filterDict {
-            sceneFilter = sanitizeFilter(dict)
+        let page = isInitialLoad ? 1 : currentGroupScenePage + 1
+        errorMessage = nil
+        
+        let query = GraphQLQueries.queryWithFragments("findScenes")
+        let sortToUse = currentGroupSceneSortOption
+        
+        var filterDict: [String: Any] = [
+            "page": page,
+            "per_page": groupDetailPerPage,
+            "sort": sortToUse.sortField == "random" ? randomSort(.scenes) : sortToUse.sortField,
+            "direction": sortToUse.direction
+        ]
+        if !currentGroupSceneSearchQuery.isEmpty {
+            filterDict["q"] = currentGroupSceneSearchQuery
         }
         
-        // Add group restriction
+        var sceneFilter: [String: Any] = [:]
+        if let savedFilter = currentGroupDetailFilter {
+            if let dict = savedFilter.filterDict {
+                sceneFilter = sanitizeFilter(dict)
+            } else if let obj = savedFilter.object_filter, let objDict = obj.value as? [String: Any] {
+                sceneFilter = sanitizeFilter(objDict)
+            }
+        }
+        if !currentGroupDetailSceneLiveFilter.isEmpty {
+            for (key, value) in currentGroupDetailSceneLiveFilter {
+                sceneFilter[key] = value
+            }
+        }
         sceneFilter["groups"] = [
             "value": [groupId],
             "modifier": "INCLUDES"
         ]
+        sceneFilter = sanitizeFilter(sceneFilter)
         
         let variables: [String: Any] = [
-            "filter": [
-                "page": page,
-                "per_page": groupDetailPerPage,
-                "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
-                "direction": sortBy.direction
-            ],
+            "filter": filterDict,
             "scene_filter": sceneFilter
         ]
-        
-        let query = GraphQLQueries.queryWithFragments("findScenes")
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
@@ -3563,17 +3817,28 @@ class StashDBViewModel: ObservableObject {
                     if isInitialLoad {
                         self.groupScenes = result.scenes
                         self.totalGroupScenes = result.count
-                        self.isLoadingGroupScenes = false
+                        self.errorMessage = nil
                     } else {
                         self.groupScenes.append(contentsOf: result.scenes)
                     }
                     self.hasMoreGroupScenes = result.scenes.count == self.groupDetailPerPage
+                    self.currentGroupScenePage = page
+                    self.isLoadingGroupScenes = false
                 }
             } else {
                 DispatchQueue.main.async {
                     self.isLoadingGroupScenes = false
+                    if isInitialLoad {
+                        self.errorMessage = "Szenen der Gruppe konnten nicht geladen werden"
+                    }
                 }
             }
+        }
+    }
+    
+    func loadMoreGroupScenes(groupId: String) {
+        if !isLoadingGroupScenes && hasMoreGroupScenes {
+            fetchGroupScenes(groupId: groupId, sortBy: currentGroupSceneSortOption, isInitialLoad: false)
         }
     }
     
@@ -3659,13 +3924,22 @@ class StashDBViewModel: ObservableObject {
         }
     }
     
-    func fetchTagScenes(tagId: String, sortBy: SceneSortOption = .dateDesc, isInitialLoad: Bool = true, filter: SavedFilter? = nil) {
+    func fetchTagScenes(
+        tagId: String,
+        sortBy: SceneSortOption = .dateDesc,
+        isInitialLoad: Bool = true,
+        filter: SavedFilter? = nil,
+        liveFilter: [String: Any]? = nil,
+        searchQuery: String? = nil
+    ) {
         if isInitialLoad {
             currentTagScenePage = 1
             currentTagSceneSortOption = sortBy
             currentTagDetailFilter = filter
-            // tagScenes = []
-            totalTagScenes = 0
+            currentTagDetailSceneLiveFilter = liveFilter ?? [:]
+            if let sq = searchQuery {
+                currentTagSceneSearchQuery = sq
+            }
             isLoadingTagScenes = true
         } else {
             isLoadingTagScenes = true
@@ -3676,12 +3950,15 @@ class StashDBViewModel: ObservableObject {
         
         let query = GraphQLQueries.queryWithFragments("findScenes")
         
-        let filterDict: [String: Any] = [
+        var filterDict: [String: Any] = [
             "page": page,
             "per_page": scenesPerPage,
             "sort": sortBy.sortField == "random" ? randomSort(.scenes) : sortBy.sortField,
             "direction": sortBy.direction
         ]
+        if !currentTagSceneSearchQuery.isEmpty {
+            filterDict["q"] = currentTagSceneSearchQuery
+        }
         
         var sceneFilter: [String: Any] = [:]
         
@@ -3693,10 +3970,17 @@ class StashDBViewModel: ObservableObject {
             }
         }
         
+        if !currentTagDetailSceneLiveFilter.isEmpty {
+            for (key, value) in currentTagDetailSceneLiveFilter {
+                sceneFilter[key] = value
+            }
+        }
+        
         sceneFilter["tags"] = [
             "modifier": "INCLUDES",
             "value": [tagId]
         ]
+        sceneFilter = sanitizeFilter(sceneFilter)
         
         let variables: [String: Any] = [
             "filter": filterDict,

@@ -951,6 +951,37 @@ class TabManager: ObservableObject {
     func getPersistentSortOption(for tab: AppTab) -> String? {
         return tabs.first(where: { $0.id == tab })?.defaultSortOption
     }
+
+    /// Scenes: value shown in Settings › Default Sorting, then current session sort if persistent is missing/invalid.
+    /// Used when a saved filter / preset has no usable embedded `sortRaw`.
+    func resolvedScenesSortFallbackFromTabConfig() -> StashDBViewModel.SceneSortOption {
+        if let raw = getPersistentSortOption(for: .scenes),
+           !raw.isEmpty,
+           let o = StashDBViewModel.SceneSortOption(rawValue: raw) {
+            return o
+        }
+        if let raw = getSortOption(for: .scenes),
+           !raw.isEmpty,
+           let o = StashDBViewModel.SceneSortOption(rawValue: raw) {
+            return o
+        }
+        return .dateDesc
+    }
+
+    /// Detail views that list scenes (performer, studio, …): persistent detail sort, then session detail sort, then global scenes default.
+    func resolvedDetailSceneSortFallback(for context: String) -> StashDBViewModel.SceneSortOption {
+        if let raw = getPersistentDetailSortOption(for: context),
+           !raw.isEmpty,
+           let o = StashDBViewModel.SceneSortOption(rawValue: raw) {
+            return o
+        }
+        if let raw = getDetailSortOption(for: context),
+           !raw.isEmpty,
+           let o = StashDBViewModel.SceneSortOption(rawValue: raw) {
+            return o
+        }
+        return resolvedScenesSortFallbackFromTabConfig()
+    }
     
     // Helper to set sort option for a tab (session only)
     func setSortOption(for tab: AppTab, option: String) {

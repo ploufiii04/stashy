@@ -15,14 +15,12 @@ struct PerformerDetailView: View {
     @ObservedObject var tabManager = TabManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @EnvironmentObject var coordinator: NavigationCoordinator
-    @State private var refreshTrigger = UUID()
     @State private var isHeaderExpanded = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var fullPerformer: Performer?
-    @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getDetailSortOption(for: "performer_detail") ?? "") ?? .dateDesc
     @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
     @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
-    @State private var isChangingSort = false
+    @State private var performerLiveFilterSheetPresented = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
     
@@ -38,17 +36,10 @@ struct PerformerDetailView: View {
 
     init(performer: Performer) {
         _performer = State(initialValue: performer)
-    }
-
-    // Safe sort change function
-    private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
-        if newOption == .random && selectedSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedSortOption = newOption
-        TabManager.shared.setDetailSortOption(for: "performer_detail", option: newOption.rawValue)
-        refreshTrigger = UUID()
-        viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: newOption, isInitialLoad: true)
+        let sc = performer.sceneCount
+        let gal = performer.galleryCount ?? 0
+        let initialTab: DetailTab = sc > 0 ? .scenes : (gal > 0 ? .galleries : .scenes)
+        _selectedDetailTab = State(initialValue: initialTab)
     }
 
     private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
@@ -65,21 +56,6 @@ struct PerformerDetailView: View {
         }
         selectedImageSortOption = newOption
         viewModel.fetchDetailImages(performerId: performer.id, sortBy: newOption, isInitialLoad: true)
-    }
-    
-    @Environment(\.verticalSizeClass) var verticalSizeClass
-    
-    private var columns: [GridItem] {
-        if verticalSizeClass == .compact {
-             return [
-                 GridItem(.flexible(), spacing: 12),
-                 GridItem(.flexible(), spacing: 12)
-             ]
-        } else if horizontalSizeClass == .regular {
-            return Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
-        } else {
-            return [GridItem(.flexible(), spacing: 12)]
-        }
     }
     
     private var galleryColumns: [GridItem] {
@@ -120,23 +96,39 @@ struct PerformerDetailView: View {
         availableTabs.count > 1
     }
 
-    var body: some View {
+    private var shouldAutoSwitchToPerformerGalleriesForEmptyScenes: Bool {
+        viewModel.totalPerformerScenes == 0
+            && !viewModel.isLoadingPerformerScenes
+            && viewModel.totalPerformerGalleries > 0
+            && effectiveScenes == 0
+            && !viewModel.isPerformerDetailSceneListConstrained
+    }
+
+    @ViewBuilder
+    private var performerScenesStack: some View {
+        VStack(spacing: 12) {
+            headerView(displayPerformer: displayPerformer)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            ScenesView(
+                hideTitle: true,
+                scope: .performer(performerId: performer.id),
+                sharedViewModel: viewModel,
+                externalLiveFilterSheetBinding: $performerLiveFilterSheetPresented,
+                showsFloatingFilterButton: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var nonScenesScrollContent: some View {
         ScrollView {
             VStack(spacing: 12) {
                 headerView(displayPerformer: displayPerformer)
 
-                if selectedDetailTab == .scenes {
-                    if !viewModel.performerScenes.isEmpty {
-                        sceneGrid
-                    } else if viewModel.isLoadingPerformerScenes {
-                        VStack {
-                            ProgressView()
-                            Text("Loading scenes...").font(.caption).foregroundColor(.secondary)
-                        }.padding(.top, 40)
-                    } else {
-                        Text("No scenes found").foregroundColor(.secondary).padding(.top, 40)
-                    }
-                } else if selectedDetailTab == .galleries {
+                if selectedDetailTab == .galleries {
                     if !viewModel.performerGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingPerformerGalleries {
@@ -159,42 +151,36 @@ struct PerformerDetailView: View {
             }
             .padding(16)
         }
+    }
+
+    var body: some View {
+        Group {
+            if selectedDetailTab == .scenes {
+                performerScenesStack
+            } else {
+                nonScenesScrollContent
+            }
+        }
         .applyAppBackground()
         .onAppear {
             loadData()
             isFavorite = performer.favorite ?? false
         }
         .onChange(of: viewModel.totalPerformerGalleries) { oldValue, newValue in
-            // Switch to galleries only if no scenes exist and galleries are found
-            if !viewModel.isLoadingPerformerScenes && viewModel.totalPerformerScenes == 0 && newValue > 0 {
+            if newValue > 0 && shouldAutoSwitchToPerformerGalleriesForEmptyScenes {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
         .onChange(of: viewModel.totalPerformerScenes) { oldValue, newValue in
             if newValue > 0 {
-                // If scenes are found, always favor scenes tab (as requested)
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .scenes }
-            } else if newValue == 0 && viewModel.totalPerformerGalleries > 0 {
-                // If scenes explicitly become 0 (or are 0 after load), switch to galleries
+            } else if shouldAutoSwitchToPerformerGalleriesForEmptyScenes {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneDeleted"))) { _ in
-            print("🔄 SceneDeleted - Re-loading performer data")
-            viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: selectedSortOption, isInitialLoad: true)
+            print("🔄 SceneDeleted - Refreshing performer metadata")
             loadPerformerMetadata()
-        }
-        // Keep list state in sync with SceneDetailView updates (same behavior as ScenesView).
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SceneResumeTimeUpdated"))) { notification in
-            if let sceneId = notification.userInfo?["sceneId"] as? String,
-               let resumeTime = notification.userInfo?["resumeTime"] as? Double {
-                viewModel.updateSceneResumeTime(id: sceneId, newResumeTime: resumeTime)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ScenePlayAdded"))) { notification in
-            if let sceneId = notification.userInfo?["sceneId"] as? String {
-                viewModel.incrementScenePlayCount(id: sceneId, by: 1)
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
             if let targetId = notification.userInfo?["performerId"] as? String,
@@ -273,8 +259,16 @@ struct PerformerDetailView: View {
                 .frame(maxWidth: .infinity)
 
                 if selectedDetailTab == .scenes {
-                    sceneSortMenu
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        HapticManager.light()
+                        performerLiveFilterSheetPresented = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
                 } else if selectedDetailTab == .galleries {
                     gallerySortMenu
                         .frame(maxWidth: .infinity)
@@ -289,9 +283,6 @@ struct PerformerDetailView: View {
     // MARK: - Helper Views & Methods
     
     private func loadData() {
-        if viewModel.performerScenes.isEmpty && !viewModel.isLoadingPerformerScenes {
-            viewModel.fetchPerformerScenes(performerId: performer.id, sortBy: selectedSortOption, isInitialLoad: true)
-        }
         if viewModel.performerGalleries.isEmpty && !viewModel.isLoadingPerformerGalleries {
             viewModel.fetchPerformerGalleries(performerId: performer.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
         }
@@ -321,28 +312,6 @@ struct PerformerDetailView: View {
                  self.isFavorite = p.favorite ?? false
              }
         }
-    }
-    
-    private var sceneGrid: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(viewModel.performerScenes) { scene in
-                NavigationLink(destination: SceneDetailView(scene: scene)) {
-                    SceneCardView(scene: scene)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            
-            if viewModel.isLoadingPerformerScenes {
-                 VStack(spacing: 8) {
-                    ProgressView()
-                    Text("Loading more scenes...").font(.caption).foregroundColor(.secondary)
-                }.padding(.vertical, 20)
-            } else if viewModel.hasMorePerformerScenes {
-                Color.clear.frame(height: 1).onAppear { viewModel.loadMorePerformerScenes(performerId: performer.id) }
-            }
-        }
-        .id(refreshTrigger)
     }
     
     private var galleryGrid: some View {
@@ -586,129 +555,6 @@ struct PerformerDetailView: View {
         }
     }
     
-    private var sceneSortMenu: some View {
-        Menu {
-            // Random
-            Button(action: { changeSortOption(to: .random) }) {
-                HStack {
-                    Text("Random")
-                    if selectedSortOption == .random { Image(systemName: "checkmark") }
-                }
-            }
-            
-            Divider()
-            
-            // Date
-            Menu {
-                Button(action: { changeSortOption(to: .dateDesc) }) {
-                    HStack {
-                        Text("Newest First")
-                        if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .dateAsc) }) {
-                    HStack {
-                        Text("Oldest First")
-                        if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Date")
-                    if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Title
-            Menu {
-                Button(action: { changeSortOption(to: .titleAsc) }) {
-                    HStack {
-                        Text("A → Z")
-                        if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .titleDesc) }) {
-                    HStack {
-                        Text("Z → A")
-                        if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Title")
-                    if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Duration
-            Menu {
-                Button(action: { changeSortOption(to: .durationDesc) }) {
-                    HStack {
-                        Text("Longest First")
-                        if selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .durationAsc) }) {
-                    HStack {
-                        Text("Shortest First")
-                        if selectedSortOption == .durationAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Duration")
-                    if selectedSortOption == .durationAsc || selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Rating
-            Menu {
-                Button(action: { changeSortOption(to: .ratingDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .ratingAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Rating")
-                    if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Counter
-            Menu {
-                Button(action: { changeSortOption(to: .oCounterDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .oCounterAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedSortOption == .oCounterAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Counter")
-                    if selectedSortOption == .oCounterAsc || selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
-        }
-    }
-
     private func headerView(displayPerformer: Performer) -> some View {
         let collapsedHeight: CGFloat = 115
         let imageWidth: CGFloat = 72

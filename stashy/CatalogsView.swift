@@ -568,9 +568,8 @@ struct GroupDetailView: View {
     @ObservedObject var configManager = ServerConfigManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @EnvironmentObject var coordinator: NavigationCoordinator
-    @Environment(\.verticalSizeClass) var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getPersistentDetailSortOption(for: DetailViewContext.group.rawValue) ?? "") ?? .dateDesc
+    @State private var groupLiveFilterSheetPresented = false
     @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
     @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     
@@ -582,29 +581,27 @@ struct GroupDetailView: View {
         case tags = "Tags"
         case images = "Images"
     }
-    @State private var selectedDetailTab: DetailTab = .scenes
+    @State private var selectedDetailTab: DetailTab
 
-    private var columns: [GridItem] {
-        if verticalSizeClass == .compact {
-             return [
-                 GridItem(.flexible(), spacing: 12),
-                 GridItem(.flexible(), spacing: 12)
-             ]
-        } else if horizontalSizeClass == .regular {
-            return Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
-        } else {
-            return [GridItem(.flexible(), spacing: 12)]
-        }
+    init(selectedGroup: StashGroup) {
+        self.selectedGroup = selectedGroup
+        let sc = selectedGroup.scene_count ?? 0
+        let gal = selectedGroup.gallery_count ?? 0
+        _selectedDetailTab = State(initialValue: sc > 0 ? .scenes : (gal > 0 ? .galleries : .scenes))
     }
-    
+
+    private var effectiveScenes: Int {
+        max(viewModel.totalGroupScenes, selectedGroup.scene_count ?? 0)
+    }
+
     private var galleryColumns: [GridItem] {
         if horizontalSizeClass == .regular {
              return Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
         } else {
-             return [
-                 GridItem(.flexible(), spacing: 12),
-                 GridItem(.flexible(), spacing: 12)
-             ]
+            return [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ]
         }
     }
 
@@ -614,7 +611,7 @@ struct GroupDetailView: View {
 
     private var availableTabs: [DetailTab] {
         var tabs: [DetailTab] = []
-        if (selectedGroup.scene_count ?? 0) > 0 { tabs.append(.scenes) }
+        if effectiveScenes > 0 { tabs.append(.scenes) }
         if effectiveGalleries > 0 { tabs.append(.galleries) }
         if viewModel.totalDetailPerformers > 0 { tabs.append(.performers) }
         if viewModel.totalDetailStudios > 0 { tabs.append(.studios) }
@@ -627,24 +624,31 @@ struct GroupDetailView: View {
         availableTabs.count > 1
     }
 
-    var body: some View {
+    @ViewBuilder
+    private var groupScenesStack: some View {
+        VStack(spacing: 12) {
+            headerView
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            ScenesView(
+                hideTitle: true,
+                scope: .group(groupId: selectedGroup.id),
+                sharedViewModel: viewModel,
+                externalLiveFilterSheetBinding: $groupLiveFilterSheetPresented,
+                showsFloatingFilterButton: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var nonScenesGroupScroll: some View {
         ScrollView {
             VStack(spacing: 12) {
-                // Header Section
                 headerView
-                
-                if selectedDetailTab == .scenes {
-                    if !viewModel.groupScenes.isEmpty {
-                        sceneGrid
-                    } else if viewModel.isLoadingGroupScenes {
-                        VStack {
-                            ProgressView()
-                            Text("Loading scenes...").font(.caption).foregroundColor(.secondary)
-                        }.padding(.top, 40)
-                    } else {
-                        Text("No scenes found").foregroundColor(.secondary).padding(.top, 40)
-                    }
-                } else if selectedDetailTab == .galleries {
+
+                if selectedDetailTab == .galleries {
                     if !viewModel.groupGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingGroupGalleries {
@@ -664,6 +668,17 @@ struct GroupDetailView: View {
                 } else if selectedDetailTab == .images {
                     imageGrid
                 }
+            }
+        }
+        .background(Color.appBackground)
+    }
+
+    var body: some View {
+        Group {
+            if selectedDetailTab == .scenes {
+                groupScenesStack
+            } else {
+                nonScenesGroupScroll
             }
         }
         .background(Color.appBackground)
@@ -712,8 +727,16 @@ struct GroupDetailView: View {
         .floatingActionBar {
             HStack(spacing: 0) {
                 if selectedDetailTab == .scenes {
-                    sceneSortMenu
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        HapticManager.light()
+                        groupLiveFilterSheetPresented = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
                 } else if selectedDetailTab == .galleries {
                     gallerySortMenu
                         .frame(maxWidth: .infinity)
@@ -724,9 +747,6 @@ struct GroupDetailView: View {
             }
         }
         .onAppear {
-            if viewModel.groupScenes.isEmpty {
-                viewModel.fetchGroupScenes(groupId: selectedGroup.id, sortBy: selectedSortOption, isInitialLoad: true)
-            }
             if viewModel.groupGalleries.isEmpty {
                 viewModel.fetchGroupGalleries(groupId: selectedGroup.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
             }
@@ -805,96 +825,6 @@ struct GroupDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 32)
-    }
-
-    private var sceneSortMenu: some View {
-        Menu {
-            // Random
-            Button(action: { changeSortOption(to: .random) }) {
-                HStack {
-                    Text("Random")
-                    if selectedSortOption == .random { Image(systemName: "checkmark") }
-                }
-            }
-            
-            Divider()
-            
-            // Date
-            Menu {
-                Button(action: { changeSortOption(to: .dateDesc) }) {
-                    HStack {
-                        Text("Newest First")
-                        if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .dateAsc) }) {
-                    HStack {
-                        Text("Oldest First")
-                        if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Date")
-                    if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Title
-            Menu {
-                Button(action: { changeSortOption(to: .titleAsc) }) {
-                    HStack {
-                        Text("A → Z")
-                        if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .titleDesc) }) {
-                    HStack {
-                        Text("Z → A")
-                        if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Title")
-                    if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Rating
-            Menu {
-                Button(action: { changeSortOption(to: .ratingDesc) }) {
-                    HStack {
-                        Text("Highest Rated")
-                        if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .ratingAsc) }) {
-                    HStack {
-                        Text("Lowest Rated")
-                        if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Rating")
-                    if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
-        }
-    }
-
-    private func changeSortOption(to option: StashDBViewModel.SceneSortOption) {
-        if option == .random && selectedSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedSortOption = option
-        TabManager.shared.setPersistentDetailSortOption(for: DetailViewContext.group.rawValue, option: option.rawValue)
-        viewModel.fetchGroupScenes(groupId: selectedGroup.id, sortBy: option, isInitialLoad: true)
     }
 
     private func changeGallerySortOption(to option: StashDBViewModel.GallerySortOption) {
@@ -1073,31 +1003,6 @@ struct GroupDetailView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appearanceManager.tintColor)
         }
-    }
-
-    private var sceneGrid: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(viewModel.groupScenes) { scene in
-                NavigationLink(destination: SceneDetailView(scene: scene)) {
-                    SceneCardView(scene: scene)
-                }
-                .buttonStyle(.plain)
-            }
-            
-            if viewModel.isLoadingGroupScenes {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-            } else if viewModel.hasMoreGroupScenes {
-                Color.clear
-                    .frame(height: 1)
-                    .onAppear {
-                        viewModel.loadMoreGroupScenes(groupId: selectedGroup.id)
-                    }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 32)
     }
 
     private var galleryGrid: some View {

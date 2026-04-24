@@ -510,10 +510,9 @@ struct TagDetailView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.verticalSizeClass) var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getDetailSortOption(for: "tag_detail") ?? "") ?? .dateDesc
+    @State private var tagLiveFilterSheetPresented = false
     @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
     @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
-    @State private var isChangingSort = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
     @State private var isHeaderExpanded = false
@@ -525,23 +524,14 @@ struct TagDetailView: View {
         case groups = "Groups"
         case images = "Images"
     }
-    @State private var selectedDetailTab: DetailTab = .scenes
+    @State private var selectedDetailTab: DetailTab
 
-    // Safe sort change function
-    private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
-        if newOption == .random && selectedSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        guard !isChangingSort else { return }
-        isChangingSort = true
-        selectedSortOption = newOption
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            TabManager.shared.setDetailSortOption(for: "tag_detail", option: newOption.rawValue)
-            self.viewModel.fetchTagScenes(tagId: self.selectedTag.id, sortBy: newOption, isInitialLoad: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.isChangingSort = false
-            }
-        }
+    init(selectedTag: Tag) {
+        self.selectedTag = selectedTag
+        let sc = selectedTag.sceneCount ?? 0
+        let gal = selectedTag.galleryCount ?? 0
+        let initialTab: DetailTab = sc > 0 ? .scenes : (gal > 0 ? .galleries : .scenes)
+        _selectedDetailTab = State(initialValue: initialTab)
     }
 
     private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
@@ -610,23 +600,40 @@ struct TagDetailView: View {
         availableTabs.count > 1
     }
 
-    var body: some View {
+    /// Auto-switch to galleries only for a genuinely empty scene list, not for an empty filtered result.
+    private var shouldAutoSwitchToTagGalleriesForEmptyScenes: Bool {
+        viewModel.totalTagScenes == 0
+            && !viewModel.isLoadingTagScenes
+            && viewModel.totalTagGalleries > 0
+            && effectiveScenes == 0
+            && !viewModel.isTagDetailSceneListConstrained
+    }
+
+    @ViewBuilder
+    private var tagScenesStack: some View {
+        VStack(spacing: 12) {
+            tagHeaderView
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            ScenesView(
+                hideTitle: true,
+                scope: .tag(tagId: selectedTag.id),
+                sharedViewModel: viewModel,
+                externalLiveFilterSheetBinding: $tagLiveFilterSheetPresented,
+                showsFloatingFilterButton: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var nonScenesTagScroll: some View {
         ScrollView {
             VStack(spacing: 12) {
                 tagHeaderView
-                
-                if selectedDetailTab == .scenes {
-                    if !viewModel.tagScenes.isEmpty {
-                        sceneGrid
-                    } else if viewModel.isLoadingTagScenes {
-                        VStack {
-                            ProgressView()
-                            Text("Loading scenes...").font(.caption).foregroundColor(.secondary)
-                        }.padding(.top, 40)
-                    } else {
-                        Text("No scenes found").foregroundColor(.secondary).padding(.top, 40)
-                    }
-                } else if selectedDetailTab == .galleries {
+
+                if selectedDetailTab == .galleries {
                     if !viewModel.tagGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingTagGalleries {
@@ -647,20 +654,30 @@ struct TagDetailView: View {
             }
             .padding(16)
         }
+    }
+
+    var body: some View {
+        Group {
+            if selectedDetailTab == .scenes {
+                tagScenesStack
+            } else {
+                nonScenesTagScroll
+            }
+        }
         .applyAppBackground()
         .onAppear {
             loadDetailData()
             isFavorite = selectedTag.favorite ?? false
         }
         .onChange(of: viewModel.totalTagGalleries) { oldValue, newValue in
-            if !viewModel.isLoadingTagScenes && viewModel.totalTagScenes == 0 && newValue > 0 {
+            if newValue > 0 && shouldAutoSwitchToTagGalleriesForEmptyScenes {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
         .onChange(of: viewModel.totalTagScenes) { oldValue, newValue in
             if newValue > 0 {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .scenes }
-            } else if newValue == 0 && viewModel.totalTagGalleries > 0 {
+            } else if shouldAutoSwitchToTagGalleriesForEmptyScenes {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
@@ -733,8 +750,16 @@ struct TagDetailView: View {
                 .frame(maxWidth: .infinity)
 
                 if selectedDetailTab == .scenes {
-                    sceneSortMenu
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        HapticManager.light()
+                        tagLiveFilterSheetPresented = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
                 } else if selectedDetailTab == .galleries {
                     gallerySortMenu
                         .frame(maxWidth: .infinity)
@@ -749,9 +774,6 @@ struct TagDetailView: View {
     // MARK: - Subviews & Logic
     
     private func loadDetailData() {
-        if viewModel.tagScenes.isEmpty && !viewModel.isLoadingTagScenes {
-            viewModel.fetchTagScenes(tagId: selectedTag.id, sortBy: selectedSortOption, isInitialLoad: true)
-        }
         if viewModel.tagGalleries.isEmpty && !viewModel.isLoadingTagGalleries {
             viewModel.fetchTagGalleries(tagId: selectedTag.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
         }
@@ -907,30 +929,6 @@ struct TagDetailView: View {
         }
         
         return list
-    }
-    
-    private var sceneGrid: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(viewModel.tagScenes) { scene in
-                NavigationLink(destination: SceneDetailView(scene: scene)) {
-                    SceneCardView(scene: scene)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            
-            if viewModel.isLoadingTagScenes {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-            } else if viewModel.hasMoreTagScenes {
-                Color.clear
-                    .frame(height: 1)
-                    .onAppear {
-                        viewModel.loadMoreTagScenes(tagId: selectedTag.id)
-                    }
-            }
-        }
     }
     
     private var galleryGrid: some View {
@@ -1164,129 +1162,6 @@ struct TagDetailView: View {
         }
     }
     
-    private var sceneSortMenu: some View {
-        Menu {
-            // Random
-            Button(action: { changeSortOption(to: .random) }) {
-                HStack {
-                    Text("Random")
-                    if selectedSortOption == .random { Image(systemName: "checkmark") }
-                }
-            }
-            
-            Divider()
-            
-            // Date
-            Menu {
-                // ... (existing menu items)
-                Button(action: { changeSortOption(to: .dateDesc) }) {
-                    HStack {
-                        Text("Newest First")
-                        if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .dateAsc) }) {
-                    HStack {
-                        Text("Oldest First")
-                        if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Date")
-                    if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Title
-            Menu {
-                Button(action: { changeSortOption(to: .titleAsc) }) {
-                    HStack {
-                        Text("A → Z")
-                        if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .titleDesc) }) {
-                    HStack {
-                        Text("Z → A")
-                        if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Title")
-                    if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Duration
-            Menu {
-                Button(action: { changeSortOption(to: .durationDesc) }) {
-                    HStack {
-                        Text("Longest First")
-                        if selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .durationAsc) }) {
-                    HStack {
-                        Text("Shortest First")
-                        if selectedSortOption == .durationAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Duration")
-                    if selectedSortOption == .durationAsc || selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Rating
-            Menu {
-                Button(action: { changeSortOption(to: .ratingDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .ratingAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Rating")
-                    if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Counter
-            Menu {
-                Button(action: { changeSortOption(to: .oCounterDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .oCounterAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedSortOption == .oCounterAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Counter")
-                    if selectedSortOption == .oCounterAsc || selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
-        }
-    }
 }
 
 struct TagImageView: View {

@@ -35,6 +35,7 @@ class FilterRepository: FilterRepositoryProtocol {
             mode
             filter
             object_filter
+            ui_options
           }
         }
         """

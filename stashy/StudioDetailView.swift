@@ -13,13 +13,11 @@ struct StudioDetailView: View {
     let studio: Studio
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @StateObject private var viewModel = StashDBViewModel()
-    @State private var refreshTrigger = UUID()
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getDetailSortOption(for: "studio_detail") ?? "") ?? .dateDesc
+    @State private var studioLiveFilterSheetPresented = false
     @State private var selectedGallerySortOption: StashDBViewModel.GallerySortOption = .dateDesc
     @State private var selectedImageSortOption: StashDBViewModel.ImageSortOption = .dateDesc
     @State private var selectedPerformerSortOption: StashDBViewModel.PerformerSortOption = .nameAsc
-    @State private var isChangingSort = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
     @State private var isHeaderExpanded = false // Added state for expansion
@@ -33,8 +31,15 @@ struct StudioDetailView: View {
         case groups = "Groups"
         case images = "Images"
     }
-    @State private var selectedDetailTab: DetailTab = .scenes
-    
+    @State private var selectedDetailTab: DetailTab
+
+    init(studio: Studio) {
+        self.studio = studio
+        let sc = studio.sceneCount
+        let gal = studio.galleryCount ?? 0
+        _selectedDetailTab = State(initialValue: sc > 0 ? .scenes : (gal > 0 ? .galleries : .scenes))
+    }
+
     // Computed properties for counts
     private var effectiveScenesCount: Int {
         max(viewModel.totalStudioScenes, studio.sceneCount)
@@ -58,23 +63,6 @@ struct StudioDetailView: View {
 
     private var showTabSwitcher: Bool {
         availableTabs.count > 1
-    }
-
-    // Safe sort change function
-    private func changeSortOption(to newOption: StashDBViewModel.SceneSortOption) {
-        if newOption == .random && selectedSortOption == .random {
-            viewModel.refreshRandomSeed()
-        }
-        selectedSortOption = newOption
-        
-        // Save to TabManager (Session)
-        TabManager.shared.setDetailSortOption(for: "studio_detail", option: newOption.rawValue)
-
-        // Force view refresh
-        refreshTrigger = UUID()
-
-        // Fetch new data immediately
-        viewModel.fetchStudioScenes(studioId: studio.id, sortBy: newOption, isInitialLoad: true)
     }
 
     private func changeGallerySortOption(to newOption: StashDBViewModel.GallerySortOption) {
@@ -101,21 +89,6 @@ struct StudioDetailView: View {
         viewModel.fetchDetailPerformers(studioId: studio.id, sortBy: newOption, isInitialLoad: true)
     }
     
-    @Environment(\.verticalSizeClass) var verticalSizeClass
-    
-    private var columns: [GridItem] {
-        if verticalSizeClass == .compact {
-             return [
-                 GridItem(.flexible(), spacing: 12),
-                 GridItem(.flexible(), spacing: 12)
-             ]
-        } else if horizontalSizeClass == .regular {
-            return Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
-        } else {
-            return [GridItem(.flexible(), spacing: 12)]
-        }
-    }
-    
     private var galleryColumns: [GridItem] {
         if horizontalSizeClass == .regular {
             return Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
@@ -127,21 +100,31 @@ struct StudioDetailView: View {
         }
     }
 
-    var body: some View {
+    @ViewBuilder
+    private var studioScenesStack: some View {
+        VStack(spacing: 12) {
+            headerCard
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            ScenesView(
+                hideTitle: true,
+                scope: .studio(studioId: studio.id),
+                sharedViewModel: viewModel,
+                externalLiveFilterSheetBinding: $studioLiveFilterSheetPresented,
+                showsFloatingFilterButton: false
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var nonScenesStudioScroll: some View {
         ScrollView {
             VStack(spacing: 12) {
-                // Header Card
                 headerCard
-                
-                if selectedDetailTab == .scenes {
-                    if !viewModel.studioScenes.isEmpty {
-                        sceneGrid
-                    } else if viewModel.isLoadingStudioScenes {
-                        loadingView(message: "Loading scenes...")
-                    } else {
-                        emptyView(message: "No scenes found", icon: "film")
-                    }
-                } else if selectedDetailTab == .galleries {
+
+                if selectedDetailTab == .galleries {
                     if !viewModel.studioGalleries.isEmpty {
                         galleryGrid
                     } else if viewModel.isLoadingStudioGalleries {
@@ -163,6 +146,16 @@ struct StudioDetailView: View {
             }
             .padding(16)
         }
+    }
+
+    var body: some View {
+        Group {
+            if selectedDetailTab == .scenes {
+                studioScenesStack
+            } else {
+                nonScenesStudioScroll
+            }
+        }
         .applyAppBackground()
         .onAppear {
             // If we know from the passed studio object that there are no scenes but there are galleries,
@@ -181,20 +174,22 @@ struct StudioDetailView: View {
             }
         }
         .onChange(of: viewModel.isLoadingStudioScenes) { oldValue, newValue in
-            // If scene loading finished and we found 0 scenes, but we have galleries, switch to galleries
-            if !newValue && effectiveScenesCount == 0 && effectiveGalleriesCount > 0 {
+            if !newValue && effectiveScenesCount == 0 && effectiveGalleriesCount > 0
+                && !viewModel.isStudioDetailSceneListConstrained {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
         .onChange(of: effectiveGalleriesCount) { oldValue, newValue in
-            if !viewModel.isLoadingStudioScenes && effectiveScenesCount == 0 && newValue > 0 {
+            if !viewModel.isLoadingStudioScenes && effectiveScenesCount == 0 && newValue > 0
+                && !viewModel.isStudioDetailSceneListConstrained {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
         .onChange(of: effectiveScenesCount) { oldValue, newValue in
             if newValue > 0 {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .scenes }
-            } else if newValue == 0 && effectiveGalleriesCount > 0 {
+            } else if newValue == 0 && !viewModel.isLoadingStudioScenes && effectiveGalleriesCount > 0
+                && !viewModel.isStudioDetailSceneListConstrained {
                 withAnimation(DesignTokens.Animation.quick) { selectedDetailTab = .galleries }
             }
         }
@@ -266,8 +261,16 @@ struct StudioDetailView: View {
                 .frame(maxWidth: .infinity)
 
                 if selectedDetailTab == .scenes {
-                    sortMenu
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        HapticManager.light()
+                        studioLiveFilterSheetPresented = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(appearanceManager.tintColor)
+                    }
+                    .accessibilityLabel("Filter and sort")
+                    .frame(maxWidth: .infinity)
                 } else if selectedDetailTab == .galleries {
                     gallerySortMenu
                         .frame(maxWidth: .infinity)
@@ -447,25 +450,6 @@ struct StudioDetailView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-    }
-    
-    private var sceneGrid: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(viewModel.studioScenes) { scene in
-                NavigationLink(destination: SceneDetailView(scene: scene)) {
-                    SceneCardView(scene: scene)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            if viewModel.isLoadingStudioScenes {
-                loadingIndicator(message: "Loading more scenes...")
-            } else if viewModel.hasMoreStudioScenes && !viewModel.studioScenes.isEmpty {
-                Color.clear.frame(height: 1).onAppear { viewModel.loadMoreStudioScenes(studioId: studio.id) }
-            }
-        }
-        .id(refreshTrigger)
     }
     
     private var galleryGrid: some View {
@@ -749,129 +733,6 @@ struct StudioDetailView: View {
         }
     }
     
-    private var sortMenu: some View {
-        Menu {
-            // Random
-            Button(action: { changeSortOption(to: .random) }) {
-                HStack {
-                    Text("Random")
-                    if selectedSortOption == .random { Image(systemName: "checkmark") }
-                }
-            }
-            
-            Divider()
-            
-            // Date
-            Menu {
-                Button(action: { changeSortOption(to: .dateDesc) }) {
-                    HStack {
-                        Text("Newest First")
-                        if selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .dateAsc) }) {
-                    HStack {
-                        Text("Oldest First")
-                        if selectedSortOption == .dateAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Date")
-                    if selectedSortOption == .dateAsc || selectedSortOption == .dateDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Title
-            Menu {
-                Button(action: { changeSortOption(to: .titleAsc) }) {
-                    HStack {
-                        Text("A → Z")
-                        if selectedSortOption == .titleAsc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .titleDesc) }) {
-                    HStack {
-                        Text("Z → A")
-                        if selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Title")
-                    if selectedSortOption == .titleAsc || selectedSortOption == .titleDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Duration
-            Menu {
-                Button(action: { changeSortOption(to: .durationDesc) }) {
-                    HStack {
-                        Text("Longest First")
-                        if selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .durationAsc) }) {
-                    HStack {
-                        Text("Shortest First")
-                        if selectedSortOption == .durationAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Duration")
-                    if selectedSortOption == .durationAsc || selectedSortOption == .durationDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Rating
-            Menu {
-                Button(action: { changeSortOption(to: .ratingDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .ratingAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedSortOption == .ratingAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Rating")
-                    if selectedSortOption == .ratingAsc || selectedSortOption == .ratingDesc { Image(systemName: "checkmark") }
-                }
-            }
-            
-            // Counter
-            Menu {
-                Button(action: { changeSortOption(to: .oCounterDesc) }) {
-                    HStack {
-                        Text("High → Low")
-                        if selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                    }
-                }
-                Button(action: { changeSortOption(to: .oCounterAsc) }) {
-                    HStack {
-                        Text("Low → High")
-                        if selectedSortOption == .oCounterAsc { Image(systemName: "checkmark") }
-                    }
-                }
-            } label: {
-                HStack {
-                    Text("Counter")
-                    if selectedSortOption == .oCounterAsc || selectedSortOption == .oCounterDesc { Image(systemName: "checkmark") }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(appearanceManager.tintColor)
-        }
-    }
-    
     private func loadingView(message: String) -> some View {
         VStack {
             Spacer()
@@ -903,10 +764,6 @@ struct StudioDetailView: View {
     private func loadData() {
         if viewModel.studioGalleries.isEmpty && !viewModel.isLoadingStudioGalleries {
             viewModel.fetchStudioGalleries(studioId: studio.id, sortBy: selectedGallerySortOption, isInitialLoad: true)
-        }
-        
-        if viewModel.studioScenes.isEmpty && !viewModel.isLoadingStudioScenes {
-            viewModel.fetchStudioScenes(studioId: studio.id, sortBy: selectedSortOption, isInitialLoad: true)
         }
         
         // Fetch extended content

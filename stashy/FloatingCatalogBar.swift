@@ -28,9 +28,15 @@ struct FloatingActionBar<Content: View>: View {
 
 extension View {
     /// Adds a floating action bar above the tab bar using safeAreaInset.
-    func floatingActionBar<Content: View>(@ViewBuilder _ content: @escaping () -> Content) -> some View {
-        self.safeAreaInset(edge: .bottom, spacing: 0) {
-            FloatingActionBar(content: content)
+    func floatingActionBar<Content: View>(isPresented: Bool = true, @ViewBuilder _ content: @escaping () -> Content) -> some View {
+        Group {
+            if isPresented {
+                self.safeAreaInset(edge: .bottom, spacing: 0) {
+                    FloatingActionBar(content: content)
+                }
+            } else {
+                self
+            }
         }
     }
 }
