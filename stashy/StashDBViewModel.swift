@@ -120,6 +120,9 @@ class StashDBViewModel: ObservableObject {
 
     @Published var isLoading = true
     @Published var errorMessage: String?
+    /// Letzter Fehler von `findImages` (Katalog/Galerie/Detail). Getrennt von `errorMessage`, damit parallele Requests
+    /// (z. B. `fetchSavedFilters`) den Verbindungsfehler der Bildliste nicht per `performGraphQLQuery` zurücksetzen.
+    @Published var imageFindListError: String?
     @Published var serverStatus: String = "Nicht verbunden"
     
     /// Per-kind random seeds. Each content kind (scenes, previews, markers, ...)
@@ -289,17 +292,16 @@ class StashDBViewModel: ObservableObject {
                     self.isLoading = false
                     self.isInitializing = false
                     print("✅ Staggered initialization sequence completed")
+                    NotificationCenter.default.post(name: .stashServerInitializationFinished, object: nil)
                 }
             }
         }
     }
     
     @objc private func handleServerChange() {
-        Task {
+        Task { @MainActor in
             await GraphQLClient.shared.cancelAllRequests()
-        }
-        DispatchQueue.main.async {
-            self.isLoading = true // Show loading immediately
+            self.isLoading = true
             self.resetData()
             print("🔄 StashDBViewModel reset due to server change")
             self.initializeServerConnection()
@@ -651,6 +653,8 @@ class StashDBViewModel: ObservableObject {
         case createdAtAsc
         case oCountDesc
         case oCountAsc
+        case ratingDesc
+        case ratingAsc
 
         var displayName: String {
             switch self {
@@ -666,14 +670,16 @@ class StashDBViewModel: ObservableObject {
             case .createdAtAsc: return "Created (Oldest First)"
             case .oCountDesc: return "O Count (High-Low)"
             case .oCountAsc: return "O Count (Low-High)"
+            case .ratingDesc: return "Rating (High-Low)"
+            case .ratingAsc: return "Rating (Low-High)"
             case .random: return "Random"
             }
         }
 
         var direction: String {
             switch self {
-            case .nameAsc, .sceneCountAsc, .birthdateAsc, .updatedAtAsc, .createdAtAsc, .oCountAsc: return "ASC"
-            case .nameDesc, .sceneCountDesc, .birthdateDesc, .updatedAtDesc, .createdAtDesc, .oCountDesc, .random: return "DESC"
+            case .nameAsc, .sceneCountAsc, .birthdateAsc, .updatedAtAsc, .createdAtAsc, .oCountAsc, .ratingAsc: return "ASC"
+            case .nameDesc, .sceneCountDesc, .birthdateDesc, .updatedAtDesc, .createdAtDesc, .oCountDesc, .ratingDesc, .random: return "DESC"
             }
         }
 
@@ -685,6 +691,7 @@ class StashDBViewModel: ObservableObject {
             case .updatedAtAsc, .updatedAtDesc: return "updated_at"
             case .createdAtAsc, .createdAtDesc: return "created_at"
             case .oCountAsc, .oCountDesc: return "o_counter"
+            case .ratingAsc, .ratingDesc: return "rating"
             case .random: return "random"
             }
         }
@@ -998,6 +1005,8 @@ class StashDBViewModel: ObservableObject {
     @Published var totalPerformerScenes: Int = 0
     @Published var isLoadingPerformerScenes = false
     @Published var hasMorePerformerScenes = true
+    /// Wird nach dem ersten abgeschlossenen `fetchPerformerScenes` (Seite 1) gesetzt — Tab-/Header-Zahlen sollen nicht ewig veraltetes `Performer.sceneCount` aus der Listenkarte mischen, sonst bleibt die leere `ScenesView` aktiv und triggert Endlosschleifen über `onChange(savedFilters)`.
+    @Published var performerDetailScenesInitialFetchCompleted = false
     private var currentPerformerScenePage = 1
     private var currentPerformerSceneSortOption: SceneSortOption = .dateDesc
     private var currentPerformerDetailFilter: SavedFilter? = nil
@@ -1083,6 +1092,7 @@ class StashDBViewModel: ObservableObject {
         isLoading = true // Start in loading state
         isLoadingSavedFilters = false // Reset filter loading state
         errorMessage = nil
+        imageFindListError = nil
         isFetchingStats = false
         lastStatsFetch = nil
         isFetchingFilters = false
@@ -2364,7 +2374,7 @@ class StashDBViewModel: ObservableObject {
     /// Convenience: dispatch to the correct fetch method based on row content type.
     func refreshHomeRow(config: HomeRowConfig, limit: Int = 10) {
         switch config.type {
-        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
+        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .performersHighestRating:
             fetchPerformersForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
         case .newStudios, .studiosHighestSceneCount:
             fetchStudiosForHomeRow(config: config, limit: limit, forceRefresh: true) { _ in }
@@ -2434,7 +2444,7 @@ class StashDBViewModel: ObservableObject {
             setSort(.ratingDesc)
         case .random:
             setSort(.random)
-        case .statistics, .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .newStudios, .studiosHighestSceneCount, .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
+        case .statistics, .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .performersHighestRating, .newStudios, .studiosHighestSceneCount, .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
             homeRowLoadingState[rowType] = false
             completion([])
             return
@@ -2517,6 +2527,8 @@ class StashDBViewModel: ObservableObject {
             setSort(.sceneCountDesc)
         case .performersHighestOCount:
             setSort(.oCountDesc)
+        case .performersHighestRating:
+            setSort(.ratingDesc)
         default:
             homeRowLoadingState[rowType] = false
             completion([])
@@ -2828,6 +2840,11 @@ class StashDBViewModel: ObservableObject {
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingPerformerGalleries = false
+                self.isLoadingMorePerformerGalleries = false
+                self.hasMorePerformerGalleries = false
+            }
             return
         }
         
@@ -2845,10 +2862,13 @@ class StashDBViewModel: ObservableObject {
                     self.hasMorePerformerGalleries = result.galleries.count == 20
                     self.currentPerformerGalleryPage = page
                     self.isLoadingPerformerGalleries = false
+                    self.isLoadingMorePerformerGalleries = false
                 }
             } else {
                 DispatchQueue.main.async {
                     self.isLoadingPerformerGalleries = false
+                    self.isLoadingMorePerformerGalleries = false
+                    self.hasMorePerformerGalleries = false
                 }
             }
         }
@@ -3009,6 +3029,11 @@ class StashDBViewModel: ObservableObject {
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingPerformerScenes = false
+                self.hasMorePerformerScenes = false
+                if isInitialLoad { self.performerDetailScenesInitialFetchCompleted = true }
+            }
             return
         }
         
@@ -3028,6 +3053,7 @@ class StashDBViewModel: ObservableObject {
                     
                     if isInitialLoad {
                         self.isLoadingPerformerScenes = false
+                        self.performerDetailScenesInitialFetchCompleted = true
                         self.errorMessage = nil // Clear error on success
                     } else {
                         self.isLoadingPerformerScenes = false
@@ -3040,6 +3066,8 @@ class StashDBViewModel: ObservableObject {
                     } else {
                         self.isLoadingPerformerScenes = false
                     }
+                    self.hasMorePerformerScenes = false
+                    if isInitialLoad { self.performerDetailScenesInitialFetchCompleted = true }
                     self.errorMessage = "Szenen des Schauspielers konnten nicht geladen werden"
                 }
             }
@@ -3122,8 +3150,14 @@ class StashDBViewModel: ObservableObject {
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
-              
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingDetailStudios = false
+                self.hasMoreDetailStudios = false
+            }
+            return
+        }
+
         performGraphQLQuery(query: bodyString) { (response: StudiosResponse?) in
             DispatchQueue.main.async {
                 if let result = response?.data?.findStudios {
@@ -3135,6 +3169,8 @@ class StashDBViewModel: ObservableObject {
                     }
                     self.hasMoreDetailStudios = result.studios.count == 20
                     self.currentDetailStudioPage = page
+                } else {
+                    self.hasMoreDetailStudios = false
                 }
                 self.isLoadingDetailStudios = false
             }
@@ -3184,8 +3220,14 @@ class StashDBViewModel: ObservableObject {
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
-              
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingDetailTags = false
+                self.hasMoreDetailTags = false
+            }
+            return
+        }
+
         performGraphQLQuery(query: bodyString) { (response: TagsResponse?) in
             DispatchQueue.main.async {
                 if let result = response?.data?.findTags {
@@ -3197,6 +3239,8 @@ class StashDBViewModel: ObservableObject {
                     }
                     self.hasMoreDetailTags = result.tags.count == 40
                     self.currentDetailTagPage = page
+                } else {
+                    self.hasMoreDetailTags = false
                 }
                 self.isLoadingDetailTags = false
             }
@@ -3236,8 +3280,14 @@ class StashDBViewModel: ObservableObject {
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
-              
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingDetailGroups = false
+                self.hasMoreDetailGroups = false
+            }
+            return
+        }
+
         performGraphQLQuery(query: bodyString) { (response: GroupsResponse?) in
             DispatchQueue.main.async {
                 if let result = response?.data?.findGroups {
@@ -3249,6 +3299,8 @@ class StashDBViewModel: ObservableObject {
                     }
                     self.hasMoreDetailGroups = result.groups.count == 20
                     self.currentDetailGroupPage = page
+                } else {
+                    self.hasMoreDetailGroups = false
                 }
                 self.isLoadingDetailGroups = false
             }
@@ -3329,6 +3381,8 @@ class StashDBViewModel: ObservableObject {
         } else {
             isLoadingDetailImages = true
         }
+
+        imageFindListError = nil
         
         let page = isInitialLoad ? 1 : currentDetailImagePage + 1
         let query = GraphQLQueries.queryWithFragments("findImages")
@@ -3367,9 +3421,17 @@ class StashDBViewModel: ObservableObject {
         ]
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
-              let bodyString = String(data: bodyData, encoding: .utf8) else { return }
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingDetailImages = false
+                let msg = "Could not load images"
+                self.imageFindListError = msg
+                self.errorMessage = msg
+            }
+            return
+        }
               
-        performGraphQLQuery(query: bodyString) { (response: ImagesResponse?) in
+        performGraphQLQuery(query: bodyString, clearsGlobalErrorMessageOnStart: false) { (response: ImagesResponse?) in
             DispatchQueue.main.async {
                 if let result = response?.data?.findImages {
                     if isInitialLoad {
@@ -3380,6 +3442,15 @@ class StashDBViewModel: ObservableObject {
                     }
                     self.hasMoreDetailImages = result.images.count == 40
                     self.currentDetailImagePage = page
+                    self.errorMessage = nil
+                    self.imageFindListError = nil
+                } else {
+                    self.hasMoreDetailImages = false
+                    let msg = self.errorMessage ?? "Could not load images"
+                    self.imageFindListError = msg
+                    if self.errorMessage == nil {
+                        self.errorMessage = msg
+                    }
                 }
                 self.isLoadingDetailImages = false
             }
@@ -4472,6 +4543,8 @@ class StashDBViewModel: ObservableObject {
         } else {
             isLoadingGalleryImages = true
         }
+
+        imageFindListError = nil
         
         currentGalleryImageSortOption = sortBy
         let page = isInitialLoad ? 1 : currentGalleryImagePage + 1
@@ -4500,10 +4573,16 @@ class StashDBViewModel: ObservableObject {
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingGalleryImages = false
+                let msg = "Could not load images"
+                self.imageFindListError = msg
+                self.errorMessage = msg
+            }
             return
         }
         
-        performGraphQLQuery(query: bodyString) { (response: GalleryImagesResponse?) in
+        performGraphQLQuery(query: bodyString, clearsGlobalErrorMessageOnStart: false) { (response: GalleryImagesResponse?) in
             if let result = response?.data?.findImages {
                 DispatchQueue.main.async {
                     if isInitialLoad {
@@ -4516,10 +4595,17 @@ class StashDBViewModel: ObservableObject {
                     self.hasMoreGalleryImages = result.images.count == 40
                     self.currentGalleryImagePage = page
                     self.isLoadingGalleryImages = false
+                    self.errorMessage = nil
+                    self.imageFindListError = nil
                 }
             } else {
                 DispatchQueue.main.async {
                     self.isLoadingGalleryImages = false
+                    let msg = self.errorMessage ?? "Could not load images"
+                    self.imageFindListError = msg
+                    if self.errorMessage == nil {
+                        self.errorMessage = msg
+                    }
                 }
             }
         }
@@ -4546,6 +4632,9 @@ class StashDBViewModel: ObservableObject {
         } else {
             isLoadingImages = true
         }
+
+        // Nur Bildlisten-spezifischen Fehler zurücksetzen — `errorMessage` nicht anfassen (paralleles `fetchSavedFilters`).
+        imageFindListError = nil
 
         currentImageSortOption = sortBy
         let page = isInitialLoad ? 1 : currentImagePage + 1
@@ -4613,10 +4702,16 @@ class StashDBViewModel: ObservableObject {
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
+            DispatchQueue.main.async {
+                self.isLoadingImages = false
+                let msg = "Could not load images"
+                self.imageFindListError = msg
+                self.errorMessage = msg
+            }
             return
         }
         
-        performGraphQLQuery(query: bodyString) { (response: GalleryImagesResponse?) in
+        performGraphQLQuery(query: bodyString, clearsGlobalErrorMessageOnStart: false) { (response: GalleryImagesResponse?) in
             if let result = response?.data?.findImages {
                 DispatchQueue.main.async {
                     if isInitialLoad {
@@ -4629,10 +4724,17 @@ class StashDBViewModel: ObservableObject {
                     self.hasMoreImages = result.images.count == perPage
                     self.currentImagePage = page
                     self.isLoadingImages = false
+                    self.errorMessage = nil
+                    self.imageFindListError = nil
                 }
             } else {
                 DispatchQueue.main.async {
                     self.isLoadingImages = false
+                    let msg = self.errorMessage ?? "Could not load images"
+                    self.imageFindListError = msg
+                    if self.errorMessage == nil {
+                        self.errorMessage = msg
+                    }
                 }
             }
         }
@@ -5203,7 +5305,7 @@ class StashDBViewModel: ObservableObject {
         }.resume()
     }
     
-    private func performGraphQLQuery<T: Decodable>(query: String, completion: @escaping (T?) -> Void) {
+    private func performGraphQLQuery<T: Decodable>(query: String, clearsGlobalErrorMessageOnStart: Bool = true, completion: @escaping (T?) -> Void) {
         guard ServerConfigManager.shared.loadConfig()?.hasValidConfig == true else {
             errorMessage = "Server configuration is missing or incomplete"
             print("❌ No valid server configuration found")
@@ -5212,7 +5314,9 @@ class StashDBViewModel: ObservableObject {
         }
         
         isLoading = true
-        errorMessage = nil
+        if clearsGlobalErrorMessageOnStart {
+            errorMessage = nil
+        }
         
         // Delegate to new GraphQLClient
         GraphQLClient.shared.execute(query: query) { [weak self] (result: Result<T, GraphQLNetworkError>) in

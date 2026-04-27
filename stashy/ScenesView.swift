@@ -389,6 +389,8 @@ private struct ScenesViewContent: View {
     @State private var showDeletePresetAlert = false
     @State private var presetNameInput = ""
     var hideTitle: Bool = false
+    /// Detail (Performer/Studio/Tag/Group): nur einmal `performSearch` als „leere Liste + gespeicherte Filter fertig“-Fallback — sonst Endlosschleife, wenn `savedFilters` oft neu veröffentlicht wird.
+    @State private var didRunEmptyListSavedFilterFallback = false
 
     private var liveFilterSheetPresented: Binding<Bool> {
         if let ext = externalLiveFilterSheetBinding {
@@ -415,6 +417,11 @@ private struct ScenesViewContent: View {
         case .tag: return viewModel.tagScenes.isEmpty
         case .group: return viewModel.groupScenes.isEmpty
         }
+    }
+
+    private var isSceneListDetailScope: Bool {
+        if case .catalog = scope { return false }
+        return true
     }
 
     private var showsBlockingInitialLoad: Bool {
@@ -1166,7 +1173,10 @@ private struct ScenesViewContent: View {
             }
             
         }
-        .floatingActionBar(isPresented: showsFloatingFilterButton) {
+        .floatingActionBar(
+            isPresented: showsFloatingFilterButton,
+            catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: primarySceneListIsEmpty, errorMessage: viewModel.errorMessage)
+        ) {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Button(action: { liveFilterSheetPresented.wrappedValue = true }) {
@@ -1401,7 +1411,14 @@ private struct ScenesViewContent: View {
                     // Default filter was set but NO filters were found on server, or filters finished loading and defaultId is missing
                     // Trigger fetch without filter to avoid being stuck in loading state (only if empty)
                     if primarySceneListIsEmpty {
-                        performSearch()
+                        if isSceneListDetailScope {
+                            if !didRunEmptyListSavedFilterFallback {
+                                didRunEmptyListSavedFilterFallback = true
+                                performSearch()
+                            }
+                        } else {
+                            performSearch()
+                        }
                     }
                 }
             }
@@ -1420,10 +1437,17 @@ private struct ScenesViewContent: View {
                 case .group: loadingPrimary = viewModel.isLoadingGroupScenes
                 }
                 if primarySceneListIsEmpty && !loadingPrimary && selectedFilter == nil {
+                    if isSceneListDetailScope {
+                        guard !didRunEmptyListSavedFilterFallback else { return }
+                        didRunEmptyListSavedFilterFallback = true
+                    }
                     print("🔄 Fallback: Filters loaded (empty), triggering initial scene fetch")
                     performSearch()
                 }
             }
+        }
+        .onChange(of: scope) { _, _ in
+            didRunEmptyListSavedFilterFallback = false
         }
     }
 

@@ -165,6 +165,7 @@ enum HomeRowType: String, Codable {
     case newGalleries
     case recentlyUpdatedGalleries
     case performersHighestOCount
+    case performersHighestRating
     case galleriesHighestImageCount
     
     var defaultTitle: String {
@@ -184,6 +185,7 @@ enum HomeRowType: String, Codable {
         case .newGalleries: return "Galleries - New"
         case .recentlyUpdatedGalleries: return "Galleries - Recently Updated"
         case .performersHighestOCount: return "Performers - Counter"
+        case .performersHighestRating: return "Performers - Rating"
         case .galleriesHighestImageCount: return "Galleries - Image Count"
         }
     }
@@ -244,6 +246,7 @@ enum ToolsItem: String, Codable, CaseIterable, Identifiable {
     case server
     case downloads
     case statistics
+    case hotOrNot
     
     var id: String { rawValue }
     
@@ -252,6 +255,7 @@ enum ToolsItem: String, Codable, CaseIterable, Identifiable {
         case .server: return "Server"
         case .downloads: return "Downloads"
         case .statistics: return "Statistics"
+        case .hotOrNot: return "Hot or Not"
         }
     }
     
@@ -260,6 +264,7 @@ enum ToolsItem: String, Codable, CaseIterable, Identifiable {
         case .server: return "server.rack"
         case .downloads: return "square.and.arrow.down"
         case .statistics: return "chart.bar.fill"
+        case .hotOrNot: return "flame.fill"
         }
     }
 }
@@ -564,6 +569,7 @@ class TabManager: ObservableObject {
             ensureHighestSceneCountStudiosRow()
             ensureRecentlyUpdatedGalleriesRow()
             ensurePerformersHighestOCountRow()
+            ensurePerformersHighestRatingRow()
             ensureGalleriesHighestImageCountRow()
         } else {
             // Default Home Rows
@@ -580,10 +586,11 @@ class TabManager: ObservableObject {
                 HomeRowConfig(id: UUID(), title: HomeRowType.galleriesHighestImageCount.defaultTitle, isEnabled: true, sortOrder: 9, type: .galleriesHighestImageCount),
                 HomeRowConfig(id: UUID(), title: HomeRowType.newest3Min.defaultTitle, isEnabled: true, sortOrder: 10, type: .newest3Min),
                 HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestOCount.defaultTitle, isEnabled: true, sortOrder: 11, type: .performersHighestOCount),
-                HomeRowConfig(id: UUID(), title: HomeRowType.mostViewed3Min.defaultTitle, isEnabled: true, sortOrder: 12, type: .mostViewed3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.random.defaultTitle, isEnabled: true, sortOrder: 13, type: .random),
-                HomeRowConfig(id: UUID(), title: HomeRowType.topCounter3Min.defaultTitle, isEnabled: false, sortOrder: 14, type: .topCounter3Min),
-                HomeRowConfig(id: UUID(), title: HomeRowType.topRating3Min.defaultTitle, isEnabled: false, sortOrder: 15, type: .topRating3Min)
+                HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestRating.defaultTitle, isEnabled: true, sortOrder: 12, type: .performersHighestRating),
+                HomeRowConfig(id: UUID(), title: HomeRowType.mostViewed3Min.defaultTitle, isEnabled: true, sortOrder: 13, type: .mostViewed3Min),
+                HomeRowConfig(id: UUID(), title: HomeRowType.random.defaultTitle, isEnabled: true, sortOrder: 14, type: .random),
+                HomeRowConfig(id: UUID(), title: HomeRowType.topCounter3Min.defaultTitle, isEnabled: false, sortOrder: 15, type: .topCounter3Min),
+                HomeRowConfig(id: UUID(), title: HomeRowType.topRating3Min.defaultTitle, isEnabled: false, sortOrder: 16, type: .topRating3Min)
             ]
             saveHomeRows()
         }
@@ -687,6 +694,14 @@ class TabManager: ObservableObject {
     private func ensurePerformersHighestOCountRow() {
          if !homeRows.contains(where: { $0.type == .performersHighestOCount }) {
              let newRow = HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestOCount.defaultTitle, isEnabled: true, sortOrder: homeRows.count, type: .performersHighestOCount)
+             homeRows.append(newRow)
+             saveHomeRows()
+         }
+    }
+
+    private func ensurePerformersHighestRatingRow() {
+         if !homeRows.contains(where: { $0.type == .performersHighestRating }) {
+             let newRow = HomeRowConfig(id: UUID(), title: HomeRowType.performersHighestRating.defaultTitle, isEnabled: true, sortOrder: homeRows.count, type: .performersHighestRating)
              homeRows.append(newRow)
              saveHomeRows()
          }
@@ -796,7 +811,8 @@ class TabManager: ObservableObject {
             var hasChanges = false
             for item in ToolsItem.allCases {
                 if !result.contains(where: { $0.id == item }) {
-                    result.append(ToolsItemConfig(id: item, isEnabled: true, sortOrder: result.count))
+                    let enabled = item != .hotOrNot
+                    result.append(ToolsItemConfig(id: item, isEnabled: enabled, sortOrder: result.count))
                     hasChanges = true
                 }
             }
@@ -811,7 +827,8 @@ class TabManager: ObservableObject {
             self.tools = [
                 ToolsItemConfig(id: .downloads, isEnabled: true, sortOrder: 0),
                 ToolsItemConfig(id: .server, isEnabled: true, sortOrder: 1),
-                ToolsItemConfig(id: .statistics, isEnabled: true, sortOrder: 2)
+                ToolsItemConfig(id: .statistics, isEnabled: true, sortOrder: 2),
+                ToolsItemConfig(id: .hotOrNot, isEnabled: false, sortOrder: 3)
             ]
             enforceFixedTools()
             saveTools()

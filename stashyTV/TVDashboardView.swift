@@ -41,7 +41,9 @@ struct TVDashboardView: View {
         }
         .background(Color.appBackground)
         .onAppear { loadData() }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+        // Nicht auf `ServerConfigChanged` laden: `handleServerChange` bricht alle GraphQL-Tasks ab —
+        // ein sofortiges `loadData()` würde nur leer/cancelled enden. Stattdessen nach init neu laden.
+        .onReceive(NotificationCenter.default.publisher(for: .stashServerInitializationFinished)) { _ in
             loadData()
         }
         .onChange(of: focusedHeroSceneID) { _, newValue in

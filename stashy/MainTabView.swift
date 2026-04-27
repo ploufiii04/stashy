@@ -209,12 +209,14 @@ struct ToolsView: View {
         case server = "Server"
         case downloads = "Downloads"
         case statistics = "Statistics"
+        case hotOrNot = "Hot or Not"
         
         var icon: String {
             switch self {
             case .server: return "server.rack"
             case .downloads: return "square.and.arrow.down"
             case .statistics: return "chart.bar.fill"
+            case .hotOrNot: return "flame.fill"
             }
         }
     }
@@ -226,6 +228,7 @@ struct ToolsView: View {
             case .server: return .server
             case .downloads: return .downloads
             case .statistics: return .statistics
+            case .hotOrNot: return .hotOrNot
             }
         }
     }
@@ -253,6 +256,8 @@ struct ToolsView: View {
                 DownloadsView()
             case .statistics:
                 ToolsStatisticsView()
+            case .hotOrNot:
+                HotOrNotToolsView()
             }
         }
         .navigationBarHidden(true)

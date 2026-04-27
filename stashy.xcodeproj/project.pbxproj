@@ -136,6 +136,7 @@
 		F6BC02EF04794FCAA2460E89 /* PerformerRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF675E682F2A6386004CA019 /* PerformerRepository.swift */; };
 		FC10AB0012345678901234AB /* FloatingCatalogBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC10AB0112345678901234AB /* FloatingCatalogBar.swift */; };
 		FC10AB0212345678901234AB /* FloatingCatalogBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC10AB0112345678901234AB /* FloatingCatalogBar.swift */; };
+		971A00012F999001 /* HotOrNotToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 971A00022F999002 /* HotOrNotToolsView.swift */; };
 		FDFEA639517B4DF2B8490448 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FB7794FE84155DC02AAC07 /* App.swift */; };
 /* End PBXBuildFile section */
 
@@ -219,6 +220,7 @@
 		DFUI000062F3AUDIT006 /* ToastManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastManager.swift; sourceTree = "<group>"; };
 		FA617C2A62174FFFB0912B44 /* SceneGroupsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneGroupsCard.swift; sourceTree = "<group>"; };
 		FC10AB0112345678901234AB /* FloatingCatalogBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingCatalogBar.swift; sourceTree = "<group>"; };
+		971A00022F999002 /* HotOrNotToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotOrNotToolsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -276,6 +278,7 @@
 				DFGQ000042F28A0000000004 /* GraphQLQueries.swift */,
 				DF22BB192F16743C007C2090 /* HomeView.swift */,
 				FC10AB0112345678901234AB /* FloatingCatalogBar.swift */,
+				971A00022F999002 /* HotOrNotToolsView.swift */,
 				372E2D692F6339EE00603361 /* LoginAuthHelper.swift */,
 				DF22BB262F167CDC007C2090 /* ImageCacheManager.swift */,
 				37BE5B4D2F51718500107960 /* Managers */,
@@ -595,6 +598,7 @@
 				DF06EF262F18EC1300299105 /* SceneCardView.swift in Sources */,
 				DF22BB242F16743C007C2090 /* HomeView.swift in Sources */,
 				FC10AB0012345678901234AB /* FloatingCatalogBar.swift in Sources */,
+				971A00012F999001 /* HotOrNotToolsView.swift in Sources */,
 				DFF7EE412F0D3D2800344A8B /* TabManager.swift in Sources */,
 				DFE504622E8A8C4000323FF0 /* StudiosView.swift in Sources */,
 				DF22BB342F1831C7007C2090 /* AppearanceSettingsView.swift in Sources */,

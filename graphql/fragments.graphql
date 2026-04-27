@@ -13,7 +13,7 @@ fragment PerformerFields on Performer {
 }
 
 fragment StudioFields on Studio {
-  id name url details image_path scene_count performer_count gallery_count image_count favorite rating100 created_at updated_at
+  id name url details image_path scene_count performer_count gallery_count favorite rating100 created_at updated_at
 }
 
 fragment TagFields on Tag {

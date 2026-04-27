@@ -1,0 +1,8 @@
+query HotOrNotFindPerformers($performer_filter: PerformerFilterType, $filter: FindFilterType) {
+  findPerformers(performer_filter: $performer_filter, filter: $filter) {
+    count
+    performers {
+      ...HotOrNotPerformerFields
+    }
+  }
+}

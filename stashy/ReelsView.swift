@@ -97,6 +97,7 @@ private enum ReelsSessionRAM {
 struct ReelsView: View {
     @ObservedObject private var appearanceManager = AppearanceManager.shared
     @ObservedObject private var tabManager = TabManager.shared
+    @ObservedObject private var configManager = ServerConfigManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var selectedSortOption: StashDBViewModel.SceneSortOption = StashDBViewModel.SceneSortOption(rawValue: TabManager.shared.getReelsDefaultSort(for: .scenes) ?? "") ?? .random
@@ -890,6 +891,14 @@ struct ReelsView: View {
             case .marker(let m): return "marker-\(m.id)"
             case .clip(let c): return "clip-\(c.id)"
             case .preview(let s): return "preview-\(s.id)"
+            }
+        }
+
+        /// Thumbnail under the player only fades out when the stream is ready in **scenes** and **previews**; markers/clips keep the static layer until swapped.
+        var hidesReelThumbnailWhenVideoReady: Bool {
+            switch self {
+            case .scene, .preview: return true
+            case .marker, .clip: return false
             }
         }
         
@@ -1708,6 +1717,21 @@ struct ReelsView: View {
         }
     }
 
+    /// Kein Server / Verbindungsfehler: untere Capsule- & Scrubber-Leiste ausblenden (wie „offline“).
+    private var reelsBottomChromeSuppressed: Bool {
+        configManager.activeConfig == nil || (isListEmpty && viewModel.errorMessage != nil)
+    }
+
+    /// Voller Rand-zu-Rand-Modus nur für den eigentlichen Reels-Player. Bei leerer Liste + Laden/Fehler
+    /// bleibt die System-Safe-Area aktiv, damit zentrierte States (`ConnectionErrorView`, Loading)
+    /// mit der oberen `safeAreaInset`-Nav-Leiste fluchten und nicht „nach oben rutschen“.
+    private var reelsPremiumContentSafeAreaRegions: SafeAreaRegions {
+        if reelsMode == .pics { return [] }
+        let awaitingFeed = isListEmpty && (viewModel.isLoading || viewModel.errorMessage != nil)
+        if awaitingFeed { return [] }
+        return .all
+    }
+
     var body: some View {
         premiumContent
     }
@@ -2010,9 +2034,16 @@ struct ReelsView: View {
 
     @ViewBuilder
     private var premiumContentLayout: some View {
+        let reelsFeedConnectionError = reelsMode != .pics && isListEmpty && viewModel.errorMessage != nil
         ZStack {
-            Color.black.ignoresSafeArea()
-            
+            Group {
+                if reelsFeedConnectionError {
+                    Color.appBackground.ignoresSafeArea()
+                } else {
+                    Color.black.ignoresSafeArea()
+                }
+            }
+
             if reelsMode == .pics {
                 if isInitialized {
                     StashLineView(
@@ -2038,14 +2069,14 @@ struct ReelsView: View {
                 }
             }
         }
-        .ignoresSafeArea(reelsMode == .pics ? [] : .all)
+        .ignoresSafeArea(reelsPremiumContentSafeAreaRegions)
         .allowsHitTesting(!isMenuOpen)
         .navigationBarHidden(true)
         .safeAreaInset(edge: .top, spacing: 0) {
             reelsNavBar
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if reelsMode != .pics {
+            if reelsMode != .pics && !reelsBottomChromeSuppressed {
                 VStack(spacing: 0) {
                     reelsInfoOverlay
                     reelsScrubberBar
@@ -2521,26 +2552,21 @@ struct ReelsView: View {
 
     @ViewBuilder
     private var errorStateView: some View {
-        VStack {
-            Spacer()
-            ConnectionErrorView(onRetry: {
-                switch reelsMode {
-                case .scenes:
-                    applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: selectedTags)
-                case .markers:
-                    applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: selectedTags)
-                case .clips:
-                    applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: selectedPerformer, tags: selectedTags)
-                case .previews:
-                    applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags)
-                case .pics:
-                    break
-                }
-            }, isDark: true)
-            Spacer()
-        }
+        ConnectionErrorView(onRetry: {
+            switch reelsMode {
+            case .scenes:
+                applySettings(sortBy: selectedSortOption, sceneFilter: selectedFilter, performer: selectedPerformer, tags: selectedTags)
+            case .markers:
+                applySettings(markerSortBy: selectedMarkerSortOption, markerFilter: selectedMarkerFilter, performer: selectedPerformer, tags: selectedTags)
+            case .clips:
+                applySettings(clipSortBy: reelsClipImageFilters.selectedSortOption, clipFilter: reelsClipImageFilters.selectedFilter, performer: selectedPerformer, tags: selectedTags)
+            case .previews:
+                applySettings(previewSortBy: selectedSortOption, previewFilter: selectedPreviewFilter, performer: selectedPerformer, tags: selectedTags)
+            case .pics:
+                break
+            }
+        })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
     }
 
     private func advanceToNextItem(from item: ReelItemData) {
@@ -3568,6 +3594,8 @@ extension ReelItemView {
                     } else {
                         ZStack {
                             reelThumbnailBackdrop
+                                .opacity(item.hidesReelThumbnailWhenVideoReady ? (videoSurfaceReadiness.showsDecodedVideo ? 0 : 1) : 1)
+                                .animation(.easeInOut(duration: 0.18), value: videoSurfaceReadiness.showsDecodedVideo)
                             if let player = player {
                                 FullScreenVideoPlayer(player: player, videoGravity: shouldFill ? .resizeAspectFill : .resizeAspect)
                                     .opacity(videoSurfaceReadiness.showsDecodedVideo ? 1 : 0)
@@ -3586,7 +3614,7 @@ extension ReelItemView {
         .focusEffectDisabled()
     }
 
-    /// Still image behind the `AVPlayerLayer` until the item reaches `.readyToPlay` (avoids black / double-flash on swap).
+    /// Still image behind the player until `.readyToPlay` (in scenes/previews, hidden once video is ready; markers/clips stay as underlay).
     @ViewBuilder
     private var reelThumbnailBackdrop: some View {
         if let url = item.thumbnailURL {

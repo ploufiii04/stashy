@@ -13,7 +13,7 @@ extension Array {
 func homeCardWidth(for config: HomeRowConfig, isLarge: Bool, screenWidth: CGFloat) -> CGFloat {
     if isLarge { return 280 }
     switch config.type {
-    case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
+    case .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .performersHighestRating:
         return 125 * 2 / 3
     case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
         return 125
@@ -26,7 +26,7 @@ func homeCardHeight(for config: HomeRowConfig, isLarge: Bool, screenWidth: CGFlo
     let width = homeCardWidth(for: config, isLarge: isLarge, screenWidth: screenWidth)
     if isLarge {
         switch config.type {
-        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
+        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .performersHighestRating:
             return width * 3 / 2
         case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
             return 125
@@ -35,7 +35,7 @@ func homeCardHeight(for config: HomeRowConfig, isLarge: Bool, screenWidth: CGFlo
         }
     }
     switch config.type {
-    case .newPerformers, .performersHighestSceneCount, .performersHighestOCount:
+    case .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .performersHighestRating:
         return width * 3 / 2
     case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:
         return 125
@@ -64,7 +64,7 @@ struct HomeRowView: View {
 
     private var items: [String] {
         switch config.type {
-        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount: return performers.map(\.id)
+        case .newPerformers, .performersHighestSceneCount, .performersHighestOCount, .performersHighestRating: return performers.map(\.id)
         case .newStudios, .studiosHighestSceneCount:                                 return studios.map(\.id)
         case .newGalleries, .recentlyUpdatedGalleries, .galleriesHighestImageCount:  return galleries.map(\.id)
         default:                                                                     return scenes.map(\.id)
@@ -214,6 +214,13 @@ struct HomeRowView: View {
                                                  isLarge: isLarge, screenWidth: screenWidth)
                         }
                     }
+                case .performersHighestRating:
+                    ForEach(performers) { p in
+                        cardLink(destination: PerformerDetailView(performer: p), id: p.id, width: w) {
+                            HomePerformerCardView(performer: p, config: config, badgeType: .rating,
+                                                 isLarge: isLarge, screenWidth: screenWidth)
+                        }
+                    }
                 case .newStudios, .studiosHighestSceneCount:
                     ForEach(studios) { s in
                         cardLink(destination: StudioDetailView(studio: s), id: s.id, width: w) {
@@ -261,6 +268,7 @@ struct HomeRowView: View {
         case .newPerformers:               PerformersView(initialSort: .createdAtDesc)
         case .performersHighestSceneCount: PerformersView(initialSort: .sceneCountDesc)
         case .performersHighestOCount:     PerformersView(initialSort: .oCountDesc)
+        case .performersHighestRating:   PerformersView(initialSort: .ratingDesc)
         case .newStudios:                  StudiosView(initialSort: .createdAtDesc)
         case .studiosHighestSceneCount:    StudiosView(initialSort: .sceneCountDesc)
         case .newGalleries:                GalleriesView(initialSort: .createdAtDesc)
@@ -339,9 +347,13 @@ struct HomePerformerCardView: View {
                 HStack(alignment: .top) {
                     Spacer()
                     HStack(spacing: 2) {
-                        Image(systemName: badgeType == .oCount ? appearanceManager.oCounterIcon : "film")
+                        Image(systemName: badgeType == .oCount ? appearanceManager.oCounterIcon : (badgeType == .rating ? "star.fill" : "film"))
                             .font(.system(size: 8, weight: .bold))
-                        Text("\(badgeType == .oCount ? (performer.oCounter ?? 0) : performer.sceneCount)")
+                        Text(
+                            badgeType == .oCount
+                                ? "\(performer.oCounter ?? 0)"
+                                : (badgeType == .rating ? "\(performer.rating100 ?? 0)" : "\(performer.sceneCount)")
+                        )
                             .font(.system(size: 9, weight: .bold))
                     }
                     .foregroundColor(.white)

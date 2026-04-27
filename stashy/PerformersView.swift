@@ -555,7 +555,7 @@ struct PerformersView: View {
                 }
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.performers.isEmpty, errorMessage: viewModel.errorMessage)) {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Button {
@@ -681,7 +681,14 @@ struct PerformersView: View {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(viewModel.performers) { performer in
                         NavigationLink(destination: PerformerDetailView(performer: performer)) {
-                            PerformerCardView(performer: performer, badgeType: (selectedSortOption == .oCountDesc || selectedSortOption == .oCountAsc) ? .oCount : .sceneCount)
+                            PerformerCardView(
+                                performer: performer,
+                                badgeType: (selectedSortOption == .oCountDesc || selectedSortOption == .oCountAsc)
+                                    ? .oCount
+                                    : (selectedSortOption == .ratingDesc || selectedSortOption == .ratingAsc)
+                                        ? .rating
+                                        : .sceneCount
+                            )
                         }
                         .buttonStyle(PlainButtonStyle())
                         .id(performer.id)
@@ -753,100 +760,105 @@ struct PerformerCardView: View {
     }
 
     var body: some View {
-
+        // Wie `ImageThumbnailCard`: Bild in Zelle mit fester `geometry`-Fläche + `clipped()`,
+        // damit `scaledToFill` den Hit-Test / Layout nicht sprengt; Root `contentShape`
+        // begrenzt Touches auf die sichtbare Karte (siehe ImagesView).
         ZStack(alignment: .bottomLeading) {
-            // Image
             GeometryReader { geometry in
-                ZStack {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.2))
+                ZStack(alignment: .bottomLeading) {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.2))
 
-                    if let thumbnailURL = performer.thumbnailURL {
-                        CustomAsyncImage(url: thumbnailURL) { loader in
-                            if loader.isLoading {
-                                ProgressView()
-                            } else if let image = loader.image {
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
-                                    .clipped()
-                            } else {
-                                Image(systemName: "person.fill")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.secondary)
+                        if let thumbnailURL = performer.thumbnailURL {
+                            CustomAsyncImage(url: thumbnailURL) { loader in
+                                if loader.isLoading {
+                                    ProgressView()
+                                } else if let image = loader.image {
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                } else {
+                                    Image(systemName: "person.fill")
+                                        .font(.largeTitle)
+                                        .foregroundColor(.secondary)
+                                }
                             }
+                        } else {
+                            Image(systemName: "person.fill")
+                                .font(.largeTitle)
+                                .foregroundColor(.secondary)
                         }
-                    } else {
-                        Image(systemName: "person.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.secondary)
                     }
-                }
-            }
-            .aspectRatio(9/12, contentMode: .fit) 
-            
-            // Gradient Overlay
-            LinearGradient(
-                gradient: Gradient(colors: [.clear, .black.opacity(0.8)]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 120)
-            
-            // Top Badge (Single value Top Right)
-            VStack {
-                HStack {
-                    // Age badge (Top Left)
-                    if let age = ageText {
-                        HStack(spacing: 3) {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 10, weight: .bold))
-                            Text(age)
-                                .font(.system(size: 11, weight: .bold))
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+
+                    LinearGradient(
+                        gradient: Gradient(colors: [.clear, .black.opacity(0.8)]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: min(120, geometry.size.height * 0.55))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .allowsHitTesting(false)
+
+                    VStack {
+                        HStack {
+                            if let age = ageText {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "calendar")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text(age)
+                                        .font(.system(size: 11, weight: .bold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                                .clipShape(Capsule())
+                                .shadow(color: .black.opacity(0.2), radius: 2)
+                            }
+
+                            Spacer()
+
+                            HStack(spacing: 3) {
+                                Image(systemName: badgeType == .oCount ? appearanceManager.oCounterIcon : (badgeType == .rating ? "star.fill" : "film"))
+                                    .font(.system(size: 10, weight: .bold))
+                                Text(
+                                    badgeType == .oCount
+                                        ? "\(performer.oCounter ?? 0)"
+                                        : (badgeType == .rating ? "\(performer.rating100 ?? 0)" : "\(performer.sceneCount)")
+                                )
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(DesignTokens.Opacity.badge))
+                            .clipShape(Capsule())
+                            .shadow(color: .black.opacity(0.2), radius: 2)
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(DesignTokens.Opacity.badge))
-                        .clipShape(Capsule())
-                        .shadow(color: .black.opacity(0.2), radius: 2)
+                        .padding(8)
+                        Spacer()
                     }
 
-                    Spacer()
-                    
-                    // Single Badge (Top Right)
-                    HStack(spacing: 3) {
-                        Image(systemName: badgeType == .oCount ? appearanceManager.oCounterIcon : "film")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("\(badgeType == .oCount ? (performer.oCounter ?? 0) : performer.sceneCount)")
-                            .font(.system(size: 11, weight: .bold))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .bottom, spacing: 6) {
+                            Text(performer.name)
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.black.opacity(DesignTokens.Opacity.badge))
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.2), radius: 2)
-                }
-                .padding(8)
-                Spacer()
-            }
-            
-            // Info Section (Bottom Name)
-            VStack(alignment: .leading, spacing: 4) {
-                 HStack(alignment: .bottom, spacing: 6) {
-                    Text(performer.name)
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
                 }
             }
-            .padding(12)
+            .aspectRatio(9/12, contentMode: .fit)
         }
         .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
+        .contentShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
         .cardShadow()
     }
 }

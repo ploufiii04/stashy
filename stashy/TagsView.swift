@@ -423,7 +423,7 @@ struct TagsView: View {
                 }
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.tags.isEmpty, errorMessage: viewModel.errorMessage)) {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Button {
@@ -733,6 +733,24 @@ struct TagDetailView: View {
         availableTabs.count > 1
     }
 
+    private var catalogFloatingChromeForFooter: CatalogFloatingChromeState {
+        let primaryEmpty: Bool = {
+            switch selectedDetailTab {
+            case .scenes: return viewModel.tagScenes.isEmpty
+            case .galleries: return viewModel.tagGalleries.isEmpty
+            case .studios: return viewModel.detailStudios.isEmpty
+            case .groups: return viewModel.detailGroups.isEmpty
+            case .images: return viewModel.detailImages.isEmpty
+            }
+        }()
+        return CatalogFloatingChromeState(
+            hasActiveServerConfig: configManager.activeConfig != nil,
+            primaryListIsEmpty: primaryEmpty,
+            errorMessage: viewModel.errorMessage,
+            imageFindListError: viewModel.imageFindListError
+        )
+    }
+
     /// Auto-switch to galleries only for a genuinely empty scene list, not for an empty filtered result.
     private var shouldAutoSwitchToTagGalleriesForEmptyScenes: Bool {
         viewModel.totalTagScenes == 0
@@ -947,7 +965,7 @@ struct TagDetailView: View {
                 }
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: catalogFloatingChromeForFooter) {
             HStack(spacing: 0) {
                 Button {
                     guard !isUpdatingFavorite else { return }

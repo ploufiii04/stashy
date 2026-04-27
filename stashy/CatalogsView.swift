@@ -176,7 +176,7 @@ struct GroupsView: View {
         .navigationTitle("Groups")
         .navigationBarTitleDisplayMode(.inline)
         .applyAppBackground()
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.groups.isEmpty, errorMessage: viewModel.errorMessage)) {
             HStack(spacing: 0) {
                 // Search Pill (if active)
                 if !searchText.isEmpty {
@@ -633,6 +633,25 @@ struct GroupDetailView: View {
         availableTabs.count > 1
     }
 
+    private var groupDetailCatalogFloatingChromeForFooter: CatalogFloatingChromeState {
+        let primaryEmpty: Bool = {
+            switch selectedDetailTab {
+            case .scenes: return viewModel.groupScenes.isEmpty
+            case .galleries: return viewModel.groupGalleries.isEmpty
+            case .performers: return viewModel.detailPerformers.isEmpty
+            case .studios: return viewModel.detailStudios.isEmpty
+            case .tags: return viewModel.detailTags.isEmpty
+            case .images: return viewModel.detailImages.isEmpty
+            }
+        }()
+        return CatalogFloatingChromeState(
+            hasActiveServerConfig: configManager.activeConfig != nil,
+            primaryListIsEmpty: primaryEmpty,
+            errorMessage: viewModel.errorMessage,
+            imageFindListError: viewModel.imageFindListError
+        )
+    }
+
     @ViewBuilder
     private var groupScenesStack: some View {
         VStack(spacing: 12) {
@@ -883,7 +902,7 @@ struct GroupDetailView: View {
                 }
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: groupDetailCatalogFloatingChromeForFooter) {
             HStack(spacing: 0) {
                 if selectedDetailTab == .scenes {
                     Button {

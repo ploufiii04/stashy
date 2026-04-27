@@ -27,6 +27,7 @@ struct TVApp: App {
             }
             .fullScreenCover(isPresented: $securityManager.isAppLocked) {
                 TVPasscodeEntryView()
+                    .presentationBackground(Color.black)
             }
             .onChange(of: scenePhase) { _, newPhase in
                 defer { lastScenePhase = newPhase }
@@ -132,53 +133,55 @@ struct TVPasscodeEntryView: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 16) {
-                Spacer().frame(height: 80)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                VStack(spacing: 16) {
+                    Spacer().frame(height: 80)
 
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 52))
-                    .foregroundStyle(.primary)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.primary)
 
-                Text("Enter PIN")
-                    .font(.largeTitle)
-                    .fontWeight(.semibold)
+                    Text("Enter PIN")
+                        .font(.largeTitle)
+                        .fontWeight(.semibold)
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .font(.title3)
-                }
-
-                HStack(spacing: 18) {
-                    ForEach(0..<4, id: \.self) { index in
-                        Circle()
-                            .fill(index < pin.count ? Color.white : Color.white.opacity(0.25))
-                            .frame(width: 14, height: 14)
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .font(.title3)
                     }
+
+                    HStack(spacing: 18) {
+                        ForEach(0..<4, id: \.self) { index in
+                            Circle()
+                                .fill(index < pin.count ? Color.white : Color.white.opacity(0.25))
+                                .frame(width: 14, height: 14)
+                        }
+                    }
+                    .offset(x: shakeTrigger ? 12 : 0)
+                    .animation(.default, value: shakeTrigger)
+                    .padding(.top, 8)
                 }
-                .offset(x: shakeTrigger ? 12 : 0)
-                .animation(.default, value: shakeTrigger)
-                .padding(.top, 8)
+
+                Spacer()
+
+                TVPinPad(
+                    onDigit: { digit in
+                        if pin.count < 4 { pin.append(digit) }
+                    },
+                    onDelete: {
+                        if !pin.isEmpty { pin.removeLast() }
+                    },
+                    onCancel: nil,
+                    isFocused: $isFocused
+                )
+                .padding(.bottom, 60)
             }
-
-            Spacer()
-
-            TVPinPad(
-                onDigit: { digit in
-                    if pin.count < 4 { pin.append(digit) }
-                },
-                onDelete: {
-                    if !pin.isEmpty { pin.removeLast() }
-                },
-                onCancel: nil,
-                isFocused: $isFocused
-            )
-            .padding(.bottom, 60)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 80)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 80)
-        .background(Color.black.opacity(0.95).ignoresSafeArea())
         .onChange(of: pin) { _, newValue in
             guard newValue.count == 4 else { return }
             if securityManager.verify(pin: newValue) {
@@ -212,62 +215,64 @@ struct TVPasscodeSetupView: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 16) {
-                Spacer().frame(height: 80)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                VStack(spacing: 16) {
+                    Spacer().frame(height: 80)
 
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 52))
-                    .foregroundStyle(.primary)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.primary)
 
-                Text(step == 1 ? "Set PIN" : "Confirm PIN")
-                    .font(.largeTitle)
-                    .fontWeight(.semibold)
+                    Text(step == 1 ? "Set PIN" : "Confirm PIN")
+                        .font(.largeTitle)
+                        .fontWeight(.semibold)
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .font(.title3)
-                }
-
-                HStack(spacing: 18) {
-                    ForEach(0..<4, id: \.self) { index in
-                        Circle()
-                            .fill(index < (step == 1 ? pin.count : confirm.count) ? Color.white : Color.white.opacity(0.25))
-                            .frame(width: 14, height: 14)
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .font(.title3)
                     }
+
+                    HStack(spacing: 18) {
+                        ForEach(0..<4, id: \.self) { index in
+                            Circle()
+                                .fill(index < (step == 1 ? pin.count : confirm.count) ? Color.white : Color.white.opacity(0.25))
+                                .frame(width: 14, height: 14)
+                        }
+                    }
+                    .offset(x: shakeTrigger ? 12 : 0)
+                    .animation(.default, value: shakeTrigger)
+                    .padding(.top, 8)
                 }
-                .offset(x: shakeTrigger ? 12 : 0)
-                .animation(.default, value: shakeTrigger)
-                .padding(.top, 8)
+
+                Spacer()
+
+                TVPinPad(
+                    onDigit: { digit in
+                        if step == 1 {
+                            if pin.count < 4 { pin.append(digit) }
+                        } else {
+                            if confirm.count < 4 { confirm.append(digit) }
+                        }
+                    },
+                    onDelete: {
+                        if step == 1 {
+                            if !pin.isEmpty { pin.removeLast() }
+                        } else {
+                            if !confirm.isEmpty { confirm.removeLast() }
+                        }
+                    },
+                    onCancel: { isPresented = false },
+                    isFocused: $isFocused
+                )
+
+                Spacer()
             }
-
-            Spacer()
-
-            TVPinPad(
-                onDigit: { digit in
-                    if step == 1 {
-                        if pin.count < 4 { pin.append(digit) }
-                    } else {
-                        if confirm.count < 4 { confirm.append(digit) }
-                    }
-                },
-                onDelete: {
-                    if step == 1 {
-                        if !pin.isEmpty { pin.removeLast() }
-                    } else {
-                        if !confirm.isEmpty { confirm.removeLast() }
-                    }
-                },
-                onCancel: { isPresented = false },
-                isFocused: $isFocused
-            )
-
-            Spacer()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 80)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 80)
-        .background(Color.black.opacity(0.95).ignoresSafeArea())
         .onChange(of: pin) { _, v in
             if step == 1 && v.count == 4 {
                 step = 2

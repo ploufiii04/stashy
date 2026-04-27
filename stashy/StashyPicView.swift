@@ -36,6 +36,19 @@ struct StashLineView: View {
         stashLineListFilters.refetchImages(viewModel: viewModel, initial: true)
     }
 
+    /// Nach Filter-/Sort-/Live-Wechsel: bei nächstem Ende von `isLoadingImages` auf ersten Post der **neu** geladenen Liste springen;
+    /// gespeicherte Scroll-IDs leeren, damit nichts Altes «restore»-t.
+    private func prepareScrollToTopAfterNextFetch() {
+        shouldScrollToTopAfterReload = true
+        pendingRestoreId = nil
+        scrollPositionId = nil
+        if let pid = performerFilter?.id {
+            coordinator.picsPerformerScrollIds[pid] = nil
+        } else {
+            coordinator.picsGlobalScrollId = nil
+        }
+    }
+
     private func rebuildGroupedPosts() {
         cachedPosts = computeGroupedPosts()
     }
@@ -107,7 +120,7 @@ struct StashLineView: View {
                 .colorScheme(.dark)
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.allImages.isEmpty, errorMessage: viewModel.errorMessage, imageFindListError: viewModel.imageFindListError)) {
             floatingBarContent
         }
         .sheet(isPresented: $stashLineListFilters.showFilterSortSheet) {
@@ -130,8 +143,12 @@ struct StashLineView: View {
                 tagPickerOptions: stashLineListFilters.tagPickerOptions,
                 tagPickerLoading: stashLineListFilters.tagPickerLoading,
                 onTagPickerSectionAppear: { stashLineListFilters.loadTagPickerOptions(viewModel: viewModel) },
-                onApply: { stashLineListFilters.applyLiveFilter(viewModel: viewModel) },
+                onApply: {
+                    prepareScrollToTopAfterNextFetch()
+                    stashLineListFilters.applyLiveFilter(viewModel: viewModel)
+                },
                 onReset: {
+                    prepareScrollToTopAfterNextFetch()
                     stashLineListFilters.catalogPresetRowSelection = ""
                     stashLineListFilters.selectedFilter = nil
                     stashLineListFilters.clearLiveChipsOnly()
@@ -193,6 +210,7 @@ struct StashLineView: View {
         }
         .onChange(of: stashLineListFilters.catalogPresetRowSelection) { _, newId in
             guard stashLineListFilters.showFilterSortSheet else { return }
+            prepareScrollToTopAfterNextFetch()
             stashLineListFilters.handlePresetSelection(newId, viewModel: viewModel)
         }
         .onAppear {
@@ -247,21 +265,25 @@ struct StashLineView: View {
             }
         }
         .onChange(of: viewModel.isLoadingImages) { wasLoading, isLoading in
-            print("🔄 isLoadingImages \(wasLoading)→\(isLoading) | pendingRestore=\(pendingRestoreId ?? "nil")")
-            if wasLoading && !isLoading, let id = pendingRestoreId {
+            print("🔄 isLoadingImages \(wasLoading)→\(isLoading) | pendingRestore=\(pendingRestoreId ?? "nil") | scrollTopAfter=\(shouldScrollToTopAfterReload)")
+            guard wasLoading && !isLoading else { return }
+            // Zuerst Gruppierung mit den **neuen** allImages, sonst war cachedPosts evtl. noch der alte
+            // Stand und scrollPosition trifft nicht den ersten Post der neuen Liste.
+            rebuildGroupedPosts()
+
+            if shouldScrollToTopAfterReload {
+                shouldScrollToTopAfterReload = false
+                pendingRestoreId = nil
+                let firstId = cachedPosts.first?.id
+                DispatchQueue.main.async {
+                    scrollPositionId = firstId
+                }
+                return
+            }
+
+            if let id = pendingRestoreId {
                 pendingRestoreId = nil
                 DispatchQueue.main.async { scrollPositionId = id }
-            }
-            if wasLoading && !isLoading, shouldScrollToTopAfterReload {
-                shouldScrollToTopAfterReload = false
-                DispatchQueue.main.async {
-                    // After reload/group rebuild, jump to the first post if available.
-                    if let first = cachedPosts.first?.id {
-                        scrollPositionId = first
-                    } else {
-                        scrollPositionId = nil
-                    }
-                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
@@ -401,16 +423,8 @@ struct StashLineView: View {
     }
 
     private func changeSortOption(to newOption: StashDBViewModel.ImageSortOption) {
+        prepareScrollToTopAfterNextFetch()
         stashLineListFilters.changeSortOption(to: newOption, viewModel: viewModel)
-        // Reset scroll state so the list cleanly jumps to the top after the reload.
-        shouldScrollToTopAfterReload = true
-        pendingRestoreId = nil
-        scrollPositionId = nil
-        if let pid = performerFilter?.id {
-            coordinator.picsPerformerScrollIds[pid] = nil
-        } else {
-            coordinator.picsGlobalScrollId = nil
-        }
     }
 
     private func computeGroupedPosts() -> [StashLinePost] {

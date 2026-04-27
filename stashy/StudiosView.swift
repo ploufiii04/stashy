@@ -425,7 +425,7 @@ struct StudiosView: View {
         .toolbar {
             toolbarContent
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.studios.isEmpty, errorMessage: viewModel.errorMessage)) {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Button {

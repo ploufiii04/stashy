@@ -84,7 +84,7 @@ struct MarkersView: View {
             }
             
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.sceneMarkers.isEmpty, errorMessage: viewModel.errorMessage)) {
             HStack(spacing: 0) {
                 // Sort Menu
                 Menu {

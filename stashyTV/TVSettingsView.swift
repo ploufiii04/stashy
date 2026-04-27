@@ -255,6 +255,7 @@ struct TVSettingsView: View {
             }
             .fullScreenCover(isPresented: $showingSetPasscode) {
                 TVPasscodeSetupView(isPresented: $showingSetPasscode)
+                    .presentationBackground(Color.black)
             }
             .sheet(item: $editingServer) { server in
                 TVServerFormView(server: server) { updatedServer in

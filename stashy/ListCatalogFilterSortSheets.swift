@@ -286,6 +286,7 @@ private enum PerformerCatalogSortFieldKind: String, CaseIterable, Identifiable {
     case updated_at
     case created_at
     case o_counter
+    case rating
     case random
 
     var id: String { rawValue }
@@ -298,6 +299,7 @@ private enum PerformerCatalogSortFieldKind: String, CaseIterable, Identifiable {
         case .updated_at: return "Updated"
         case .created_at: return "Created"
         case .o_counter: return "O Count"
+        case .rating: return "Rating"
         case .random: return "Random"
         }
     }
@@ -315,6 +317,7 @@ private enum PerformerCatalogSortFieldKind: String, CaseIterable, Identifiable {
         case .updated_at: return ascending ? .updatedAtAsc : .updatedAtDesc
         case .created_at: return ascending ? .createdAtAsc : .createdAtDesc
         case .o_counter: return ascending ? .oCountAsc : .oCountDesc
+        case .rating: return ascending ? .ratingAsc : .ratingDesc
         case .random: return .random
         }
     }

@@ -694,22 +694,27 @@ class TVPlayerViewModel: ObservableObject {
     private var progressTimer: AnyCancellable?
     private var sceneId: String?
     private var viewModel: StashDBViewModel?
+    /// Avoid duplicate seek/play when `status` KVO fires more than once at `.readyToPlay`.
+    private var didApplyInitialPlayback = false
 
     func setupPlayer(url: URL, sceneId: String, viewModel: StashDBViewModel, startAt timestamp: Double = 0) {
         print("🚀 TV PLAYER VM: Setting up player for URL: \(url.absoluteString) at \(timestamp)s")
         self.sceneId = sceneId
         self.viewModel = viewModel
-        
+        self.didApplyInitialPlayback = false
+
         let newPlayer = createPlayer(for: url)
-        
-        if timestamp > 0 {
-            newPlayer.seek(to: CMTime(seconds: timestamp, preferredTimescale: 600))
-        }
-        
-        statusObserver = newPlayer.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] item, change in
+        self.player = newPlayer
+        self.isShowingPlayer = true
+
+        let startSeconds = max(0, timestamp)
+
+        statusObserver = newPlayer.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self, weak newPlayer] item, _ in
+            guard let self, let newPlayer else { return }
             DispatchQueue.main.async {
+                guard self.player === newPlayer else { return }
                 if item.status == .failed {
-                    self?.error = item.error
+                    self.error = item.error
                     print("❌ TV PLAYER VM: Playback FAILED: \(item.error?.localizedDescription ?? "Unknown error")")
                     if let error = item.error as NSError? {
                         print("❌ TV PLAYER VM: Error domain: \(error.domain), code: \(error.code)")
@@ -717,18 +722,42 @@ class TVPlayerViewModel: ObservableObject {
                     }
                 } else if item.status == .readyToPlay {
                     print("✅ TV PLAYER VM: Player item READY to play")
+                    self.applyInitialPlaybackIfNeeded(player: newPlayer, startSeconds: startSeconds)
                 }
             }
         }
-        
-        self.player = newPlayer
-        self.isShowingPlayer = true
-        
+
         progressTimer = Timer.publish(every: 10, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.saveProgress()
             }
+    }
+
+    /// Seeking before `readyToPlay` (especially HLS/transcodes) causes UI hangs and endless buffering after scrubs.
+    private func applyInitialPlaybackIfNeeded(player: AVPlayer, startSeconds: Double) {
+        guard !didApplyInitialPlayback else { return }
+        didApplyInitialPlayback = true
+
+        let item = player.currentItem
+        let durationSec = item?.duration.seconds ?? 0
+        var start = startSeconds
+        if durationSec.isFinite, durationSec > 0 {
+            start = min(start, max(0, durationSec - 0.5))
+        }
+
+        if start > 0.25 {
+            let target = CMTime(seconds: start, preferredTimescale: 600)
+            let tol = CMTime(seconds: 2, preferredTimescale: 600)
+            player.seek(to: target, toleranceBefore: tol, toleranceAfter: tol) { [weak self, weak player] _ in
+                DispatchQueue.main.async {
+                    guard let self, let player, self.player === player else { return }
+                    player.play()
+                }
+            }
+        } else {
+            player.play()
+        }
     }
 
     func saveProgress() {
@@ -745,13 +774,15 @@ class TVPlayerViewModel: ObservableObject {
 
     func clear() {
         saveProgress()
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
         progressTimer = nil
         statusObserver = nil
+        didApplyInitialPlayback = true
+        let p = player
         player = nil
         sceneId = nil
         viewModel = nil
+        p?.pause()
+        p?.replaceCurrentItem(with: nil)
     }
 }
 
@@ -761,16 +792,11 @@ struct TVVideoPlayerView: View {
     let player: AVPlayer
     @Binding var isPresented: Bool
 
-    @State private var isPlaying = true
-
     var body: some View {
         VideoPlayer(player: player) {
             // Empty overlay - VideoPlayer provides native tvOS controls
         }
         .ignoresSafeArea()
-        .onAppear {
-            player.play()
-        }
         .onDisappear {
             // Final progress save handled by VM clear
         }

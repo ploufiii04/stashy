@@ -12,6 +12,7 @@ import SwiftUI
 struct PerformerDetailView: View {
     @State var performer: Performer
     @ObservedObject var appearanceManager = AppearanceManager.shared
+    @ObservedObject var configManager = ServerConfigManager.shared
     @ObservedObject var tabManager = TabManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @EnvironmentObject var coordinator: NavigationCoordinator
@@ -21,6 +22,8 @@ struct PerformerDetailView: View {
     @State private var performerLiveFilterSheetPresented = false
     @State private var isFavorite: Bool = false
     @State private var isUpdatingFavorite: Bool = false
+    /// Verhindert mehrfaches `loadData()` bei wiederholtem SwiftUI-`onAppear` (leere Performer → identische Refetch-Schleife).
+    @State private var hasRunPerformerDetailInitialLoad = false
     @StateObject private var linkedStudios: DetailLinkedStudiosFilterModel
     @StateObject private var linkedTags: DetailLinkedTagsFilterModel
     @StateObject private var linkedGalleries: DetailLinkedGalleriesFilterModel
@@ -64,7 +67,10 @@ struct PerformerDetailView: View {
     }
     
     private var effectiveScenes: Int {
-        max(viewModel.totalPerformerScenes, displayPerformer.sceneCount)
+        if viewModel.performerDetailScenesInitialFetchCompleted {
+            return viewModel.totalPerformerScenes
+        }
+        return max(viewModel.totalPerformerScenes, displayPerformer.sceneCount)
     }
     
     private var effectiveGalleries: Int {
@@ -84,6 +90,25 @@ struct PerformerDetailView: View {
 
     private var showTabSwitcher: Bool {
         availableTabs.count > 1
+    }
+
+    private var performerDetailCatalogFloatingChromeForFooter: CatalogFloatingChromeState {
+        let primaryEmpty: Bool = {
+            switch selectedDetailTab {
+            case .scenes: return viewModel.performerScenes.isEmpty
+            case .galleries: return viewModel.performerGalleries.isEmpty
+            case .studios: return viewModel.detailStudios.isEmpty
+            case .tags: return viewModel.detailTags.isEmpty
+            case .groups: return viewModel.detailGroups.isEmpty
+            case .images: return viewModel.detailImages.isEmpty
+            }
+        }()
+        return CatalogFloatingChromeState(
+            hasActiveServerConfig: configManager.activeConfig != nil,
+            primaryListIsEmpty: primaryEmpty,
+            errorMessage: viewModel.errorMessage,
+            imageFindListError: viewModel.imageFindListError
+        )
     }
 
     private var shouldAutoSwitchToPerformerGalleriesForEmptyScenes: Bool {
@@ -282,7 +307,10 @@ struct PerformerDetailView: View {
         }
         .applyAppBackground()
         .onAppear {
-            loadData()
+            if !hasRunPerformerDetailInitialLoad {
+                hasRunPerformerDetailInitialLoad = true
+                loadData()
+            }
             isFavorite = performer.favorite ?? false
         }
         .onChange(of: viewModel.totalPerformerGalleries) { oldValue, newValue in
@@ -362,7 +390,7 @@ struct PerformerDetailView: View {
                 }
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: performerDetailCatalogFloatingChromeForFooter) {
             HStack(spacing: 0) {
                 Button {
                     guard !isUpdatingFavorite else { return }
@@ -721,7 +749,7 @@ struct PerformerDetailView: View {
                     ProgressView()
                     Text("Loading more galleries...").font(.caption).foregroundColor(.secondary)
                 }.padding(.vertical, 20)
-             } else if viewModel.hasMorePerformerGalleries {
+             } else if viewModel.hasMorePerformerGalleries && !viewModel.performerGalleries.isEmpty {
                  Color.clear.frame(height: 1).onAppear { viewModel.loadMorePerformerGalleries(performerId: performer.id) }
              }
         }
@@ -736,7 +764,7 @@ struct PerformerDetailView: View {
                 .buttonStyle(.plain)
             }
             if viewModel.isLoadingDetailStudios { ProgressView().padding() }
-            else if viewModel.hasMoreDetailStudios {
+            else if viewModel.hasMoreDetailStudios && !viewModel.detailStudios.isEmpty {
                 Color.clear.onAppear { linkedStudios.refetchStudios(viewModel: viewModel, initial: false) }
             }
         }
@@ -751,7 +779,7 @@ struct PerformerDetailView: View {
                 .buttonStyle(.plain)
             }
             if viewModel.isLoadingDetailTags { ProgressView().padding() }
-            else if viewModel.hasMoreDetailTags {
+            else if viewModel.hasMoreDetailTags && !viewModel.detailTags.isEmpty {
                 Color.clear.onAppear { linkedTags.refetchTags(viewModel: viewModel, initial: false) }
             }
         }
@@ -766,7 +794,7 @@ struct PerformerDetailView: View {
                 .buttonStyle(.plain)
             }
             if viewModel.isLoadingDetailGroups { ProgressView().padding() }
-            else if viewModel.hasMoreDetailGroups {
+            else if viewModel.hasMoreDetailGroups && !viewModel.detailGroups.isEmpty {
                 Color.clear.onAppear { viewModel.fetchDetailGroups(performerId: performer.id, isInitialLoad: false) }
             }
         }
@@ -781,7 +809,7 @@ struct PerformerDetailView: View {
                 .buttonStyle(.plain)
             }
             if viewModel.isLoadingDetailImages { ProgressView().padding() }
-            else if viewModel.hasMoreDetailImages {
+            else if viewModel.hasMoreDetailImages && !viewModel.detailImages.isEmpty {
                 Color.clear.onAppear { linkedImages.refetchImages(viewModel: viewModel, initial: false) }
             }
         }
@@ -793,7 +821,7 @@ struct PerformerDetailView: View {
         
         return HStack(alignment: .top, spacing: 0) {
             // Thumbnail: 9:16 portrait, flush to edges, cropped from top
-            ZStack(alignment: .bottom) {
+            ZStack(alignment: .top) {
                 if let thumbnailURL = displayPerformer.thumbnailURL {
                     CustomAsyncImage(url: thumbnailURL) { loader in
                         if loader.isLoading {
@@ -803,7 +831,6 @@ struct PerformerDetailView: View {
                             image.resizable()
                                 .scaledToFill()
                                 .frame(width: imageWidth)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .clipped()
                         } else {
                             defaultThumbnailContent(width: imageWidth)
@@ -813,9 +840,10 @@ struct PerformerDetailView: View {
                     defaultThumbnailContent(width: imageWidth)
                 }
             }
-            .frame(width: imageWidth)
+            .frame(width: imageWidth, alignment: .top)
             .frame(minHeight: collapsedHeight)
-            .frame(maxHeight: isHeaderExpanded ? .infinity : collapsedHeight)
+            // Wenn ausgeklappt: Zeilenhöhe = Detailbereich, kein Füllen des übergeordneten VStack (siehe fixedSize am Header)
+            .frame(maxHeight: isHeaderExpanded ? nil : collapsedHeight, alignment: .top)
             .background(Color.gray.opacity(DesignTokens.Opacity.placeholder))
             
             // Details Section
@@ -883,6 +911,8 @@ struct PerformerDetailView: View {
                 .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
         )
         .cardShadow()
+        // Nur so hoch wie Inhalt (Name/Details), nicht so hoch wie die komplette übergeordnete Fläche
+        .fixedSize(horizontal: false, vertical: true)
         .overlay(
             Group {
                 let allDetails = getPerformerDetails(displayPerformer)
@@ -921,7 +951,7 @@ struct PerformerDetailView: View {
     private func defaultThumbnailContent(width: CGFloat) -> some View {
         Rectangle().fill(Color.gray.opacity(DesignTokens.Opacity.placeholder))
             .frame(width: width)
-            .frame(maxHeight: .infinity)
+            .frame(maxHeight: .infinity, alignment: .top)
             .overlay(Image(systemName: "person.fill").font(.system(size: 32)).foregroundColor(.appAccent.opacity(0.5)))
     }
 
@@ -947,16 +977,11 @@ struct PerformerDetailView: View {
     private func getPerformerDetails(_ p: Performer) -> [(label: String, value: String)] {
         var list: [(label: String, value: String)] = []
         
-        // Add Scenes and Galleries as the first row
+        // First row: scenes + galleries; third slot is rating (Stash 0–100).
         list.append((label: "SCENES", value: "\(p.sceneCount)"))
-        if let gCount = p.galleryCount ?? viewModel.totalPerformerGalleries as Int?, gCount > 0 {
-            list.append((label: "GALLERIES", value: "\(gCount)"))
-        } else {
-            // Add a placeholder to keep the grid aligned if galleries are 0
-            // Or just leave it if there's only 1 item in the first row. 
-            // Usually it looks better if the first row is full.
-            // But if there are no galleries, maybe just leave it.
-        }
+        let galleryDisplay = max(p.galleryCount ?? 0, viewModel.totalPerformerGalleries)
+        list.append((label: "GALLERIES", value: "\(galleryDisplay)"))
+        list.append((label: "RATING", value: p.rating100.map { String($0) } ?? "—"))
         
         if let val = p.gender, !val.isEmpty { list.append((label: "GENDER", value: val)) }
         

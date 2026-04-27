@@ -1,0 +1,26 @@
+fragment HotOrNotPerformerFields on Performer {
+  id
+  name
+  disambiguation
+  birthdate
+  country
+  image_path
+  scene_count
+  image_count
+  gallery_count
+  gender
+  ethnicity
+  height_cm
+  weight
+  measurements
+  fake_tits
+  penis_length
+  career_length
+  tattoos
+  piercings
+  alias_list
+  favorite
+  rating100
+  o_counter
+  custom_fields
+}

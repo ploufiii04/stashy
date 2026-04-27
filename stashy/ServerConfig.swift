@@ -9,6 +9,11 @@ import Foundation
 import SwiftUI
 import Combine
 
+extension Notification.Name {
+    /// Nach Abschluss von `StashDBViewModel.initializeServerConnection()` (Filter + Statistik). z.B. tvOS-Dashboard nach Serverwechsel neu laden; vermeidet Race mit `GraphQLClient.cancelAllRequests()`.
+    static let stashServerInitializationFinished = Notification.Name("stashServerInitializationFinished")
+}
+
 enum ServerProtocol: String, Codable, CaseIterable {
     case http = "HTTP"
     case https = "HTTPS"

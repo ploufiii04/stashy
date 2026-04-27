@@ -15,6 +15,7 @@ struct ImagesView: View {
     @StateObject private var imageListFilters: DetailLinkedImagesFilterModel
     @ObservedObject var appearanceManager = AppearanceManager.shared
     @ObservedObject var configManager = ServerConfigManager.shared
+    @EnvironmentObject private var coordinator: NavigationCoordinator
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
     
     @State private var lastOpenedImageId: String?
@@ -58,6 +59,20 @@ struct ImagesView: View {
         imageListFilters.catalogFilterSortFABActive
     }
 
+    /// Wie `ScenesView`: nur echte Bildlisten-Ladevorgänge blockieren, nicht `viewModel.isLoading` von anderen Queries.
+    private var showsBlockingInitialLoad: Bool {
+        if gallery != nil {
+            viewModel.isLoadingGalleryImages && viewModel.galleryImages.isEmpty
+        } else {
+            viewModel.isLoadingImages && viewModel.allImages.isEmpty
+        }
+    }
+
+    /// Verbindungs- bzw. Ladefehler für die Bildliste (`imageFindListError` ist gegen Races mit `fetchSavedFilters` stabil).
+    private var imagesListShowsConnectionError: Bool {
+        displayedImages.isEmpty && (viewModel.imageFindListError != nil || viewModel.errorMessage != nil)
+    }
+
     var body: some View {
         imagesCoreChrome
             .sheet(isPresented: $imageListFilters.showFilterSortSheet, content: imagesFilterSortSheet)
@@ -92,9 +107,9 @@ struct ImagesView: View {
                 ConnectionErrorView {
                     imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                 }
-            } else if (viewModel.isLoadingImages || viewModel.isLoadingGalleryImages) && displayedImages.isEmpty {
+            } else if showsBlockingInitialLoad {
                 StandardLoadingView(message: "Loading images...")
-            } else if displayedImages.isEmpty && viewModel.errorMessage != nil {
+            } else if imagesListShowsConnectionError {
                 ConnectionErrorView {
                     imageListFilters.refetchImages(viewModel: viewModel, initial: true)
                 }
@@ -127,6 +142,7 @@ struct ImagesView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(gallery?.title ?? "Images")
         .navigationBarTitleDisplayMode(.inline)
         .applyAppBackground()
@@ -160,16 +176,21 @@ struct ImagesView: View {
                  }
             }
 
-            // Fetch filters
-            viewModel.fetchSavedFilters()
-
+            // Wie GalleriesView: bei gesetztem Standard-Filter erst laden, wenn Saved Filters da sind
+            // (oder kein Standard), sonst bleibt die Liste leer ohne Request → kein „Server not reachable“.
             if gallery != nil, viewModel.galleryImages.isEmpty {
                 imageListFilters.refetchImages(viewModel: viewModel, initial: true)
-            } else if gallery == nil,
-                      TabManager.shared.getDefaultFilterId(for: .images) == nil,
-                      viewModel.allImages.isEmpty {
-                imageListFilters.refetchImages(viewModel: viewModel, initial: true)
+            } else if gallery == nil, viewModel.allImages.isEmpty {
+                if TabManager.shared.getDefaultFilterId(for: .images) == nil || !viewModel.savedFilters.isEmpty {
+                    imageListFilters.refetchImages(viewModel: viewModel, initial: true)
+                }
             }
+
+            if gallery == nil, !coordinator.activeSearchText.isEmpty {
+                coordinator.activeSearchText = ""
+            }
+
+            viewModel.fetchSavedFilters()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DefaultFilterChanged"))) { notification in
             guard gallery == nil else { return }
@@ -223,7 +244,7 @@ struct ImagesView: View {
                 imageListFilters.refetchImages(viewModel: viewModel, initial: true)
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: displayedImages.isEmpty, errorMessage: viewModel.errorMessage, imageFindListError: viewModel.imageFindListError)) {
             HStack(spacing: 0) {
                 if isSelectionMode {
                     Button {

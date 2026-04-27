@@ -23,6 +23,7 @@ import StoreKit
 enum PerformerBadgeType {
     case sceneCount
     case oCount
+    case rating
 }
 
 // MARK: - Global Helper Functions
@@ -147,7 +148,8 @@ func createPlayer(for url: URL) -> AVPlayer {
     // A small forward buffer (2s) keeps seeks snappy on HLS — a 10s buffer
     // forces AVPlayer to download/transcode ~10s per jump before playback.
     playerItem.preferredForwardBufferDuration = 2
-    playerItem.automaticallyPreservesTimeOffsetFromLive = true
+    // Stash scenes are VOD; preserving live offset breaks seeks/resume on HLS.
+    playerItem.automaticallyPreservesTimeOffsetFromLive = false
     playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
 
     let player = AVPlayer(playerItem: playerItem)

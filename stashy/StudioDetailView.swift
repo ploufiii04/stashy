@@ -12,6 +12,7 @@ import SwiftUI
 struct StudioDetailView: View {
     let studio: Studio
     @ObservedObject var appearanceManager = AppearanceManager.shared
+    @ObservedObject var configManager = ServerConfigManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var studioLiveFilterSheetPresented = false
@@ -72,7 +73,26 @@ struct StudioDetailView: View {
         availableTabs.count > 1
     }
 
-    
+    private var studioDetailCatalogFloatingChromeForFooter: CatalogFloatingChromeState {
+        let primaryEmpty: Bool = {
+            switch selectedDetailTab {
+            case .scenes: return viewModel.studioScenes.isEmpty
+            case .galleries: return viewModel.studioGalleries.isEmpty
+            case .studios: return viewModel.detailStudios.isEmpty
+            case .performers: return viewModel.detailPerformers.isEmpty
+            case .tags: return viewModel.detailTags.isEmpty
+            case .groups: return viewModel.detailGroups.isEmpty
+            case .images: return viewModel.detailImages.isEmpty
+            }
+        }()
+        return CatalogFloatingChromeState(
+            hasActiveServerConfig: configManager.activeConfig != nil,
+            primaryListIsEmpty: primaryEmpty,
+            errorMessage: viewModel.errorMessage,
+            imageFindListError: viewModel.imageFindListError
+        )
+    }
+
     private var galleryColumns: [GridItem] {
         if horizontalSizeClass == .regular {
             return Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
@@ -372,7 +392,7 @@ struct StudioDetailView: View {
                 }
             }
         }
-        .floatingActionBar {
+        .floatingActionBar(isPresented: true, catalogChrome: studioDetailCatalogFloatingChromeForFooter) {
             HStack(spacing: 0) {
                 Button {
                     guard !isUpdatingFavorite else { return }
