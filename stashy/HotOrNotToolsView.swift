@@ -87,12 +87,41 @@ private struct HotOrNotMatchRecord: Codable, Equatable {
 
 private enum HotOrNotSwissMath {
 
+    /// Stash `custom_fields` may encode `hotornot_stats` as a JSON **string** (plugin) or as a structured **object** (GraphQL).
+    private static func intFromStashJSON(_ v: StashJSONValue?) -> Int {
+        guard let v else { return 0 }
+        switch v {
+        case .int(let i): return i
+        case .double(let d): return Int(d.rounded())
+        case .string(let s): return Int(s) ?? 0
+        default: return 0
+        }
+    }
+
+    private static func stringFromStashJSON(_ v: StashJSONValue?) -> String? {
+        guard let v else { return nil }
+        if case .string(let s) = v { return s }
+        return nil
+    }
+
     static func parseStats(from customFields: [String: StashJSONValue]?) -> HotOrNotStats {
         guard let fields = customFields else { return .empty }
         if case .string(let json) = fields["hotornot_stats"],
            let data = json.data(using: .utf8),
            let decoded = try? JSONDecoder().decode(HotOrNotStats.self, from: data) {
             return decoded
+        }
+        if case .object(let obj) = fields["hotornot_stats"] {
+            return HotOrNotStats(
+                total_matches: intFromStashJSON(obj["total_matches"]),
+                wins: intFromStashJSON(obj["wins"]),
+                losses: intFromStashJSON(obj["losses"]),
+                draws: intFromStashJSON(obj["draws"]),
+                current_streak: intFromStashJSON(obj["current_streak"]),
+                best_streak: intFromStashJSON(obj["best_streak"]),
+                worst_streak: intFromStashJSON(obj["worst_streak"]),
+                last_match: stringFromStashJSON(obj["last_match"])
+            )
         }
         if case .string(let elo) = fields["elo_matches"], let n = Int(elo) {
             var s = HotOrNotStats.empty
@@ -136,6 +165,7 @@ private enum HotOrNotSwissMath {
     }
 
     /// Plugin `getKFactor`: halved K only for `mode == "champion"`; `"gauntlet"` uses same base as Swiss.
+    /// Use `matchCount: nil` when there is no Hot-or-Not history so the rating-distance fallback applies (otherwise `0` is treated as “&lt;10 matches” and locks K at 16).
     static func getKFactor(currentRating: Double, matchCount: Int?, mode: String) -> Int {
         let baseK: Int
         if let mc = matchCount {
@@ -147,12 +177,19 @@ private enum HotOrNotSwissMath {
         return mode == "champion" ? max(1, Int(round(Double(baseK) * 0.5))) : baseK
     }
 
+    /// `nil` when no recorded Hot-or-Not games → `getKFactor` uses rating-distance bands instead of novice K=16 on `0`.
+    static func matchCountParameterForK(_ stats: HotOrNotStats) -> Int? {
+        let sumWL = stats.wins + stats.losses + stats.draws
+        guard stats.total_matches > 0 || sumWL > 0 else { return nil }
+        return max(stats.total_matches, sumWL)
+    }
+
     /// Swiss or Champion full ELO on both sides (`calculateMatchOutcome` non-gauntlet branch in hot_or_not.js).
     static func outcomeRatedMatch(
         winnerRating: Double,
         loserRating: Double,
-        winnerMatchCount: Int,
-        loserMatchCount: Int,
+        winnerMatchCount: Int?,
+        loserMatchCount: Int?,
         eloMode: String
     ) -> (winnerGain: Int, loserLoss: Int) {
         let ratingDiff = loserRating - winnerRating
@@ -167,8 +204,8 @@ private enum HotOrNotSwissMath {
     static func outcomeSwiss(
         winnerRating: Double,
         loserRating: Double,
-        winnerMatchCount: Int,
-        loserMatchCount: Int
+        winnerMatchCount: Int?,
+        loserMatchCount: Int?
     ) -> (winnerGain: Int, loserLoss: Int) {
         outcomeRatedMatch(
             winnerRating: winnerRating,
@@ -182,8 +219,8 @@ private enum HotOrNotSwissMath {
     static func outcomeChampion(
         winnerRating: Double,
         loserRating: Double,
-        winnerMatchCount: Int,
-        loserMatchCount: Int
+        winnerMatchCount: Int?,
+        loserMatchCount: Int?
     ) -> (winnerGain: Int, loserLoss: Int) {
         outcomeRatedMatch(
             winnerRating: winnerRating,
@@ -198,7 +235,7 @@ private enum HotOrNotSwissMath {
     static func outcomeGauntlet(
         winnerRating: Double,
         loserRating: Double,
-        winnerMatchCount: Int,
+        winnerMatchCount: Int?,
         isChampionWinner: Bool,
         isFallingWinner: Bool,
         isChampionLoser: Bool,
@@ -226,8 +263,8 @@ private enum HotOrNotSwissMath {
     static func outcomeDraw(
         leftRating: Double,
         rightRating: Double,
-        leftMatches: Int,
-        rightMatches: Int
+        leftMatches: Int?,
+        rightMatches: Int?
     ) -> (leftGain: Int, rightLoss: Int) {
         let ratingDiff = rightRating - leftRating
         let expectedWinner = 1 / (1 + pow(10, ratingDiff / 400))
@@ -237,6 +274,64 @@ private enum HotOrNotSwissMath {
         let rightLoss = Int(round(lK * (1 - expectedWinner - 0.5)))
         return (leftGain, rightLoss)
     }
+
+    #if DEBUG
+    /// Xcode-Konsole: nach jedem Vote eine Zeile mit E, K, Match-Count-Param und Roh-Stats. Filter: `[HotOrNot ELO]`.
+    static func logDuelVoteDebugLine(
+        duelModeRaw: String,
+        winnerDisplay: String,
+        loserDisplay: String,
+        winnerRating: Double,
+        loserRating: Double,
+        winnerStats: HotOrNotStats,
+        loserStats: HotOrNotStats,
+        gain: Int,
+        loss: Int,
+        gauntlet: (isChampionWinner: Bool, isFallingWinner: Bool, isChampionLoser: Bool, isFallingLoser: Bool, loserRank: Int?)?
+    ) {
+        let mcW = matchCountParameterForK(winnerStats)
+        let mcL = matchCountParameterForK(loserStats)
+        let ratingDiff = loserRating - winnerRating
+        let ew = 1 / (1 + pow(10, ratingDiff / 400))
+        let eStr = String(format: "%.4f", ew)
+        if let g = gauntlet {
+            let k = getKFactor(currentRating: winnerRating, matchCount: mcW, mode: "gauntlet")
+            print(
+                "[HotOrNot ELO] \(duelModeRaw) \(winnerDisplay) vs \(loserDisplay) rW=\(String(format: "%.1f", winnerRating)) rL=\(String(format: "%.1f", loserRating)) E=\(eStr) Kgauntlet=\(k) cwW=\(g.isChampionWinner) fallW=\(g.isFallingWinner) cwL=\(g.isChampionLoser) fallL=\(g.isFallingLoser) loserRank=\(g.loserRank.map(String.init) ?? "nil") | mcW=\(mcW.map(String.init) ?? "nil") mcL=\(mcL.map(String.init) ?? "nil") W(tm/w/l/d)=\(winnerStats.total_matches)/\(winnerStats.wins)/\(winnerStats.losses)/\(winnerStats.draws) L(tm/w/l/d)=\(loserStats.total_matches)/\(loserStats.wins)/\(loserStats.losses)/\(loserStats.draws) → gain=\(gain) loss=\(loss)"
+            )
+        } else {
+            let eloMode = duelModeRaw == "champion" ? "champion" : "swiss"
+            let wK = getKFactor(currentRating: winnerRating, matchCount: mcW, mode: eloMode)
+            let lK = getKFactor(currentRating: loserRating, matchCount: mcL, mode: eloMode)
+            print(
+                "[HotOrNot ELO] \(duelModeRaw) \(winnerDisplay) vs \(loserDisplay) rW=\(String(format: "%.1f", winnerRating)) rL=\(String(format: "%.1f", loserRating)) E=\(eStr) Kw=\(wK) Kl=\(lK) mcW=\(mcW.map(String.init) ?? "nil") mcL=\(mcL.map(String.init) ?? "nil") W(tm/w/l/d)=\(winnerStats.total_matches)/\(winnerStats.wins)/\(winnerStats.losses)/\(winnerStats.draws) L(tm/w/l/d)=\(loserStats.total_matches)/\(loserStats.wins)/\(loserStats.losses)/\(loserStats.draws) → gain=\(gain) loss=\(loss)"
+            )
+        }
+    }
+
+    static func logDrawSkipDebugLine(
+        duelModeRaw: String,
+        leftDisplay: String,
+        rightDisplay: String,
+        leftRating: Double,
+        rightRating: Double,
+        leftStats: HotOrNotStats,
+        rightStats: HotOrNotStats,
+        leftGain: Int,
+        rightLoss: Int
+    ) {
+        let mcL = matchCountParameterForK(leftStats)
+        let mcR = matchCountParameterForK(rightStats)
+        let ratingDiff = rightRating - leftRating
+        let ew = 1 / (1 + pow(10, ratingDiff / 400))
+        let kLeft = getKFactor(currentRating: leftRating, matchCount: mcL, mode: "swiss")
+        let kRight = getKFactor(currentRating: rightRating, matchCount: mcR, mode: "swiss")
+        let eStr = String(format: "%.4f", ew)
+        print(
+            "[HotOrNot ELO] draw/skip \(duelModeRaw) \(leftDisplay) vs \(rightDisplay) rL=\(String(format: "%.1f", leftRating)) rR=\(String(format: "%.1f", rightRating)) E(left wins prob)=\(eStr) K_left=\(kLeft) K_right=\(kRight) mcL=\(mcL.map(String.init) ?? "nil") mcR=\(mcR.map(String.init) ?? "nil") L(tm/w/l/d)=\(leftStats.total_matches)/\(leftStats.wins)/\(leftStats.losses)/\(leftStats.draws) R(tm/w/l/d)=\(rightStats.total_matches)/\(rightStats.wins)/\(rightStats.losses)/\(rightStats.draws) → dL=\(leftGain) dR=\(rightLoss)"
+        )
+    }
+    #endif
 
     static func updateStats(_ current: HotOrNotStats, won: Bool?) -> HotOrNotStats {
         var n = current
@@ -757,6 +852,54 @@ private struct HotOrNotFindResponse: Codable {
     let data: HotOrNotFindData?
 }
 
+// MARK: - Battle rank (Performer detail header; same pool as Charts)
+
+enum HotOrNotBattleDisplay {
+    private static let gendersKey = "stashy.hotOrNot.selectedGenders"
+    private static let client = GraphQLClient.shared
+
+    static func loadGenders() -> Set<String> {
+        if let data = UserDefaults.standard.data(forKey: gendersKey),
+           let arr = try? JSONDecoder().decode([String].self, from: data), !arr.isEmpty {
+            return Set(arr)
+        }
+        return ["FEMALE"]
+    }
+
+    static func saveGenders(_ genders: Set<String>) {
+        let arr = Array(genders).sorted()
+        if let data = try? JSONEncoder().encode(arr) {
+            UserDefaults.standard.set(data, forKey: gendersKey)
+        }
+    }
+
+    private static func performerFilter(genders: Set<String>) -> [String: Any] {
+        [
+            "gender": ["value_list": Array(genders).sorted(), "modifier": "INCLUDES"],
+            "NOT": ["is_missing": "image"] as [String: Any]
+        ]
+    }
+
+    /// Same query/sort as `HotOrNotViewModel.refreshLeaderboard` — `rank/total` in the Hot Or Not pool, or `nil` if not listed or on error.
+    static func fetchRankSlashTotal(performerId: String) async -> String? {
+        let genders = loadGenders()
+        let query = GraphQLQueries.queryWithFragments("hotOrNotFindPerformers")
+        let variables: [String: Any] = [
+            "performer_filter": performerFilter(genders: genders),
+            "filter": ["per_page": -1, "sort": "rating", "direction": "DESC"] as [String: Any]
+        ]
+        do {
+            let res: HotOrNotFindResponse = try await client.execute(query: query, variables: variables)
+            let list = res.data?.findPerformers.performers ?? []
+            let sorted = list.sorted { ($0.rating100 ?? 50) > ($1.rating100 ?? 50) }
+            guard !sorted.isEmpty, let idx = sorted.firstIndex(where: { $0.id == performerId }) else { return nil }
+            return "\(idx + 1)/\(sorted.count)"
+        } catch {
+            return nil
+        }
+    }
+}
+
 private struct HotOrNotMutationData: Codable {
     let performerUpdate: HotOrNotUpdated?
 }
@@ -812,7 +955,9 @@ private final class HotOrNotViewModel: ObservableObject {
     @Published var duelMode: DuelMode = .swiss {
         didSet { UserDefaults.standard.set(duelMode.rawValue, forKey: Self.duelModeDefaultsKey) }
     }
-    @Published var selectedGenders: Set<String> = ["FEMALE"]
+    @Published var selectedGenders: Set<String> = HotOrNotBattleDisplay.loadGenders() {
+        didSet { HotOrNotBattleDisplay.saveGenders(selectedGenders) }
+    }
     @Published var left: HotOrNotPerformerData?
     @Published var right: HotOrNotPerformerData?
     @Published var rankLeft: Int?
@@ -1183,8 +1328,8 @@ private final class HotOrNotViewModel: ObservableObject {
             let o = HotOrNotSwissMath.outcomeSwiss(
                 winnerRating: wr,
                 loserRating: lr,
-                winnerMatchCount: winner.stats.total_matches,
-                loserMatchCount: loser.stats.total_matches
+                winnerMatchCount: HotOrNotSwissMath.matchCountParameterForK(winner.stats),
+                loserMatchCount: HotOrNotSwissMath.matchCountParameterForK(loser.stats)
             )
             gain = o.winnerGain
             loss = o.loserLoss
@@ -1192,8 +1337,8 @@ private final class HotOrNotViewModel: ObservableObject {
             let o = HotOrNotSwissMath.outcomeChampion(
                 winnerRating: wr,
                 loserRating: lr,
-                winnerMatchCount: winner.stats.total_matches,
-                loserMatchCount: loser.stats.total_matches
+                winnerMatchCount: HotOrNotSwissMath.matchCountParameterForK(winner.stats),
+                loserMatchCount: HotOrNotSwissMath.matchCountParameterForK(loser.stats)
             )
             gain = o.winnerGain
             loss = o.loserLoss
@@ -1201,7 +1346,7 @@ private final class HotOrNotViewModel: ObservableObject {
             let o = HotOrNotSwissMath.outcomeGauntlet(
                 winnerRating: wr,
                 loserRating: lr,
-                winnerMatchCount: winner.stats.total_matches,
+                winnerMatchCount: HotOrNotSwissMath.matchCountParameterForK(winner.stats),
                 isChampionWinner: isChampionWinner,
                 isFallingWinner: isFallingWinner,
                 isChampionLoser: isChampionLoser,
@@ -1211,17 +1356,37 @@ private final class HotOrNotViewModel: ObservableObject {
             gain = o.winnerGain
             loss = o.loserLoss
         }
-        let newW = min(100, max(1, (winner.rating100 ?? 50) + gain))
-        let newL = min(100, max(1, (loser.rating100 ?? 50) - loss))
+        #if DEBUG
+        HotOrNotSwissMath.logDuelVoteDebugLine(
+            duelModeRaw: duelMode.rawValue,
+            winnerDisplay: winner.displayName,
+            loserDisplay: loser.displayName,
+            winnerRating: wr,
+            loserRating: lr,
+            winnerStats: winner.stats,
+            loserStats: loser.stats,
+            gain: gain,
+            loss: loss,
+            gauntlet: duelMode == .gauntlet
+                ? (isChampionWinner, isFallingWinner, isChampionLoser, isFallingLoser, loserRank)
+                : nil
+        )
+        #endif
+        let oldW = winner.rating100 ?? 50
+        let oldL = loser.rating100 ?? 50
+        let newW = min(100, max(1, oldW + gain))
+        let newL = min(100, max(1, oldL - loss))
+        let deltaW = newW - oldW
+        let deltaL = newL - oldL
         let feedback: HotOrNotDuelVoteFeedback = if leftWins {
             HotOrNotDuelVoteFeedback(
-                left: .init(delta100: gain, rating100After: newW),
-                right: .init(delta100: -loss, rating100After: newL)
+                left: .init(delta100: deltaW, rating100After: newW),
+                right: .init(delta100: deltaL, rating100After: newL)
             )
         } else {
             HotOrNotDuelVoteFeedback(
-                left: .init(delta100: -loss, rating100After: newL),
-                right: .init(delta100: gain, rating100After: newW)
+                left: .init(delta100: deltaL, rating100After: newL),
+                right: .init(delta100: deltaW, rating100After: newW)
             )
         }
         do {
@@ -1272,14 +1437,29 @@ private final class HotOrNotViewModel: ObservableObject {
         let (lg, rrLoss) = HotOrNotSwissMath.outcomeDraw(
             leftRating: lr,
             rightRating: rr,
-            leftMatches: l.stats.total_matches,
-            rightMatches: r.stats.total_matches
+            leftMatches: HotOrNotSwissMath.matchCountParameterForK(l.stats),
+            rightMatches: HotOrNotSwissMath.matchCountParameterForK(r.stats)
         )
-        let newL = min(100, max(1, (l.rating100 ?? 50) + lg))
-        let newR = min(100, max(1, (r.rating100 ?? 50) - rrLoss))
+        #if DEBUG
+        HotOrNotSwissMath.logDrawSkipDebugLine(
+            duelModeRaw: duelMode.rawValue,
+            leftDisplay: l.displayName,
+            rightDisplay: r.displayName,
+            leftRating: lr,
+            rightRating: rr,
+            leftStats: l.stats,
+            rightStats: r.stats,
+            leftGain: lg,
+            rightLoss: rrLoss
+        )
+        #endif
+        let oldL = l.rating100 ?? 50
+        let oldR = r.rating100 ?? 50
+        let newL = min(100, max(1, oldL + lg))
+        let newR = min(100, max(1, oldR - rrLoss))
         let feedback = HotOrNotDuelVoteFeedback(
-            left: .init(delta100: lg, rating100After: newL),
-            right: .init(delta100: -rrLoss, rating100After: newR)
+            left: .init(delta100: newL - oldL, rating100After: newL),
+            right: .init(delta100: newR - oldR, rating100After: newR)
         )
         if duelMode == .gauntlet {
             climbSkippedId = r.id

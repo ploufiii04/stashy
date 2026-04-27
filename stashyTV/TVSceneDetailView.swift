@@ -692,6 +692,8 @@ class TVPlayerViewModel: ObservableObject {
 
     private var statusObserver: NSKeyValueObservation?
     private var progressTimer: AnyCancellable?
+    /// Nach System-Spulen bleibt der Player oft bei rate 0; Apple-TV+-ähnlich wieder anspielen.
+    private var timeJumpedObserver: NSObjectProtocol?
     private var sceneId: String?
     private var viewModel: StashDBViewModel?
     /// Avoid duplicate seek/play when `status` KVO fires more than once at `.readyToPlay`.
@@ -732,6 +734,28 @@ class TVPlayerViewModel: ObservableObject {
             .sink { [weak self] _ in
                 self?.saveProgress()
             }
+
+        registerAutoResumeAfterScrub(on: newPlayer)
+    }
+
+    private func registerAutoResumeAfterScrub(on player: AVPlayer) {
+        removeTimeJumpedObserver()
+        guard let item = player.currentItem else { return }
+        timeJumpedObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemTimeJumped,
+            object: item,
+            queue: .main
+        ) { [weak player] _ in
+            guard let player, player.rate == 0 else { return }
+            player.play()
+        }
+    }
+
+    private func removeTimeJumpedObserver() {
+        if let token = timeJumpedObserver {
+            NotificationCenter.default.removeObserver(token)
+            timeJumpedObserver = nil
+        }
     }
 
     /// Seeking before `readyToPlay` (especially HLS/transcodes) causes UI hangs and endless buffering after scrubs.
@@ -774,6 +798,7 @@ class TVPlayerViewModel: ObservableObject {
 
     func clear() {
         saveProgress()
+        removeTimeJumpedObserver()
         progressTimer = nil
         statusObserver = nil
         didApplyInitialPlayback = true

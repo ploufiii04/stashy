@@ -3625,10 +3625,12 @@ class StashDBViewModel: ObservableObject {
         errorMessage = nil
         
         let query = GraphQLQueries.queryWithFragments("findPerformers")
+        // Text search returns a small first page; loading 500 performers (e.g. tvOS Search) is slow for little gain.
+        let effectivePerPage = searchQuery.isEmpty ? performersPerPage : min(64, performersPerPage)
         
         var filterDict: [String: Any] = [
             "page": page,
-            "per_page": performersPerPage,
+            "per_page": effectivePerPage,
             "sort": sortBy.sortField == "random" ? randomSort(.performers) : sortBy.sortField,
             "direction": sortBy.direction
         ]
@@ -3667,6 +3669,11 @@ class StashDBViewModel: ObservableObject {
         
         guard let bodyData = try? JSONSerialization.data(withJSONObject: body),
               let bodyString = String(data: bodyData, encoding: .utf8) else {
+            if isInitialLoad {
+                isLoadingPerformers = false
+            } else {
+                isLoadingMorePerformers = false
+            }
             return
         }
         
@@ -3681,7 +3688,7 @@ class StashDBViewModel: ObservableObject {
                         self.performers.append(contentsOf: performersResult.performers)
                     }
                     
-                    self.hasMorePerformers = performersResult.performers.count == self.performersPerPage
+                    self.hasMorePerformers = performersResult.performers.count == effectivePerPage
                     
                     if isInitialLoad {
                         self.isLoadingPerformers = false

@@ -14,36 +14,21 @@ struct TVSearchView: View {
     @State private var searchQuery: String = ""
     @State private var hasSearched: Bool = false
     @FocusState private var isSearchFieldFocused: Bool
+    @State private var searchDebounceTask: Task<Void, Never>?
+
+    private var isSearchBusy: Bool {
+        viewModel.isLoadingScenes || viewModel.isLoadingPerformers
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 50) {
-                if viewModel.isLoading {
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            ProgressView().scaleEffect(1.5)
-                            Text("Searching…")
-                                .font(.title3)
-                                .foregroundColor(.white.opacity(0.4))
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 80)
+            VStack(alignment: .leading, spacing: 44) {
+                searchBar
+
+                if isSearchBusy {
+                    loadingBlock
                 } else if hasSearched && viewModel.scenes.isEmpty && viewModel.performers.isEmpty {
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 20) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 56))
-                                .foregroundColor(.white.opacity(0.12))
-                            Text("No results for \"\(searchQuery)\"")
-                                .font(.title3)
-                                .foregroundColor(.white.opacity(0.4))
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 80)
+                    emptyResultsBlock
                 } else if hasSearched {
                     if !viewModel.scenes.isEmpty {
                         scenesResultSection
@@ -52,54 +37,152 @@ struct TVSearchView: View {
                         performersResultSection
                     }
                 } else {
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 56))
-                                .foregroundColor(.white.opacity(0.12))
-                            Text("Search your Stash library")
-                                .font(.title3)
-                                .foregroundColor(.white.opacity(0.4))
-                            Text("Use the remote to type or dictate your search.")
-                                .font(.callout)
-                                .foregroundColor(.white.opacity(0.25))
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 100)
+                    placeholderBlock
                 }
             }
-            .padding(.vertical, 60)
+            .padding(.vertical, 48)
+            .padding(.horizontal, 40)
         }
         .background(Color.appBackground)
-        .searchable(text: $searchQuery, placement: .automatic, prompt: "Search scenes, performers…")
-        .onChange(of: searchQuery) { _, newValue in
-            let query = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if query.count < 2 {
-                viewModel.clearSearchResults()
-                hasSearched = false
-            } else {
-                performSearch()
+        .onAppear {
+            // Kurz verzögern, damit die Fokus-Engine den Tab gewählt hat.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                isSearchFieldFocused = true
             }
         }
-        .onSubmit(of: .search) {
-            performSearch()
+        .onChange(of: searchQuery) { _, newValue in
+            scheduleDebouncedSearch(newValue)
+        }
+        .onDisappear {
+            searchDebounceTask?.cancel()
+            searchDebounceTask = nil
         }
     }
 
-    // MARK: - Search
+    // MARK: - Search bar (eigenes Feld: Fokus bleibt erreichbar, kein „Festfrieren“ hinter .searchable)
 
-    private func performSearch() {
-        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard query.count >= 2 else {
+    private var searchBar: some View {
+        HStack(alignment: .center, spacing: 28) {
+            Image(systemName: "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+
+            TextField("Szenen, Performer …", text: $searchQuery)
+                .font(.title3)
+                .foregroundStyle(.primary)
+                .focused($isSearchFieldFocused)
+                .submitLabel(.search)
+                .onSubmit { commitSearchImmediately() }
+
+            if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    searchDebounceTask?.cancel()
+                    searchQuery = ""
+                    hasSearched = false
+                    viewModel.clearSearchResults()
+                    isSearchFieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Eingabe löschen")
+            }
+        }
+        .padding(.vertical, 22)
+        .padding(.horizontal, 28)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var loadingBlock: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                Text("Suche läuft …")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            Spacer()
+        }
+        .padding(.top, 40)
+    }
+
+    private var emptyResultsBlock: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 20) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 56))
+                    .foregroundColor(.white.opacity(0.12))
+                Text("Keine Treffer für „\(searchQuery)“")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.4))
+                Button("Suche anpassen") {
+                    isSearchFieldFocused = true
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+        }
+        .padding(.top, 40)
+    }
+
+    private var placeholderBlock: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 16) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 56))
+                    .foregroundColor(.white.opacity(0.12))
+                Text("Stash-Bibliothek durchsuchen")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.4))
+                Text("Mindestens zwei Zeichen, Remote oder Diktat.")
+                    .font(.callout)
+                    .foregroundColor(.white.opacity(0.25))
+                    .multilineTextAlignment(.center)
+            }
+            Spacer()
+        }
+        .padding(.top, 60)
+    }
+
+    // MARK: - Debounce & ausführen
+
+    private func scheduleDebouncedSearch(_ raw: String) {
+        searchDebounceTask?.cancel()
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count < 2 {
             viewModel.clearSearchResults()
             hasSearched = false
             return
         }
+        searchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(420))
+            guard !Task.isCancelled else { return }
+            runSearch(trimmed: trimmed)
+        }
+    }
+
+    private func commitSearchImmediately() {
+        searchDebounceTask?.cancel()
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else {
+            viewModel.clearSearchResults()
+            hasSearched = false
+            return
+        }
+        runSearch(trimmed: trimmed)
+    }
+
+    private func runSearch(trimmed: String) {
         hasSearched = true
-        viewModel.fetchScenes(sortBy: StashDBViewModel.SceneSortOption.dateDesc, searchQuery: query)
-        viewModel.fetchPerformers(sortBy: StashDBViewModel.PerformerSortOption.nameAsc, searchQuery: query)
+        viewModel.fetchScenes(sortBy: StashDBViewModel.SceneSortOption.dateDesc, searchQuery: trimmed)
+        viewModel.fetchPerformers(sortBy: StashDBViewModel.PerformerSortOption.nameAsc, searchQuery: trimmed)
     }
 
     // MARK: - Scenes Results
@@ -110,7 +193,7 @@ struct TVSearchView: View {
                 Image(systemName: "film.fill")
                     .font(.title3)
                     .foregroundColor(AppearanceManager.shared.tintColor)
-                Text("Scenes")
+                Text("Szenen")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -128,7 +211,7 @@ struct TVSearchView: View {
                                 TVSceneCardView(scene: scene)
                             }
                             .buttonStyle(.card)
-                            
+
                             TVSceneCardTitleView(scene: scene)
                         }
                         .frame(width: 400)
@@ -148,7 +231,7 @@ struct TVSearchView: View {
                 Image(systemName: "person.2.fill")
                     .font(.title3)
                     .foregroundColor(AppearanceManager.shared.tintColor)
-                Text("Performers")
+                Text("Performer")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(.white)

@@ -24,6 +24,7 @@ struct PerformerDetailView: View {
     @State private var isUpdatingFavorite: Bool = false
     /// Verhindert mehrfaches `loadData()` bei wiederholtem SwiftUI-`onAppear` (leere Performer → identische Refetch-Schleife).
     @State private var hasRunPerformerDetailInitialLoad = false
+    @State private var hotOrNotBattleLine: String?
     @StateObject private var linkedStudios: DetailLinkedStudiosFilterModel
     @StateObject private var linkedTags: DetailLinkedTagsFilterModel
     @StateObject private var linkedGalleries: DetailLinkedGalleriesFilterModel
@@ -122,7 +123,7 @@ struct PerformerDetailView: View {
     @ViewBuilder
     private var performerScenesStack: some View {
         VStack(spacing: 12) {
-            headerView(displayPerformer: displayPerformer)
+            headerView(displayPerformer: displayPerformer, battleLine: hotOrNotBattleLine)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             ScenesView(
@@ -141,7 +142,7 @@ struct PerformerDetailView: View {
     private var nonScenesScrollContent: some View {
         ScrollView {
             VStack(spacing: 12) {
-                headerView(displayPerformer: displayPerformer)
+                headerView(displayPerformer: displayPerformer, battleLine: hotOrNotBattleLine)
 
                 if selectedDetailTab == .galleries {
                     if !viewModel.performerGalleries.isEmpty {
@@ -306,6 +307,12 @@ struct PerformerDetailView: View {
             }
         }
         .applyAppBackground()
+        .task(id: displayPerformer.id) {
+            hotOrNotBattleLine = nil
+            if let line = await HotOrNotBattleDisplay.fetchRankSlashTotal(performerId: displayPerformer.id) {
+                hotOrNotBattleLine = line
+            }
+        }
         .onAppear {
             if !hasRunPerformerDetailInitialLoad {
                 hasRunPerformerDetailInitialLoad = true
@@ -815,7 +822,7 @@ struct PerformerDetailView: View {
         }
     }
     
-    private func headerView(displayPerformer: Performer) -> some View {
+    private func headerView(displayPerformer: Performer, battleLine: String?) -> some View {
         let collapsedHeight: CGFloat = 115
         let imageWidth: CGFloat = 72
         
@@ -880,7 +887,7 @@ struct PerformerDetailView: View {
                 }
                 
                 // Grid for Performer Info
-                let allDetails = getPerformerDetails(displayPerformer)
+                let allDetails = getPerformerDetails(displayPerformer, battleLine: battleLine)
                 let visibleDetails = isHeaderExpanded ? allDetails : Array(allDetails.prefix(4))
                 
                 if !visibleDetails.isEmpty {
@@ -915,7 +922,7 @@ struct PerformerDetailView: View {
         .fixedSize(horizontal: false, vertical: true)
         .overlay(
             Group {
-                let allDetails = getPerformerDetails(displayPerformer)
+                let allDetails = getPerformerDetails(displayPerformer, battleLine: battleLine)
                 if allDetails.count > 4 {
                     Button(action: {
                         withAnimation(.spring()) {
@@ -974,7 +981,7 @@ struct PerformerDetailView: View {
         }
     }
 
-    private func getPerformerDetails(_ p: Performer) -> [(label: String, value: String)] {
+    private func getPerformerDetails(_ p: Performer, battleLine: String?) -> [(label: String, value: String)] {
         var list: [(label: String, value: String)] = []
         
         // First row: scenes + galleries; third slot is rating (Stash 0–100).
@@ -982,6 +989,9 @@ struct PerformerDetailView: View {
         let galleryDisplay = max(p.galleryCount ?? 0, viewModel.totalPerformerGalleries)
         list.append((label: "GALLERIES", value: "\(galleryDisplay)"))
         list.append((label: "RATING", value: p.rating100.map { String($0) } ?? "—"))
+        if let battleLine, !battleLine.isEmpty {
+            list.append((label: "BATTLE", value: battleLine))
+        }
         
         if let val = p.gender, !val.isEmpty { list.append((label: "GENDER", value: val)) }
         
