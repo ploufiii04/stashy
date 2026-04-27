@@ -2,8 +2,9 @@
 //  HotOrNotToolsView.swift
 //  stashy
 //
-//  Duel modes Swiss / Gauntlet / Champion + leaderboard, aligned with the HotOrNot Stash plugin
-//  (hotornot_stats, rating100, performer_record; math from hot_or_not.js / math-utils.js).
+//  Duel modes Head-to-head / Placement / Champion + Charts leaderboard; rating math aligned with
+//  Ascension plugin (`ascension.js` calculateMatchOutcome / getProgressiveKFactor).
+//  (hotornot_stats, rating100, performer_record).
 //
 
 #if !os(tvOS)
@@ -164,121 +165,130 @@ private enum HotOrNotSwissMath {
         return items.last
     }
 
-    /// Plugin `getKFactor`: halved K only for `mode == "champion"`; `"gauntlet"` uses same base as Swiss.
-    /// Use `matchCount: nil` when there is no Hot-or-Not history so the rating-distance fallback applies (otherwise `0` is treated as “&lt;10 matches” and locks K at 16).
-    static func getKFactor(currentRating: Double, matchCount: Int?, mode: String) -> Int {
-        let baseK: Int
-        if let mc = matchCount {
-            baseK = mc < 10 ? 16 : (mc < 30 ? 12 : 8)
-        } else {
-            let dist = abs(currentRating - 50)
-            baseK = dist < 10 ? 12 : (dist < 25 ? 10 : 8)
+    /// Match count for Ascension `getProgressiveKFactor` (`total_matches` with fallback to played games).
+    static func matchCountForProgressive(_ stats: HotOrNotStats) -> Int {
+        max(stats.total_matches, stats.wins + stats.losses + stats.draws)
+    }
+
+    /// Ascension `getProgressiveKFactor` (`ascension.js`). `mode` is `"swiss" | "gauntlet" | "champion"` (internal).
+    static func getProgressiveKFactor(rating: Double, matchCount: Int, mode: String) -> Int {
+        let count = max(0, matchCount)
+        let experienceFactor = 0.5 + 0.5 / (1 + exp(Double(count - 18) / 6))
+        var baseK = 32.0 * experienceFactor
+        if rating > 60 {
+            let reductionFactor = max(0.5, 1 - (rating - 60) / 70)
+            baseK *= reductionFactor
         }
-        return mode == "champion" ? max(1, Int(round(Double(baseK) * 0.5))) : baseK
+        if mode == "champion" {
+            let kFactor = (baseK * 0.85).rounded()
+            return min(35, max(6, Int(kFactor)))
+        }
+        if mode == "gauntlet" {
+            let kFactor = (baseK * 1.1).rounded()
+            return min(45, max(8, Int(kFactor)))
+        }
+        return min(40, max(6, Int(baseK.rounded())))
     }
 
-    /// `nil` when no recorded Hot-or-Not games → `getKFactor` uses rating-distance bands instead of novice K=16 on `0`.
-    static func matchCountParameterForK(_ stats: HotOrNotStats) -> Int? {
-        let sumWL = stats.wins + stats.losses + stats.draws
-        guard stats.total_matches > 0 || sumWL > 0 else { return nil }
-        return max(stats.total_matches, sumWL)
+    static func getUnderdogMultiplier(winnerRating: Double, loserRating: Double) -> Double {
+        let ratingDiff = loserRating - winnerRating
+        if ratingDiff > 30 { return 1.5 }
+        if ratingDiff > 20 { return 1.3 }
+        if ratingDiff > 10 { return 1.1 }
+        return 1
     }
 
-    /// Swiss or Champion full ELO on both sides (`calculateMatchOutcome` non-gauntlet branch in hot_or_not.js).
-    static func outcomeRatedMatch(
+    /// When the loser is rated below the winner, reduce how many points the loser loses.
+    static func getChallengeProtectionMultiplier(loserRating: Double, winnerRating: Double) -> Double {
+        let ratingDiff = winnerRating - loserRating
+        if ratingDiff > 15 {
+            if ratingDiff > 30 { return 0.7 }
+            if ratingDiff > 25 { return 0.8 }
+            if ratingDiff > 20 { return 0.85 }
+            return 0.9
+        }
+        return 1
+    }
+
+    /// Ascension `calculateMatchOutcome` (`ascension.js`). `mode`: `"swiss"` (Head-to-head), `"gauntlet"` (Placement), `"champion"`.
+    static func calculateMatchOutcome(
         winnerRating: Double,
         loserRating: Double,
-        winnerMatchCount: Int?,
-        loserMatchCount: Int?,
-        eloMode: String
+        mode: String,
+        winnerMatchCount: Int,
+        loserMatchCount: Int,
+        winnerStats: HotOrNotStats,
+        loserStats: HotOrNotStats,
+        isSpecialChallenge: Bool = false
     ) -> (winnerGain: Int, loserLoss: Int) {
         let ratingDiff = loserRating - winnerRating
         let expectedWinner = 1 / (1 + pow(10, ratingDiff / 400))
-        let wK = Double(getKFactor(currentRating: winnerRating, matchCount: winnerMatchCount, mode: eloMode))
-        let lK = Double(getKFactor(currentRating: loserRating, matchCount: loserMatchCount, mode: eloMode))
-        let winnerGain = max(0, Int(round(wK * (1 - expectedWinner))))
-        let loserLoss = max(0, Int(round(lK * expectedWinner)))
-        return (winnerGain, loserLoss)
-    }
+        let winnerK = Double(getProgressiveKFactor(rating: winnerRating, matchCount: winnerMatchCount, mode: mode))
+        let loserK = Double(getProgressiveKFactor(rating: loserRating, matchCount: loserMatchCount, mode: mode))
+        let winnerUnderdogMult = getUnderdogMultiplier(winnerRating: winnerRating, loserRating: loserRating)
+        let lossProtection = isSpecialChallenge ? 0.1 : getChallengeProtectionMultiplier(loserRating: loserRating, winnerRating: winnerRating)
+        var winnerGain = (winnerK * (1 - expectedWinner) * winnerUnderdogMult).rounded()
+        var loserLoss = (loserK * expectedWinner * lossProtection).rounded()
 
-    static func outcomeSwiss(
-        winnerRating: Double,
-        loserRating: Double,
-        winnerMatchCount: Int?,
-        loserMatchCount: Int?
-    ) -> (winnerGain: Int, loserLoss: Int) {
-        outcomeRatedMatch(
-            winnerRating: winnerRating,
-            loserRating: loserRating,
-            winnerMatchCount: winnerMatchCount,
-            loserMatchCount: loserMatchCount,
-            eloMode: "swiss"
-        )
-    }
-
-    static func outcomeChampion(
-        winnerRating: Double,
-        loserRating: Double,
-        winnerMatchCount: Int?,
-        loserMatchCount: Int?
-    ) -> (winnerGain: Int, loserLoss: Int) {
-        outcomeRatedMatch(
-            winnerRating: winnerRating,
-            loserRating: loserRating,
-            winnerMatchCount: winnerMatchCount,
-            loserMatchCount: loserMatchCount,
-            eloMode: "champion"
-        )
-    }
-
-    /// Gauntlet selective ELO (`calculateMatchOutcome` when `mode === "gauntlet"` in plugin).
-    static func outcomeGauntlet(
-        winnerRating: Double,
-        loserRating: Double,
-        winnerMatchCount: Int?,
-        isChampionWinner: Bool,
-        isFallingWinner: Bool,
-        isChampionLoser: Bool,
-        isFallingLoser: Bool,
-        loserRank: Int?
-    ) -> (winnerGain: Int, loserLoss: Int) {
-        let ratingDiff = loserRating - winnerRating
-        let expectedWinner = 1 / (1 + pow(10, ratingDiff / 400))
-        var winnerGain = 0
-        var loserLoss = 0
-        let k = Double(getKFactor(currentRating: winnerRating, matchCount: winnerMatchCount, mode: "gauntlet"))
-        if isChampionWinner || isFallingWinner {
-            winnerGain = max(0, Int(round(k * (1 - expectedWinner))))
+        if mode == "gauntlet" {
+            let currentStreak = winnerStats.current_streak
+            if currentStreak >= 3 {
+                let gauntletDampener = max(0.3, 1 - Double(currentStreak - 3) * 0.15)
+                winnerGain = Darwin.ceil(winnerGain * gauntletDampener)
+            }
         }
-        if isChampionLoser || isFallingLoser {
-            loserLoss = max(0, Int(round(k * expectedWinner)))
+        if mode == "champion" {
+            let winStreak = winnerStats.current_streak
+            if winStreak >= 5 {
+                let streakPenalty = winStreak >= 10 ? 0.4 : 0.7
+                winnerGain = Darwin.ceil(winnerGain * streakPenalty)
+            }
         }
-        if let r = loserRank, r == 1, !isChampionLoser, !isFallingLoser {
-            loserLoss = 1
+        if winnerRating >= 85 {
+            winnerGain = Darwin.ceil(winnerGain * 0.6)
+        } else if winnerRating >= 70 {
+            winnerGain = Darwin.ceil(winnerGain * 0.8)
         }
-        return (winnerGain, loserLoss)
+        if winnerRating < loserRating - 20 {
+            let ratingDiff2 = loserRating - winnerRating
+            let scaleFactor = max(0.3, 1 - (ratingDiff2 - 20) / 100)
+            winnerGain = Darwin.ceil(winnerGain * scaleFactor)
+            loserLoss = Darwin.ceil(loserLoss * scaleFactor)
+            loserLoss = min(loserLoss, 5)
+        }
+        if loserRating < winnerRating - 15 {
+            let gap = winnerRating - loserRating
+            let mitigationFactor = max(0.2, 1 - gap / 45)
+            loserLoss = Darwin.ceil(loserLoss * mitigationFactor)
+            if gap > 25 {
+                loserLoss = min(loserLoss, 3)
+            }
+        }
+
+        return (max(1, Int(winnerGain)), max(0, Int(loserLoss)))
     }
 
-    /// Draw / skip: same roles as plugin handleSkip (isDraw): left = winner id, right = loser id.
+    /// Draw / skip: same as Ascension `handleComparison` draw branch (Head-to-head K curve).
     static func outcomeDraw(
         leftRating: Double,
         rightRating: Double,
-        leftMatches: Int?,
-        rightMatches: Int?
+        leftMatchCount: Int,
+        rightMatchCount: Int
     ) -> (leftGain: Int, rightLoss: Int) {
         let ratingDiff = rightRating - leftRating
         let expectedWinner = 1 / (1 + pow(10, ratingDiff / 400))
-        let wK = Double(getKFactor(currentRating: leftRating, matchCount: leftMatches, mode: "swiss"))
-        let lK = Double(getKFactor(currentRating: rightRating, matchCount: rightMatches, mode: "swiss"))
+        let wK = Double(getProgressiveKFactor(rating: leftRating, matchCount: leftMatchCount, mode: "swiss"))
+        let lK = Double(getProgressiveKFactor(rating: rightRating, matchCount: rightMatchCount, mode: "swiss"))
         let leftGain = Int(round(wK * (0.5 - expectedWinner)))
         let rightLoss = Int(round(lK * (1 - expectedWinner - 0.5)))
         return (leftGain, rightLoss)
     }
 
     #if DEBUG
-    /// Xcode-Konsole: nach jedem Vote eine Zeile mit E, K, Match-Count-Param und Roh-Stats. Filter: `[HotOrNot ELO]`.
+    /// Xcode-Konsole: Filter `[HotOrNot ELO]`. `ascensionMode` = plugin string `swiss` / `gauntlet` / `champion`.
     static func logDuelVoteDebugLine(
-        duelModeRaw: String,
+        duelLabel: String,
+        ascensionMode: String,
         winnerDisplay: String,
         loserDisplay: String,
         winnerRating: Double,
@@ -286,31 +296,22 @@ private enum HotOrNotSwissMath {
         winnerStats: HotOrNotStats,
         loserStats: HotOrNotStats,
         gain: Int,
-        loss: Int,
-        gauntlet: (isChampionWinner: Bool, isFallingWinner: Bool, isChampionLoser: Bool, isFallingLoser: Bool, loserRank: Int?)?
+        loss: Int
     ) {
-        let mcW = matchCountParameterForK(winnerStats)
-        let mcL = matchCountParameterForK(loserStats)
+        let mcW = matchCountForProgressive(winnerStats)
+        let mcL = matchCountForProgressive(loserStats)
         let ratingDiff = loserRating - winnerRating
         let ew = 1 / (1 + pow(10, ratingDiff / 400))
         let eStr = String(format: "%.4f", ew)
-        if let g = gauntlet {
-            let k = getKFactor(currentRating: winnerRating, matchCount: mcW, mode: "gauntlet")
-            print(
-                "[HotOrNot ELO] \(duelModeRaw) \(winnerDisplay) vs \(loserDisplay) rW=\(String(format: "%.1f", winnerRating)) rL=\(String(format: "%.1f", loserRating)) E=\(eStr) Kgauntlet=\(k) cwW=\(g.isChampionWinner) fallW=\(g.isFallingWinner) cwL=\(g.isChampionLoser) fallL=\(g.isFallingLoser) loserRank=\(g.loserRank.map(String.init) ?? "nil") | mcW=\(mcW.map(String.init) ?? "nil") mcL=\(mcL.map(String.init) ?? "nil") W(tm/w/l/d)=\(winnerStats.total_matches)/\(winnerStats.wins)/\(winnerStats.losses)/\(winnerStats.draws) L(tm/w/l/d)=\(loserStats.total_matches)/\(loserStats.wins)/\(loserStats.losses)/\(loserStats.draws) → gain=\(gain) loss=\(loss)"
-            )
-        } else {
-            let eloMode = duelModeRaw == "champion" ? "champion" : "swiss"
-            let wK = getKFactor(currentRating: winnerRating, matchCount: mcW, mode: eloMode)
-            let lK = getKFactor(currentRating: loserRating, matchCount: mcL, mode: eloMode)
-            print(
-                "[HotOrNot ELO] \(duelModeRaw) \(winnerDisplay) vs \(loserDisplay) rW=\(String(format: "%.1f", winnerRating)) rL=\(String(format: "%.1f", loserRating)) E=\(eStr) Kw=\(wK) Kl=\(lK) mcW=\(mcW.map(String.init) ?? "nil") mcL=\(mcL.map(String.init) ?? "nil") W(tm/w/l/d)=\(winnerStats.total_matches)/\(winnerStats.wins)/\(winnerStats.losses)/\(winnerStats.draws) L(tm/w/l/d)=\(loserStats.total_matches)/\(loserStats.wins)/\(loserStats.losses)/\(loserStats.draws) → gain=\(gain) loss=\(loss)"
-            )
-        }
+        let wK = getProgressiveKFactor(rating: winnerRating, matchCount: mcW, mode: ascensionMode)
+        let lK = getProgressiveKFactor(rating: loserRating, matchCount: mcL, mode: ascensionMode)
+        print(
+            "[HotOrNot ELO] \(duelLabel) [\(ascensionMode)] \(winnerDisplay) vs \(loserDisplay) rW=\(String(format: "%.1f", winnerRating)) rL=\(String(format: "%.1f", loserRating)) E=\(eStr) Kw=\(wK) Kl=\(lK) mcW=\(mcW) mcL=\(mcL) W(tm/w/l/d)=\(winnerStats.total_matches)/\(winnerStats.wins)/\(winnerStats.losses)/\(winnerStats.draws) L(tm/w/l/d)=\(loserStats.total_matches)/\(loserStats.wins)/\(loserStats.losses)/\(loserStats.draws) → gain=\(gain) loss=\(loss)"
+        )
     }
 
     static func logDrawSkipDebugLine(
-        duelModeRaw: String,
+        duelLabel: String,
         leftDisplay: String,
         rightDisplay: String,
         leftRating: Double,
@@ -320,15 +321,15 @@ private enum HotOrNotSwissMath {
         leftGain: Int,
         rightLoss: Int
     ) {
-        let mcL = matchCountParameterForK(leftStats)
-        let mcR = matchCountParameterForK(rightStats)
+        let mcL = matchCountForProgressive(leftStats)
+        let mcR = matchCountForProgressive(rightStats)
         let ratingDiff = rightRating - leftRating
         let ew = 1 / (1 + pow(10, ratingDiff / 400))
-        let kLeft = getKFactor(currentRating: leftRating, matchCount: mcL, mode: "swiss")
-        let kRight = getKFactor(currentRating: rightRating, matchCount: mcR, mode: "swiss")
         let eStr = String(format: "%.4f", ew)
+        let kLeft = getProgressiveKFactor(rating: leftRating, matchCount: mcL, mode: "swiss")
+        let kRight = getProgressiveKFactor(rating: rightRating, matchCount: mcR, mode: "swiss")
         print(
-            "[HotOrNot ELO] draw/skip \(duelModeRaw) \(leftDisplay) vs \(rightDisplay) rL=\(String(format: "%.1f", leftRating)) rR=\(String(format: "%.1f", rightRating)) E(left wins prob)=\(eStr) K_left=\(kLeft) K_right=\(kRight) mcL=\(mcL.map(String.init) ?? "nil") mcR=\(mcR.map(String.init) ?? "nil") L(tm/w/l/d)=\(leftStats.total_matches)/\(leftStats.wins)/\(leftStats.losses)/\(leftStats.draws) R(tm/w/l/d)=\(rightStats.total_matches)/\(rightStats.wins)/\(rightStats.losses)/\(rightStats.draws) → dL=\(leftGain) dR=\(rightLoss)"
+            "[HotOrNot ELO] draw/skip \(duelLabel) \(leftDisplay) vs \(rightDisplay) rL=\(String(format: "%.1f", leftRating)) rR=\(String(format: "%.1f", rightRating)) E(left wins)=\(eStr) K_left=\(kLeft) K_right=\(kRight) mcL=\(mcL) mcR=\(mcR) L(tm/w/l/d)=\(leftStats.total_matches)/\(leftStats.wins)/\(leftStats.losses)/\(leftStats.draws) R(tm/w/l/d)=\(rightStats.total_matches)/\(rightStats.wins)/\(rightStats.losses)/\(rightStats.draws) → dL=\(leftGain) dR=\(rightLoss)"
         )
     }
     #endif
@@ -740,7 +741,7 @@ private struct HotOrNotBattleColumn: View {
     }
 }
 
-/// Gauntlet starter: same card shell as duel (`HotOrNotBattleColumn`), but only photo + name + rating row (no detail grid, no rank).
+/// Placement starter: same card shell as duel (`HotOrNotBattleColumn`), but only photo + name + rating row (no detail grid, no rank).
 private struct HotOrNotGauntletStarterPickCard: View {
     @ObservedObject var model: HotOrNotViewModel
     let performer: HotOrNotPerformerData
@@ -775,7 +776,7 @@ private struct HotOrNotGauntletStarterPickCard: View {
         .buttonStyle(.plain)
         .disabled(model.isSubmitting)
         .frame(maxWidth: .infinity)
-        .accessibilityLabel("Pick \(performer.displayName) as Gauntlet starter")
+        .accessibilityLabel("Pick \(performer.displayName) as Placement starter")
     }
 
     private var photoStack: some View {
@@ -912,7 +913,7 @@ private struct HotOrNotMutationResponse: Codable {
     let data: HotOrNotMutationData?
 }
 
-/// Per-side duel outcome: `delta100` is the change in Stash `rating100` (same units as `outcomeSwiss` / server update); `rating100After` is the clamped new value.
+/// Per-side duel outcome: `delta100` is the change in Stash `rating100` (Ascension-style math / server update); `rating100After` is the clamped new value.
 private struct HotOrNotDuelVoteFeedback: Equatable {
     struct Side: Equatable {
         let delta100: Int
@@ -932,19 +933,28 @@ private final class HotOrNotViewModel: ObservableObject {
         case leaderboard = "Charts"
     }
 
-    /// Matches plugin `currentMode`: `"swiss" | "gauntlet" | "champion"` (persisted rawValue). UI order: Swiss → Champion → Gauntlet.
+    /// Persisted `rawValue`: `headToHead` | `placement` | `champion` (legacy `swiss` / `gauntlet` migrated on load).
     enum DuelMode: String, CaseIterable, Identifiable {
-        case swiss
+        case headToHead
+        case placement
         case champion
-        case gauntlet
 
         var id: String { rawValue }
 
         var label: String {
             switch self {
-            case .swiss: return "Swiss"
+            case .headToHead: return "Head to Head"
+            case .placement: return "Placement"
             case .champion: return "Champion"
-            case .gauntlet: return "Gauntlet"
+            }
+        }
+
+        /// Ascension `calculateMatchOutcome` / `getProgressiveKFactor` mode string.
+        var ascensionMode: String {
+            switch self {
+            case .headToHead: return "swiss"
+            case .placement: return "gauntlet"
+            case .champion: return "champion"
             }
         }
     }
@@ -952,7 +962,7 @@ private final class HotOrNotViewModel: ObservableObject {
     private static let duelModeDefaultsKey = "stashy.hotOrNot.duelMode"
 
     @Published var section: Section = .battle
-    @Published var duelMode: DuelMode = .swiss {
+    @Published var duelMode: DuelMode = .headToHead {
         didSet { UserDefaults.standard.set(duelMode.rawValue, forKey: Self.duelModeDefaultsKey) }
     }
     @Published var selectedGenders: Set<String> = HotOrNotBattleDisplay.loadGenders() {
@@ -979,12 +989,12 @@ private final class HotOrNotViewModel: ObservableObject {
     @Published var climbFalling: Bool = false
     @Published var climbFallingItem: HotOrNotPerformerData?
     @Published var climbVictory: HotOrNotPerformerData?
-    @Published var gauntletStarters: [HotOrNotPerformerData] = []
-    @Published var isLoadingGauntletStarters = false
+    @Published var placementStarters: [HotOrNotPerformerData] = []
+    @Published var isLoadingPlacementStarters = false
 
-    /// Inline Gauntlet starter grid (no sheet): need picks before the first duel.
-    var needsGauntletStarterSelection: Bool {
-        duelMode == .gauntlet && climbChampion == nil && !climbFalling && climbVictory == nil
+    /// Inline Placement starter grid (no sheet): need picks before the first duel.
+    var needsPlacementStarterSelection: Bool {
+        duelMode == .placement && climbChampion == nil && !climbFalling && climbVictory == nil
     }
 
     private let client = GraphQLClient.shared
@@ -993,9 +1003,19 @@ private final class HotOrNotViewModel: ObservableObject {
     private var pendingRating100ByPerformerId: [String: Int] = [:]
 
     init() {
-        if let raw = UserDefaults.standard.string(forKey: Self.duelModeDefaultsKey),
-           let m = DuelMode(rawValue: raw) {
-            duelMode = m
+        if let raw = UserDefaults.standard.string(forKey: Self.duelModeDefaultsKey) {
+            duelMode = Self.duelMode(migratingPersistedRaw: raw)
+        }
+    }
+
+    /// Maps legacy `swiss` / `gauntlet` saved values to Ascension-style mode ids.
+    private static func duelMode(migratingPersistedRaw raw: String) -> DuelMode {
+        switch raw {
+        case "swiss", "headToHead": return .headToHead
+        case "gauntlet", "placement": return .placement
+        case "champion": return .champion
+        default:
+            return DuelMode(rawValue: raw) ?? .headToHead
         }
     }
 
@@ -1041,25 +1061,25 @@ private final class HotOrNotViewModel: ObservableObject {
             return
         }
         switch duelMode {
-        case .swiss:
-            await loadSwissPairContent()
-        case .gauntlet:
+        case .headToHead:
+            await loadHeadToHeadPairContent()
+        case .placement:
             if climbChampion == nil && !climbFalling {
                 isLoadingPair = false
                 left = nil
                 right = nil
                 rankLeft = nil
                 rankRight = nil
-                await prepareGauntletStarters()
+                await preparePlacementStarters()
                 return
             }
-            await loadClimbPair(isGauntlet: true)
+            await loadClimbPair(isPlacement: true)
         case .champion:
-            await loadClimbPair(isGauntlet: false)
+            await loadClimbPair(isPlacement: false)
         }
     }
 
-    private func loadSwissPairContent() async {
+    private func loadHeadToHeadPairContent() async {
         isLoadingPair = true
         errorMessage = nil
         defer { isLoadingPair = false }
@@ -1107,8 +1127,8 @@ private final class HotOrNotViewModel: ObservableObject {
         }
     }
 
-    /// Champion / Gauntlet pairing (`handleMatchmakingLogic` in hot_or_not.js battle-engine).
-    private func loadClimbPair(isGauntlet: Bool) async {
+    /// Champion / Placement pairing (climb ladder vs Ascension placement flow).
+    private func loadClimbPair(isPlacement: Bool) async {
         isLoadingPair = true
         errorMessage = nil
         defer { isLoadingPair = false }
@@ -1135,7 +1155,7 @@ private final class HotOrNotViewModel: ObservableObject {
                 climbChampion = mergePendingRating(live)
             }
 
-            if isGauntlet, climbFalling, let fall = climbFallingItem {
+            if isPlacement, climbFalling, let fall = climbFallingItem {
                 let candidates = list.filter {
                     $0.id != fall.id && !climbDefeatedIds.contains($0.id) && $0.id != climbSkippedId
                 }
@@ -1146,7 +1166,7 @@ private final class HotOrNotViewModel: ObservableObject {
                     rankRight = list.firstIndex { $0.id == opp.id }.map { $0 + 1 }
                 } else if climbSkippedId != nil {
                     climbSkippedId = nil
-                    await loadClimbPair(isGauntlet: true)
+                    await loadClimbPair(isPlacement: true)
                     return
                 } else {
                     let resolved = list.first(where: { $0.id == fall.id }).map { mergePendingRating($0) } ?? mergePendingRating(fall)
@@ -1185,7 +1205,7 @@ private final class HotOrNotViewModel: ObservableObject {
             if potential.isEmpty {
                 if climbSkippedId != nil {
                     climbSkippedId = nil
-                    await loadClimbPair(isGauntlet: isGauntlet)
+                    await loadClimbPair(isPlacement: isPlacement)
                     return
                 }
                 climbVictory = mergePendingRating(list[champIdx])
@@ -1217,6 +1237,7 @@ private final class HotOrNotViewModel: ObservableObject {
         climbVictory = nil
         climbFalling = false
         climbFallingItem = nil
+        placementStarters = []
         pendingRating100ByPerformerId.removeAll()
     }
 
@@ -1225,10 +1246,10 @@ private final class HotOrNotViewModel: ObservableObject {
         Task { await loadDuelPair() }
     }
 
-    func prepareGauntletStarters() async {
-        isLoadingGauntletStarters = true
+    func preparePlacementStarters() async {
+        isLoadingPlacementStarters = true
         errorMessage = nil
-        defer { isLoadingGauntletStarters = false }
+        defer { isLoadingPlacementStarters = false }
         let query = GraphQLQueries.queryWithFragments("hotOrNotFindPerformers")
         let variables: [String: Any] = [
             "performer_filter": performerFilter,
@@ -1237,17 +1258,17 @@ private final class HotOrNotViewModel: ObservableObject {
         do {
             let res: HotOrNotFindResponse = try await client.execute(query: query, variables: variables)
             let list = res.data?.findPerformers.performers ?? []
-            gauntletStarters = Array(list.shuffled().prefix(4))
-            if gauntletStarters.isEmpty {
-                errorMessage = "No performers to pick as a Gauntlet starter."
+            placementStarters = Array(list.shuffled().prefix(6))
+            if placementStarters.isEmpty {
+                errorMessage = "No performers to pick as a Placement starter."
             }
         } catch {
             errorMessage = error.localizedDescription
-            gauntletStarters = []
+            placementStarters = []
         }
     }
 
-    func pickGauntletStarter(_ p: HotOrNotPerformerData) {
+    func pickPlacementStarter(_ p: HotOrNotPerformerData) {
         climbChampion = p
         climbWins = 0
         climbDefeatedIds = []
@@ -1259,7 +1280,7 @@ private final class HotOrNotViewModel: ObservableObject {
 
     private func applyClimbAfterVote(winner: HotOrNotPerformerData, loser: HotOrNotPerformerData, newWinnerRating: Int, newLoserRating: Int) {
         switch duelMode {
-        case .swiss:
+        case .headToHead:
             break
         case .champion:
             if climbChampion?.id == winner.id {
@@ -1270,7 +1291,7 @@ private final class HotOrNotViewModel: ObservableObject {
                 climbChampion = winner.replacingRating100(newWinnerRating)
                 climbWins = 1
             }
-        case .gauntlet:
+        case .placement:
             if climbChampion?.id == winner.id {
                 climbDefeatedIds.insert(loser.id)
                 climbWins += 1
@@ -1312,53 +1333,26 @@ private final class HotOrNotViewModel: ObservableObject {
         let loser = leftWins ? r : l
         let wr = Double(winner.rating100 ?? 50)
         let lr = Double(loser.rating100 ?? 50)
-        let loserRank = leftWins ? rankRight : rankLeft
 
-        let champId = climbChampion?.id
-        let fallId = climbFallingItem?.id
-        let isChampionWinner = champId == winner.id
-        let isChampionLoser = champId == loser.id
-        let isFallingWinner = climbFalling && fallId == winner.id
-        let isFallingLoser = climbFalling && fallId == loser.id
-
-        let gain: Int
-        let loss: Int
-        switch duelMode {
-        case .swiss:
-            let o = HotOrNotSwissMath.outcomeSwiss(
-                winnerRating: wr,
-                loserRating: lr,
-                winnerMatchCount: HotOrNotSwissMath.matchCountParameterForK(winner.stats),
-                loserMatchCount: HotOrNotSwissMath.matchCountParameterForK(loser.stats)
-            )
-            gain = o.winnerGain
-            loss = o.loserLoss
-        case .champion:
-            let o = HotOrNotSwissMath.outcomeChampion(
-                winnerRating: wr,
-                loserRating: lr,
-                winnerMatchCount: HotOrNotSwissMath.matchCountParameterForK(winner.stats),
-                loserMatchCount: HotOrNotSwissMath.matchCountParameterForK(loser.stats)
-            )
-            gain = o.winnerGain
-            loss = o.loserLoss
-        case .gauntlet:
-            let o = HotOrNotSwissMath.outcomeGauntlet(
-                winnerRating: wr,
-                loserRating: lr,
-                winnerMatchCount: HotOrNotSwissMath.matchCountParameterForK(winner.stats),
-                isChampionWinner: isChampionWinner,
-                isFallingWinner: isFallingWinner,
-                isChampionLoser: isChampionLoser,
-                isFallingLoser: isFallingLoser,
-                loserRank: loserRank
-            )
-            gain = o.winnerGain
-            loss = o.loserLoss
-        }
+        let mcW = HotOrNotSwissMath.matchCountForProgressive(winner.stats)
+        let mcL = HotOrNotSwissMath.matchCountForProgressive(loser.stats)
+        let modeStr = duelMode.ascensionMode
+        let o = HotOrNotSwissMath.calculateMatchOutcome(
+            winnerRating: wr,
+            loserRating: lr,
+            mode: modeStr,
+            winnerMatchCount: mcW,
+            loserMatchCount: mcL,
+            winnerStats: winner.stats,
+            loserStats: loser.stats,
+            isSpecialChallenge: false
+        )
+        let gain = o.winnerGain
+        let loss = o.loserLoss
         #if DEBUG
         HotOrNotSwissMath.logDuelVoteDebugLine(
-            duelModeRaw: duelMode.rawValue,
+            duelLabel: duelMode.label,
+            ascensionMode: modeStr,
             winnerDisplay: winner.displayName,
             loserDisplay: loser.displayName,
             winnerRating: wr,
@@ -1366,10 +1360,7 @@ private final class HotOrNotViewModel: ObservableObject {
             winnerStats: winner.stats,
             loserStats: loser.stats,
             gain: gain,
-            loss: loss,
-            gauntlet: duelMode == .gauntlet
-                ? (isChampionWinner, isFallingWinner, isChampionLoser, isFallingLoser, loserRank)
-                : nil
+            loss: loss
         )
         #endif
         let oldW = winner.rating100 ?? 50
@@ -1437,12 +1428,12 @@ private final class HotOrNotViewModel: ObservableObject {
         let (lg, rrLoss) = HotOrNotSwissMath.outcomeDraw(
             leftRating: lr,
             rightRating: rr,
-            leftMatches: HotOrNotSwissMath.matchCountParameterForK(l.stats),
-            rightMatches: HotOrNotSwissMath.matchCountParameterForK(r.stats)
+            leftMatchCount: HotOrNotSwissMath.matchCountForProgressive(l.stats),
+            rightMatchCount: HotOrNotSwissMath.matchCountForProgressive(r.stats)
         )
         #if DEBUG
         HotOrNotSwissMath.logDrawSkipDebugLine(
-            duelModeRaw: duelMode.rawValue,
+            duelLabel: duelMode.label,
             leftDisplay: l.displayName,
             rightDisplay: r.displayName,
             leftRating: lr,
@@ -1461,7 +1452,7 @@ private final class HotOrNotViewModel: ObservableObject {
             left: .init(delta100: newL - oldL, rating100After: newL),
             right: .init(delta100: newR - oldR, rating100After: newR)
         )
-        if duelMode == .gauntlet {
+        if duelMode == .placement {
             climbSkippedId = r.id
         }
         do {
@@ -1601,11 +1592,11 @@ struct HotOrNotToolsView: View {
         }
     }
 
-    /// Gleiche Logik wie der Zweig in `battleContent` mit Karten + Aktionen (kein Sieger-/Gauntlet-Start-UI).
+    /// Gleiche Logik wie der Zweig in `battleContent` mit Karten + Aktionen (kein Sieger-/Placement-Start-UI).
     private var shouldShowDuelActionsAboveFloatingBar: Bool {
         guard model.section == .battle else { return false }
         guard model.climbVictory == nil else { return false }
-        guard !model.needsGauntletStarterSelection else { return false }
+        guard !model.needsPlacementStarterSelection else { return false }
         if model.isLoadingPair && model.left == nil { return false }
         return model.left != nil && model.right != nil
     }
@@ -1638,7 +1629,7 @@ struct HotOrNotToolsView: View {
                 .disabled(model.isSubmitting)
             }
 
-            if model.duelMode == .gauntlet {
+            if model.duelMode == .placement {
                 Button(action: {}) {
                     Label("New pair", systemImage: "arrow.triangle.2.circlepath")
                         .font(.subheadline.weight(.semibold))
@@ -1646,7 +1637,7 @@ struct HotOrNotToolsView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(true)
-                .accessibilityLabel("New pair, not available in Gauntlet")
+                .accessibilityLabel("New pair, not available in Placement")
 
                 Button {
                     HapticManager.light()
@@ -1659,7 +1650,7 @@ struct HotOrNotToolsView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(appearance.tintColor)
                 .disabled(model.isSubmitting)
-                .accessibilityLabel("End Gauntlet run")
+                .accessibilityLabel("End Placement run")
             } else {
                 Button {
                     Task { await model.loadDuelPair() }
@@ -1679,9 +1670,9 @@ struct HotOrNotToolsView: View {
     private var hotOrNotBottomChrome: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                hotOrNotDuelModeChip(.swiss)
+                hotOrNotDuelModeChip(.headToHead)
+                hotOrNotDuelModeChip(.placement)
                 hotOrNotDuelModeChip(.champion)
-                hotOrNotDuelModeChip(.gauntlet)
             }
             HStack(spacing: 10) {
                 hotOrNotChartsChip
@@ -1771,12 +1762,12 @@ struct HotOrNotToolsView: View {
     }
 
     @ViewBuilder
-    private var gauntletStarterInline: some View {
+    private var placementStarterInline: some View {
         VStack(spacing: 10) {
-            if model.isLoadingGauntletStarters && model.gauntletStarters.isEmpty {
+            if model.isLoadingPlacementStarters && model.placementStarters.isEmpty {
                 ProgressView()
                     .padding(.vertical, 28)
-            } else if model.gauntletStarters.isEmpty {
+            } else if model.placementStarters.isEmpty {
                 ContentUnavailableView(
                     "No starters",
                     systemImage: "person.2.slash",
@@ -1786,15 +1777,16 @@ struct HotOrNotToolsView: View {
                 LazyVGrid(
                     columns: [
                         GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10),
                         GridItem(.flexible(), spacing: 10)
                     ],
                     spacing: 12
                 ) {
-                    ForEach(Array(model.gauntletStarters.prefix(4)), id: \.id) { p in
+                    ForEach(Array(model.placementStarters.prefix(6)), id: \.id) { p in
                         HotOrNotGauntletStarterPickCard(
                             model: model,
                             performer: p,
-                            onPick: { model.pickGauntletStarter(p) }
+                            onPick: { model.pickPlacementStarter(p) }
                         )
                     }
                 }
@@ -1835,8 +1827,8 @@ struct HotOrNotToolsView: View {
                             .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
                     )
                     .cardShadow()
-                } else if model.needsGauntletStarterSelection {
-                    gauntletStarterInline
+                } else if model.needsPlacementStarterSelection {
+                    placementStarterInline
                 } else if model.isLoadingPair && model.left == nil {
                     ProgressView("Loading pair…")
                         .padding(.top, 40)
