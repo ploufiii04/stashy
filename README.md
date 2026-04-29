@@ -1,29 +1,29 @@
 # stashy
 
-Native **Stash**-App für **iOS** und **tvOS** mit **SwiftUI** — schnell, ohne eingebautes Tracking und direkt mit deinem Stash-Server verbunden.
+A native **Stash** client for **iOS** and **tvOS** built with **SwiftUI** — fast, no built-in tracking, and wired directly to your Stash server.
 
-## Funktionen (Stand Repo)
+## Features (current repo)
 
-- **Home & Katalog** — konfigurierbares Dashboard (Zeilen, Statistiken, Listen), Szenen, Darsteller, Studios, Galerien, Bilder, Tags, Gruppen, Marker.
-- **Feeds** — vertikaler, swipebarer Feed (Clips/Previews); optional „Social“ von Darsteller-Details aus.
-- **StashLine** — Bild-Timeline mit Filtern, Set-Gruppierung (u. a. nach Datum bzw. Name) und optional nach Bildausrichtung.
-- **Downloads** — Szenen für Offline-Wiedergabe laden.
-- **Wiedergabe** — Streaming mit wählbarer Qualität (pro Server / für Reels).
-- **Geräte** — TheHandy, **Intiface** / Buttplug inkl. **FunScript** im Player.
-- **Tools** — optional **Hot or Not** (Duell/Charts), abgestimmt auf das Stash-Plugin; in den Server-Einstellungen: **HTTPS-Zertifikat vertrauen** für Self-Signed-Zertifikate im Heimnetz.
-- **Suche** — übergreifende Suche.
-- **Einstellungen** — mehrere Server, API-Schlüssel (iOS: Keychain), Erscheinungsbild, Standard-Sortierung und -filter je Bereich, Sichtbarkeit und Reihenfolge der Tabs.
+- **Home & catalogue** — configurable dashboard (rows, statistics, lists), scenes, performers, studios, galleries, images, tags, groups, markers.
+- **Feeds** — vertical, swipeable feed (clips/previews); optional “Social” entry from performer detail.
+- **StashLine** — image timeline with filters, set grouping (e.g. by date or name), optionally by image orientation.
+- **Downloads** — download scenes for offline playback.
+- **Playback** — streaming with selectable quality (per server / for Reels).
+- **Devices** — TheHandy, **Intiface** / Buttplug including **FunScript** in the player.
+- **Tools** — optional **Hot or Not** (duel/charts), aligned with the Stash plugin; in server settings: **Trust HTTPS certificate** for self-signed certs on a home network.
+- **Search** — global search across server content.
+- **Settings** — multiple servers, API keys (Keychain on iOS), appearance, default sort/filter per area, tab visibility and order.
 
-## Datenschutz
+## Privacy
 
-Es werden **keine** Nutzerdaten für Analytics oder Tracking erhoben — keine eingebauten Drittanbieter-Tracker, keine app-internen Nutzer-IDs.
+**No** analytics or tracking user data — no third-party trackers in the app, no app-assigned user IDs.
 
-## Voraussetzungen
+## Requirements
 
-- Ein laufender **[Stash](https://github.com/stashapp/stash)**-Server (GraphQL-API wie von der App genutzt).
-- **Xcode** (empfohlen: aktuelle stabile Version).
+- A running **[Stash](https://github.com/stashapp/stash)** server (GraphQL API as used by the app).
+- **Xcode** (recommended: current stable release).
 
-## Lokal bauen
+## Build locally
 
 ```bash
 # iOS
@@ -33,26 +33,26 @@ xcodebuild -project stashy.xcodeproj -scheme stashy -destination 'generic/platfo
 xcodebuild -project stashy.xcodeproj -scheme stashyTV -destination 'generic/platform=tvOS' build
 ```
 
-GraphQL liegt unter `graphql/` und wird zur Laufzeit eingebunden.
+GraphQL documents live under `graphql/` and are loaded at runtime.
 
-## Plattformen & Installation
+## Platforms & distribution
 
-| Plattform | App Store | TestFlight |
-|-----------|-----------|------------|
-| **iOS** | [stashy](https://apps.apple.com/us/app/stashy/id6754876029) | [Einladung](https://testflight.apple.com/join/KBYqHCuD) |
-| **tvOS** | — | Early Alpha (gleicher TestFlight-Link) |
+| Platform | App Store | TestFlight |
+|----------|-----------|------------|
+| **iOS** | [stashy](https://apps.apple.com/us/app/stashy/id6754876029) | [Join](https://testflight.apple.com/join/KBYqHCuD) |
+| **tvOS** | — | Early alpha (same TestFlight link) |
 
 ## Community
 
 - **Discord**: [stashy](https://discord.gg/NBkUpUYJ)
 
-## Roadmap (Auszug)
+## Roadmap (excerpt)
 
-- tvOS näher an den iOS-Funktionsumfang bringen
-- Performance und Speicher bei sehr großen Bibliotheken
-- Feintuning von Filtern, Katalogen und Detailansichten
+- Bring tvOS closer to iOS feature parity
+- Performance and memory for very large libraries
+- Tuning filters, catalogues, and detail views
 
-## Bekannte Einschränkungen
+## Known limitations
 
-- Auf **tvOS** fehlen nicht alle iOS-Features (z. B. Keychain, manche UI-Komponenten/Gesten).
-- **Hot or Not** und ähnliche Tools setzen das **passende Stash-Plugin** bzw. Server-Daten voraus.
+- **tvOS** does not include every iOS feature (e.g. Keychain, some UI components/gestures).
+- **Hot or Not** and similar tools assume the **matching Stash plugin** and server data.
