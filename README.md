@@ -53,7 +53,7 @@ GraphQL documents live under `graphql/` and are loaded at runtime.
 ## Known limitations
 
 - **tvOS** does not include every iOS feature (e.g. Keychain, some UI components/gestures).
-- **Hot or Not** and similar tools assume the **matching Stash plugin** and server data.
+- **Match** (tab label; Hot-or-Not–style rating in tools) is **inspired by** **[Ascension](https://github.com/Servbot91/Ascension/tree/main)** — the Sakoto fork of Hot or Not for Stash. Stashy aims to stay **compatible with the same custom-field / DB entries** used by that plugin ecosystem, but **matchmaking and scoring algorithms** in the app **differ** from Ascension’s server-side behaviour; you still need a **compatible Stash plugin** and matching server data for full fidelity.
 
 ## Third-party
 

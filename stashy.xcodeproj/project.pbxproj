@@ -428,6 +428,7 @@
 				08FB778DFE84155DC02AAC07 /* Sources */,
 				08FB7791FE84155DC02AAC07 /* Frameworks */,
 				08FB7792FE84155DC02AAC07 /* Resources */,
+				E7F1C9B62F10EA1E004BBEB5 /* Patch Embedded Framework Bundle IDs */,
 			);
 			buildRules = (
 			);
@@ -542,6 +543,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "$PROJECT_DIR/stashy/scripts/bump_version.sh \n";
+		};
+		E7F1C9B62F10EA1E004BBEB5 /* Patch Embedded Framework Bundle IDs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Patch Embedded Framework Bundle IDs";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$PROJECT_DIR\"/stashy/scripts/patch_embedded_framework_bundle_ids.sh\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

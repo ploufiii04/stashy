@@ -853,6 +853,11 @@ private struct HotOrNotFindResponse: Codable {
 
 // MARK: - Battle rank (Performer detail header; same pool as Charts)
 
+/// Paginates `findPerformers` for Hot or Not leaderboards. Not isolated to `@MainActor` so `HotOrNotBattleDisplay` can use the same value in Swift 6.
+private enum HotOrNotLeaderboardPaging {
+    static let perPage = 50
+}
+
 enum HotOrNotBattleDisplay {
     private static let gendersKey = "stashy.hotOrNot.selectedGenders"
     private static let client = GraphQLClient.shared
@@ -883,7 +888,7 @@ enum HotOrNotBattleDisplay {
     static func fetchRankSlashTotal(performerId: String) async -> String? {
         let genders = loadGenders()
         let query = GraphQLQueries.queryWithFragments("hotOrNotFindPerformers")
-        let perPage = HotOrNotViewModel.leaderboardPerPage
+        let perPage = HotOrNotLeaderboardPaging.perPage
         var totalCount = 0
         var page = 1
         do {
@@ -988,7 +993,7 @@ private final class HotOrNotViewModel: ObservableObject {
     @Published var rankLeft: Int?
     @Published var rankRight: Int?
     @Published var leaderboard: [HotOrNotPerformerData] = []
-    /// Total performers in pool (`findPerformers.count`); leaderboard rows are paginated (`leaderboardPerPage`).
+    /// Total performers in pool (`findPerformers.count`); leaderboard rows are paginated (`HotOrNotLeaderboardPaging.perPage`).
     @Published var leaderboardTotalCount: Int = 0
     @Published var isLoadingMoreLeaderboard = false
     @Published var isLoadingPair = false
@@ -1017,7 +1022,6 @@ private final class HotOrNotViewModel: ObservableObject {
 
     private let client = GraphQLClient.shared
     private static let duelFeedbackDurationNs: UInt64 = 1_200_000_000
-    fileprivate static let leaderboardPerPage = 50
     /// Last successfully loaded Charts `filter.page` (1-based); 0 = not loaded.
     private var lastLeaderboardPageLoaded = 0
 
@@ -1352,7 +1356,7 @@ private final class HotOrNotViewModel: ObservableObject {
             "performer_filter": performerFilter,
             "filter": [
                 "page": 1,
-                "per_page": Self.leaderboardPerPage,
+                "per_page": HotOrNotLeaderboardPaging.perPage,
                 "sort": "rating",
                 "direction": "DESC"
             ] as [String: Any]
@@ -1380,7 +1384,7 @@ private final class HotOrNotViewModel: ObservableObject {
             "performer_filter": performerFilter,
             "filter": [
                 "page": nextPage,
-                "per_page": Self.leaderboardPerPage,
+                "per_page": HotOrNotLeaderboardPaging.perPage,
                 "sort": "rating",
                 "direction": "DESC"
             ] as [String: Any]

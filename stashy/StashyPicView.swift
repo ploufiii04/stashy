@@ -69,286 +69,327 @@ struct StashLineView: View {
         }
     }
 
-    var body: some View {
-        Group {
-            if configManager.activeConfig == nil {
-                ConnectionErrorView { performSearch() }
-            } else if viewModel.isLoadingImages && viewModel.allImages.isEmpty {
-                StandardLoadingView(message: "Loading StashLine...")
-            } else if viewModel.allImages.isEmpty && viewModel.errorMessage != nil {
-                ConnectionErrorView { performSearch() }
-            } else if viewModel.allImages.isEmpty {
-                SharedEmptyStateView(
-                    icon: "camera.fill",
-                    title: "No images found",
-                    buttonText: "Load Images",
-                    onRetry: { performSearch() }
-                )
-            } else {
-                feedContent
-            }
-        }
-        .navigationBarHidden(true)
-        .if(!isEmbedded) { view in
-            view.safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        if performerFilter != nil {
-                            Button(action: { dismiss() }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "chevron.left")
-                                        .font(.system(size: 17, weight: .semibold))
-                                }
-                                .foregroundColor(appearanceManager.tintColor)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Text(performerFilter?.name ?? "StashLine")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 32)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-
-                    Divider().overlay(Color.white.opacity(0.15))
-                }
-                .background(.bar)
-                .colorScheme(.dark)
-            }
-        }
-        .floatingActionBar(isPresented: true, catalogChrome: CatalogFloatingChromeState(hasActiveServerConfig: configManager.activeConfig != nil, primaryListIsEmpty: viewModel.allImages.isEmpty, errorMessage: viewModel.errorMessage, imageFindListError: viewModel.imageFindListError)) {
-            floatingBarContent
-        }
-        .sheet(isPresented: $stashLineListFilters.showFilterSortSheet) {
-            ImagesCatalogFilterSortSheet(
-                serverFilters: stashLineListFilters.sortedServerImageFilters(viewModel: viewModel),
-                localPresets: stashLineListFilters.localCatalogPresets,
-                selectedPresetRowId: $stashLineListFilters.catalogPresetRowSelection,
-                liveChipRowsVisible: stashLineListFilters.imageLiveChipRowsVisible,
-                sortOption: stashLineListFilters.selectedSortOption,
-                onSortChange: { changeSortOption(to: $0) },
-                liveMinRating: $stashLineListFilters.liveFilterMinRating,
-                livePerformerFavorite: $stashLineListFilters.liveFilterPerformerFavorite,
-                liveOrganized: $stashLineListFilters.liveFilterOrganized,
-                liveOCounterTag: $stashLineListFilters.liveFilterOCounterTag,
-                liveStudioIds: $stashLineListFilters.liveFilterStudioIds,
-                liveTagIds: $stashLineListFilters.liveFilterTagIds,
-                studioPickerOptions: stashLineListFilters.studioPickerOptions,
-                studioPickerLoading: stashLineListFilters.studioPickerLoading,
-                onStudioPickerSectionAppear: { stashLineListFilters.loadStudioPickerOptions(viewModel: viewModel) },
-                tagPickerOptions: stashLineListFilters.tagPickerOptions,
-                tagPickerLoading: stashLineListFilters.tagPickerLoading,
-                onTagPickerSectionAppear: { stashLineListFilters.loadTagPickerOptions(viewModel: viewModel) },
-                onApply: {
-                    prepareScrollToTopAfterNextFetch()
-                    stashLineListFilters.applyLiveFilter(viewModel: viewModel)
-                },
-                onReset: {
-                    prepareScrollToTopAfterNextFetch()
-                    stashLineListFilters.catalogPresetRowSelection = ""
-                    stashLineListFilters.selectedFilter = nil
-                    stashLineListFilters.clearLiveChipsOnly()
-                    stashLineListFilters.refetchImages(viewModel: viewModel, initial: true)
-                },
-                onRequestSave: { stashLineListFilters.savePresetOverwrite(viewModel: viewModel) },
-                onRequestSaveAs: {
-                    stashLineListFilters.catalogPresetNameInput = ""
-                    stashLineListFilters.showSaveAsCatalogPresetAlert = true
-                },
-                onRequestRename: {
-                    if let sid = ListLivePresetTag.parseServerId(stashLineListFilters.catalogPresetRowSelection),
-                       let n = viewModel.savedFilters[sid]?.name {
-                        stashLineListFilters.renameCatalogPresetInput = n
-                    } else if let ls = ListLivePresetTag.parseLocalUUIDString(stashLineListFilters.catalogPresetRowSelection),
-                              let uuid = UUID(uuidString: ls),
-                              let p = stashLineListFilters.localCatalogPresets.first(where: { $0.id == uuid }) {
-                        stashLineListFilters.renameCatalogPresetInput = p.name
-                    }
-                    stashLineListFilters.showRenameCatalogPresetAlert = true
-                },
-                onRequestDelete: { stashLineListFilters.showDeleteCatalogPresetAlert = true }
+    @ViewBuilder
+    private var stashLineRoot: some View {
+        if configManager.activeConfig == nil {
+            ConnectionErrorView { performSearch() }
+        } else if viewModel.isLoadingImages && viewModel.allImages.isEmpty {
+            StandardLoadingView(message: "Loading StashLine...")
+        } else if viewModel.allImages.isEmpty && viewModel.errorMessage != nil {
+            ConnectionErrorView { performSearch() }
+        } else if viewModel.allImages.isEmpty {
+            SharedEmptyStateView(
+                icon: "camera.fill",
+                title: "No images found",
+                buttonText: "Load Images",
+                onRetry: { performSearch() }
             )
-            .presentationDragIndicator(.visible)
-            .presentationBackground(Color.appBackground)
-            .onAppear {
-                var sel = stashLineListFilters.catalogPresetRowSelection
-                ListLivePresetTag.migrateLegacySelection(&sel)
-                stashLineListFilters.catalogPresetRowSelection = sel
-                stashLineListFilters.refreshLocalPresets()
-                stashLineListFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
-            }
+        } else {
+            feedContent
         }
-        .alert("Speichern unter", isPresented: $stashLineListFilters.showSaveAsCatalogPresetAlert) {
-            TextField("Name", text: $stashLineListFilters.catalogPresetNameInput)
-            Button("Speichern") {
-                stashLineListFilters.savePresetAs(name: stashLineListFilters.catalogPresetNameInput, viewModel: viewModel)
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("Sortierung, Filter und Live-Kriterien als neuen Stash-Bildfilter speichern.")
-        }
-        .alert("Umbenennen", isPresented: $stashLineListFilters.showRenameCatalogPresetAlert) {
-            TextField("Name", text: $stashLineListFilters.renameCatalogPresetInput)
-            Button("Speichern") {
-                stashLineListFilters.renamePreset(to: stashLineListFilters.renameCatalogPresetInput, viewModel: viewModel)
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("Preset oder gespeicherten Filter umbenennen.")
-        }
-        .alert("Filter löschen?", isPresented: $stashLineListFilters.showDeleteCatalogPresetAlert) {
-            Button("Löschen", role: .destructive) {
-                stashLineListFilters.deletePreset(viewModel: viewModel)
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text(stashLineListFilters.deletePresetConfirmationText(viewModel: viewModel))
-        }
-        .onChange(of: stashLineListFilters.catalogPresetRowSelection) { _, newId in
-            guard stashLineListFilters.showFilterSortSheet else { return }
-            prepareScrollToTopAfterNextFetch()
-            stashLineListFilters.handlePresetSelection(newId, viewModel: viewModel)
-        }
-        .onAppear {
-            let sortStr = TabManager.shared.getSortOption(for: .stashline) ?? "createdAtDesc"
-            if let sort = StashDBViewModel.ImageSortOption(rawValue: sortStr) {
-                stashLineListFilters.selectedSortOption = sort
-            }
-            if TabManager.shared.getDefaultFilterId(for: .stashline) == nil || !viewModel.savedFilters.isEmpty {
-                if viewModel.allImages.isEmpty {
-                    performSearch()
+    }
+
+    private var stashLineCatalogFABChrome: CatalogFloatingChromeState {
+        CatalogFloatingChromeState(
+            hasActiveServerConfig: configManager.activeConfig != nil,
+            primaryListIsEmpty: viewModel.allImages.isEmpty,
+            errorMessage: viewModel.errorMessage,
+            imageFindListError: viewModel.imageFindListError
+        )
+    }
+
+    private var stashLineTopInsetBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if performerFilter != nil {
+                    Button(action: { dismiss() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                        .foregroundColor(appearanceManager.tintColor)
+                    }
+                    .buttonStyle(.plain)
                 }
+                Text(performerFilter?.name ?? "StashLine")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            viewModel.fetchSavedFilters()
-            let savedId = performerFilter.flatMap { coordinator.picsPerformerScrollIds[$0.id] } ?? coordinator.picsGlobalScrollId
-            if !viewModel.allImages.isEmpty {
-                if let id = savedId { scrollPositionId = id }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 32)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+
+            Divider().overlay(Color.white.opacity(0.15))
+        }
+        .background(.bar)
+        .colorScheme(.dark)
+    }
+
+    /// Oberfläche oberhalb der Floating-Bar: Root mit optionaler Top-Navigation (nicht embedded).
+    private var stashLineNavSurface: some View {
+        Group {
+            if isEmbedded {
+                stashLineRoot.navigationBarHidden(true)
             } else {
-                pendingRestoreId = savedId
+                stashLineRoot
+                    .navigationBarHidden(true)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        stashLineTopInsetBar
+                    }
             }
-            rebuildGroupedPosts()
         }
-        .onChange(of: stashLineListFilters.selectedSortOption) { _, _ in
-            rebuildGroupedPosts()
+    }
+
+    private var stashLineNavigationChrome: some View {
+        stashLineNavSurface
+            .floatingActionBar(isPresented: true, catalogChrome: stashLineCatalogFABChrome) {
+                floatingBarContent
+            }
+    }
+
+    private var stashLineFilterSheetContent: some View {
+        ImagesCatalogFilterSortSheet(
+            serverFilters: stashLineListFilters.sortedServerImageFilters(viewModel: viewModel),
+            localPresets: stashLineListFilters.localCatalogPresets,
+            selectedPresetRowId: $stashLineListFilters.catalogPresetRowSelection,
+            liveChipRowsVisible: stashLineListFilters.imageLiveChipRowsVisible,
+            sortOption: stashLineListFilters.selectedSortOption,
+            onSortChange: { changeSortOption(to: $0) },
+            liveMinRating: $stashLineListFilters.liveFilterMinRating,
+            livePerformerFavorite: $stashLineListFilters.liveFilterPerformerFavorite,
+            liveOrganized: $stashLineListFilters.liveFilterOrganized,
+            liveOCounterTag: $stashLineListFilters.liveFilterOCounterTag,
+            liveStudioIds: $stashLineListFilters.liveFilterStudioIds,
+            liveTagIds: $stashLineListFilters.liveFilterTagIds,
+            studioPickerOptions: stashLineListFilters.studioPickerOptions,
+            studioPickerLoading: stashLineListFilters.studioPickerLoading,
+            onStudioPickerSectionAppear: { stashLineListFilters.loadStudioPickerOptions(viewModel: viewModel) },
+            tagPickerOptions: stashLineListFilters.tagPickerOptions,
+            tagPickerLoading: stashLineListFilters.tagPickerLoading,
+            onTagPickerSectionAppear: { stashLineListFilters.loadTagPickerOptions(viewModel: viewModel) },
+            onApply: {
+                prepareScrollToTopAfterNextFetch()
+                stashLineListFilters.applyLiveFilter(viewModel: viewModel)
+            },
+            onReset: {
+                prepareScrollToTopAfterNextFetch()
+                stashLineListFilters.catalogPresetRowSelection = ""
+                stashLineListFilters.selectedFilter = nil
+                stashLineListFilters.clearLiveChipsOnly()
+                stashLineListFilters.refetchImages(viewModel: viewModel, initial: true)
+            },
+            onRequestSave: { stashLineListFilters.savePresetOverwrite(viewModel: viewModel) },
+            onRequestSaveAs: {
+                stashLineListFilters.catalogPresetNameInput = ""
+                stashLineListFilters.showSaveAsCatalogPresetAlert = true
+            },
+            onRequestRename: {
+                if let sid = ListLivePresetTag.parseServerId(stashLineListFilters.catalogPresetRowSelection),
+                   let n = viewModel.savedFilters[sid]?.name {
+                    stashLineListFilters.renameCatalogPresetInput = n
+                } else if let ls = ListLivePresetTag.parseLocalUUIDString(stashLineListFilters.catalogPresetRowSelection),
+                          let uuid = UUID(uuidString: ls),
+                          let p = stashLineListFilters.localCatalogPresets.first(where: { $0.id == uuid }) {
+                    stashLineListFilters.renameCatalogPresetInput = p.name
+                }
+                stashLineListFilters.showRenameCatalogPresetAlert = true
+            },
+            onRequestDelete: { stashLineListFilters.showDeleteCatalogPresetAlert = true }
+        )
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .onAppear {
+            var sel = stashLineListFilters.catalogPresetRowSelection
+            ListLivePresetTag.migrateLegacySelection(&sel)
+            stashLineListFilters.catalogPresetRowSelection = sel
+            stashLineListFilters.refreshLocalPresets()
+            stashLineListFilters.applyCatalogPresetSelectionFromSheetIfNeeded(viewModel: viewModel)
         }
-        .onChange(of: viewModel.allImages.count) { _, _ in
-            rebuildGroupedPosts()
-        }
-        .onChange(of: viewModel.allImages.first?.id) { _, _ in
-            rebuildGroupedPosts()
-        }
-        .onChange(of: viewModel.allImages.last?.id) { _, _ in
-            rebuildGroupedPosts()
-        }
-        .onChange(of: viewModel.savedFilters) { _, newValue in
-            if stashLineListFilters.selectedFilter == nil {
-                if let defaultId = TabManager.shared.getDefaultFilterId(for: .stashline),
-                   let filter = newValue[defaultId] {
-                    stashLineListFilters.selectedFilter = filter
-                    performSearch()
-                } else if !viewModel.isLoadingSavedFilters {
+    }
+
+    private var stashLineSheetsAndAlerts: some View {
+        stashLineNavigationChrome
+            .sheet(isPresented: $stashLineListFilters.showFilterSortSheet) {
+                stashLineFilterSheetContent
+            }
+            .alert("Speichern unter", isPresented: $stashLineListFilters.showSaveAsCatalogPresetAlert) {
+                TextField("Name", text: $stashLineListFilters.catalogPresetNameInput)
+                Button("Speichern") {
+                    stashLineListFilters.savePresetAs(name: stashLineListFilters.catalogPresetNameInput, viewModel: viewModel)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Sortierung, Filter und Live-Kriterien als neuen Stash-Bildfilter speichern.")
+            }
+            .alert("Umbenennen", isPresented: $stashLineListFilters.showRenameCatalogPresetAlert) {
+                TextField("Name", text: $stashLineListFilters.renameCatalogPresetInput)
+                Button("Speichern") {
+                    stashLineListFilters.renamePreset(to: stashLineListFilters.renameCatalogPresetInput, viewModel: viewModel)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Preset oder gespeicherten Filter umbenennen.")
+            }
+            .alert("Filter löschen?", isPresented: $stashLineListFilters.showDeleteCatalogPresetAlert) {
+                Button("Löschen", role: .destructive) {
+                    stashLineListFilters.deletePreset(viewModel: viewModel)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text(stashLineListFilters.deletePresetConfirmationText(viewModel: viewModel))
+            }
+            .onChange(of: stashLineListFilters.catalogPresetRowSelection) { _, newId in
+                guard stashLineListFilters.showFilterSortSheet else { return }
+                prepareScrollToTopAfterNextFetch()
+                stashLineListFilters.handlePresetSelection(newId, viewModel: viewModel)
+            }
+    }
+
+    /// Appear + Bildliste / Filter – eigene View-Kette, damit der Type-Checker nicht aussteigt.
+    private var stashLineLoadingAndFilterObservers: some View {
+        stashLineSheetsAndAlerts
+            .onAppear {
+                let sortStr = TabManager.shared.getSortOption(for: .stashline) ?? "createdAtDesc"
+                if let sort = StashDBViewModel.ImageSortOption(rawValue: sortStr) {
+                    stashLineListFilters.selectedSortOption = sort
+                }
+                if TabManager.shared.getDefaultFilterId(for: .stashline) == nil || !viewModel.savedFilters.isEmpty {
                     if viewModel.allImages.isEmpty {
                         performSearch()
                     }
                 }
+                viewModel.fetchSavedFilters()
+                let savedId = performerFilter.flatMap { coordinator.picsPerformerScrollIds[$0.id] } ?? coordinator.picsGlobalScrollId
+                if !viewModel.allImages.isEmpty {
+                    if let id = savedId { scrollPositionId = id }
+                } else {
+                    pendingRestoreId = savedId
+                }
+                rebuildGroupedPosts()
             }
-        }
-        .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
-            if oldValue == true && isLoading == false {
-                if viewModel.allImages.isEmpty && !viewModel.isLoadingImages && stashLineListFilters.selectedFilter == nil {
-                    performSearch()
+            .onChange(of: stashLineListFilters.selectedSortOption) { _, _ in
+                rebuildGroupedPosts()
+            }
+            .onChange(of: viewModel.allImages.count) { _, _ in
+                rebuildGroupedPosts()
+            }
+            .onChange(of: viewModel.allImages.first?.id) { _, _ in
+                rebuildGroupedPosts()
+            }
+            .onChange(of: viewModel.allImages.last?.id) { _, _ in
+                rebuildGroupedPosts()
+            }
+            .onChange(of: viewModel.savedFilters) { _, newValue in
+                if stashLineListFilters.selectedFilter == nil {
+                    if let defaultId = TabManager.shared.getDefaultFilterId(for: .stashline),
+                       let filter = newValue[defaultId] {
+                        stashLineListFilters.selectedFilter = filter
+                        performSearch()
+                    } else if !viewModel.isLoadingSavedFilters {
+                        if viewModel.allImages.isEmpty {
+                            performSearch()
+                        }
+                    }
                 }
             }
-        }
-        .onChange(of: viewModel.isLoadingImages) { wasLoading, isLoading in
-            print("🔄 isLoadingImages \(wasLoading)→\(isLoading) | pendingRestore=\(pendingRestoreId ?? "nil") | scrollTopAfter=\(shouldScrollToTopAfterReload)")
-            guard wasLoading && !isLoading else { return }
-            // Zuerst Gruppierung mit den **neuen** allImages, sonst war cachedPosts evtl. noch der alte
-            // Stand und scrollPosition trifft nicht den ersten Post der neuen Liste.
-            rebuildGroupedPosts()
+            .onChange(of: viewModel.isLoadingSavedFilters) { oldValue, isLoading in
+                if oldValue == true && isLoading == false {
+                    if viewModel.allImages.isEmpty && !viewModel.isLoadingImages && stashLineListFilters.selectedFilter == nil {
+                        performSearch()
+                    }
+                }
+            }
+            .onChange(of: viewModel.isLoadingImages) { wasLoading, isLoading in
+                print("🔄 isLoadingImages \(wasLoading)→\(isLoading) | pendingRestore=\(pendingRestoreId ?? "nil") | scrollTopAfter=\(shouldScrollToTopAfterReload)")
+                guard wasLoading && !isLoading else { return }
+                rebuildGroupedPosts()
 
-            if shouldScrollToTopAfterReload {
-                shouldScrollToTopAfterReload = false
-                pendingRestoreId = nil
-                let firstId = cachedPosts.first?.id
-                DispatchQueue.main.async {
-                    scrollPositionId = firstId
+                if shouldScrollToTopAfterReload {
+                    shouldScrollToTopAfterReload = false
+                    pendingRestoreId = nil
+                    let firstId = cachedPosts.first?.id
+                    DispatchQueue.main.async {
+                        scrollPositionId = firstId
+                    }
+                    return
                 }
-                return
-            }
 
-            if let id = pendingRestoreId {
-                pendingRestoreId = nil
-                DispatchQueue.main.async { scrollPositionId = id }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
-            stashLineListFilters.selectedFilter = nil
-            performSearch()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
-            guard let targetId = notification.userInfo?["performerId"] as? String,
-                  let newPath = notification.userInfo?["newImagePath"] as? String else { return }
-            if performerFilter?.id == targetId {
-                performerFilter?.image_path = newPath
-            }
-            // Patch allImages so future rebuilds have the correct URL.
-            for i in 0..<viewModel.allImages.count {
-                if var mutablePerformers = viewModel.allImages[i].performers,
-                   let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId }) {
-                    mutablePerformers[pIndex].image_path = newPath
-                    viewModel.allImages[i].performers = mutablePerformers
+                if let id = pendingRestoreId {
+                    pendingRestoreId = nil
+                    DispatchQueue.main.async { scrollPositionId = id }
                 }
             }
-            // Update cachedPosts in-place so the avatar refreshes without
-            // replacing the array (which would cause the scroll view to jump).
-            cachedPosts = cachedPosts.map { post in
-                let updatedImages = post.images.map { img -> StashImage in
-                    guard var mutablePerformers = img.performers,
-                          let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId })
-                    else { return img }
-                    var mutableImg = img
-                    mutablePerformers[pIndex].image_path = newPath
-                    mutableImg.performers = mutablePerformers
-                    return mutableImg
+    }
+
+    /// Notifications + Scroll/Performer – zweite Kette.
+    private var stashLineSyncAndScrollObservers: some View {
+        stashLineLoadingAndFilterObservers
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ServerConfigChanged"))) { _ in
+                stashLineListFilters.selectedFilter = nil
+                performSearch()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PerformerImageUpdated"))) { notification in
+                guard let targetId = notification.userInfo?["performerId"] as? String,
+                      let newPath = notification.userInfo?["newImagePath"] as? String else { return }
+                if performerFilter?.id == targetId {
+                    performerFilter?.image_path = newPath
                 }
-                return StashLinePost(images: updatedImages)
+                for i in 0..<viewModel.allImages.count {
+                    if var mutablePerformers = viewModel.allImages[i].performers,
+                       let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId }) {
+                        mutablePerformers[pIndex].image_path = newPath
+                        viewModel.allImages[i].performers = mutablePerformers
+                    }
+                }
+                cachedPosts = cachedPosts.map { post in
+                    let updatedImages = post.images.map { img -> StashImage in
+                        guard var mutablePerformers = img.performers,
+                              let pIndex = mutablePerformers.firstIndex(where: { $0.id == targetId })
+                        else { return img }
+                        var mutableImg = img
+                        mutablePerformers[pIndex].image_path = newPath
+                        mutableImg.performers = mutablePerformers
+                        return mutableImg
+                    }
+                    return StashLinePost(images: updatedImages)
+                }
             }
-        }
-        .onChange(of: scrollPositionId) { _, newId in
-            print("📍 scrollPositionId changed → \(newId ?? "nil") | pendingRestore=\(pendingRestoreId ?? "nil") | performer=\(performerFilter?.name ?? "global")")
-            guard pendingRestoreId == nil, let id = newId else { return }
-            if let pid = performerFilter?.id {
-                coordinator.picsPerformerScrollIds[pid] = id
-            } else {
-                coordinator.picsGlobalScrollId = id
+            .onChange(of: scrollPositionId) { _, newId in
+                print("📍 scrollPositionId changed → \(newId ?? "nil") | pendingRestore=\(pendingRestoreId ?? "nil") | performer=\(performerFilter?.name ?? "global")")
+                guard pendingRestoreId == nil, let id = newId else { return }
+                if let pid = performerFilter?.id {
+                    coordinator.picsPerformerScrollIds[pid] = id
+                } else {
+                    coordinator.picsGlobalScrollId = id
+                }
             }
-        }
-        .onChange(of: performerFilter) { oldPerformer, newPerformer in
-            print("🎭 performerFilter changed \(oldPerformer?.name ?? "global") → \(newPerformer?.name ?? "global") | scrollId=\(scrollPositionId ?? "nil") | globalSaved=\(coordinator.picsGlobalScrollId ?? "nil")")
-            // Save current position for performer views being left
-            if let pid = oldPerformer?.id, let id = scrollPositionId {
-                coordinator.picsPerformerScrollIds[pid] = id
+            .onChange(of: performerFilter) { oldPerformer, newPerformer in
+                print("🎭 performerFilter changed \(oldPerformer?.name ?? "global") → \(newPerformer?.name ?? "global") | scrollId=\(scrollPositionId ?? "nil") | globalSaved=\(coordinator.picsGlobalScrollId ?? "nil")")
+                if let pid = oldPerformer?.id, let id = scrollPositionId {
+                    coordinator.picsPerformerScrollIds[pid] = id
+                }
+                scrollPositionId = nil
+                if let newPid = newPerformer?.id {
+                    pendingRestoreId = coordinator.picsPerformerScrollIds[newPid]
+                } else {
+                    pendingRestoreId = coordinator.picsGlobalScrollId
+                }
+                performSearch()
             }
-            // Global position is saved continuously by onChange(of: scrollPositionId)
-            // and explicitly by performer tap — don't overwrite here
-            // Clear scroll position so stale ID doesn't confuse the new dataset
-            scrollPositionId = nil
-            // Queue restore for the new filter
-            if let newPid = newPerformer?.id {
-                pendingRestoreId = coordinator.picsPerformerScrollIds[newPid]
-            } else {
-                pendingRestoreId = coordinator.picsGlobalScrollId
+            .onChange(of: externalPerformerFilter) { _, newValue in
+                performerFilter = newValue
             }
-            performSearch()
-        }
-        .onChange(of: externalPerformerFilter) { _, newValue in
-            performerFilter = newValue
-        }
+    }
+
+    private var stashLineObservers: some View {
+        stashLineSyncAndScrollObservers
+    }
+
+    var body: some View {
+        stashLineObservers
     }
 
     @ViewBuilder
