@@ -56,3 +56,6 @@ stashy/scripts/skipped/
 *.mlmodel
 *.mlproj
 
+
+# Accidental local binary (do not commit)
+/main
