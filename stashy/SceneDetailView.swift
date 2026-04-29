@@ -11,6 +11,7 @@ import AVFoundation
 import AVKit
 import WebKit
 import Combine
+import KSPlayer
 
 struct SceneDetailView: View {
     let scene: Scene
@@ -39,7 +40,6 @@ struct SceneDetailView: View {
 
     @State private var isHeaderExpanded = false
     @State private var isTagsExpanded = false
-    @State private var isFullscreen = false
     @State private var isPlaybackStarted = false
     @State private var tagsTotalHeight: CGFloat = 0
     @State private var isMuted = !isHeadphonesConnected()
@@ -53,6 +53,11 @@ struct SceneDetailView: View {
     /// suppress redundant work (sync restarts, play-state side-effects) during
     /// high-frequency seeks.
     @State private var isScrubbing: Bool = false
+    
+    @StateObject private var sceneKSPlayerCoordinator = KSVideoPlayer.Coordinator()
+    @State private var lastPlaybackResumeChoice = false
+    @State private var didBootstrapKSPlayer = false
+    @State private var pendingSeekAfterKSReady: Double?
     
     // Preview Video State
     @State private var previewPlayer: AVPlayer?
@@ -115,13 +120,14 @@ struct SceneDetailView: View {
                     activeScene: $activeScene,
                     player: $player,
                     isPlaybackStarted: $isPlaybackStarted,
-                    isFullscreen: $isFullscreen,
                     isPreviewing: $isPreviewing,
                     isHeaderExpanded: $isHeaderExpanded,
                     showingAddMarkerSheet: $showingAddMarkerSheet,
                     capturedMarkerTime: $capturedMarkerTime,
                     playbackSpeed: $playbackSpeed,
                     viewModel: viewModel,
+                    ksCoordinator: sceneKSPlayerCoordinator,
+                    scenePlaybackSignedURL: sceneDetailPlaybackSignedURL,
                     onSeek: { seconds in seekTo(seconds) },
                     onStartPlayback: { resume in startPlayback(resume: resume) },
                     onTitleUpdated: { newTitle, newDetails in
@@ -287,6 +293,11 @@ struct SceneDetailView: View {
         }
     }
 
+    private var sceneDetailPlaybackSignedURL: URL? {
+        guard let u = activeScene.videoURL else { return nil }
+        return signedURL(u) ?? u
+    }
+
 
 
     var body: some View {
@@ -296,6 +307,14 @@ struct SceneDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { sceneToolbarContent }
             .toolbar(.visible, for: .navigationBar)
+            .onChange(of: player) { oldPlayer, newPlayer in
+                if newPlayer == nil {
+                    didBootstrapKSPlayer = false
+                } else if isPlaybackStarted, !didBootstrapKSPlayer, oldPlayer == nil, let p = newPlayer {
+                    didBootstrapKSPlayer = true
+                    bootstrapKSPlayerAttached(p, applyResumeSeek: lastPlaybackResumeChoice)
+                }
+            }
             .modifier(SceneDetailAlertModifier(
                 showDeleteConfirmation: $showDeleteWithFilesConfirmation,
                 showingAddMarkerSheet: $showingAddMarkerSheet,
@@ -372,7 +391,6 @@ struct SceneDetailView: View {
 
     private func handleOnAppear() {
         print("🔍 Scene Detail: ID=\(activeScene.id), PlayCount=\(activeScene.playCount ?? -1)")
-        isFullscreen = false
         
         // Reset all SYNC states only on very first appear - WE WANT MANUAL ACTIVATION
         if !hasInitializedDevices {
@@ -425,22 +443,26 @@ struct SceneDetailView: View {
         if isDeleting {
             player?.pause()
             stopPreview()
+            sceneKSPlayerCoordinator.resetPlayer()
+            player = nil
             return
         }
 
-        if !isFullscreen {
-            player?.pause()
-            StashSyncManager.shared.stop()
-            if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
-            if buttplugManager.isConnected { buttplugManager.stop() }
-            if loveSpouseManager.isConnected { loveSpouseManager.stop() }
-        }
+        player?.pause()
+        StashSyncManager.shared.stop()
+        if handyManager.isSyncing || handyManager.isStashSyncMode { handyManager.pause() }
+        if buttplugManager.isConnected { buttplugManager.stop() }
+        if loveSpouseManager.isConnected { loveSpouseManager.stop() }
         stopPreview()
         removeTimeObserver()
-        
+
         let currentTime = player?.currentTime().seconds
         let effectiveResumeTime = (currentTime != nil && currentTime! > 0) ? currentTime! : activeScene.resumeTime
-        
+
+        sceneKSPlayerCoordinator.resetPlayer()
+        player = nil
+        didBootstrapKSPlayer = false
+
         if let resumeTime = effectiveResumeTime, resumeTime > 0 {
             let sceneId = activeScene.id
             if currentTime != nil && currentTime! > 0 {
@@ -495,38 +517,43 @@ struct SceneDetailView: View {
     }
 
     private func startPlayback(resume: Bool) {
-        guard let videoURL = activeScene.videoURL else { return }
+        guard activeScene.videoURL != nil else { return }
 
-        if player == nil {
-            print("🎬 Player initializing with URL: \(videoURL.absoluteString)")
-            player = createPlayer(for: videoURL)
-            player?.isMuted = isMuted
-            addTimeObserverIfNeeded()
-
-            if resume, let resumeTime = activeScene.resumeTime, resumeTime > 0 {
-                let targetTime = CMTime(seconds: resumeTime, preferredTimescale: 600)
-                player?.seek(to: targetTime)
-            }
-        } else if resume, let resumeTime = activeScene.resumeTime, resumeTime > 0 {
-             let targetTime = CMTime(seconds: resumeTime, preferredTimescale: 600)
-             player?.seek(to: targetTime)
-        }
-        
+        prepareStashPlaybackAudioSession()
+        lastPlaybackResumeChoice = resume
         withAnimation {
             isPlaybackStarted = true
         }
-        player?.play()
+        if let player {
+            bootstrapKSPlayerAttached(player, applyResumeSeek: resume)
+        }
+    }
+
+    private func bootstrapKSPlayerAttached(_ player: AVPlayer, applyResumeSeek: Bool) {
+        player.isMuted = isMuted
+        addTimeObserverIfNeeded()
+
+        if let pending = pendingSeekAfterKSReady {
+            pendingSeekAfterKSReady = nil
+            let targetTime = CMTime(seconds: pending, preferredTimescale: 600)
+            player.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+        } else if applyResumeSeek, let resumeTime = activeScene.resumeTime, resumeTime > 0 {
+            let targetTime = CMTime(seconds: resumeTime, preferredTimescale: 600)
+            player.seek(to: targetTime)
+        }
+
+        player.rate = Float(playbackSpeed)
+        player.play()
         if handyManager.isSyncing {
-            handyManager.play(at: player?.currentTime().seconds ?? 0)
+            handyManager.play(at: player.currentTime().seconds)
         }
         if buttplugManager.isConnected {
-            buttplugManager.play(at: player?.currentTime().seconds ?? 0)
+            buttplugManager.play(at: player.currentTime().seconds)
         }
         if loveSpouseManager.isSyncing {
-            loveSpouseManager.play(at: player?.currentTime().seconds ?? 0)
+            loveSpouseManager.play(at: player.currentTime().seconds)
         }
-        player?.rate = Float(playbackSpeed)
-        
+
         if !hasAddedPlay {
             registerScenePlay()
         }
@@ -619,7 +646,11 @@ struct SceneDetailView: View {
         // Keyframe-tolerant seeks are dramatically faster on HLS / transcoded
         // streams because AVPlayer can snap to the nearest I-frame instead of
         // forcing the server to re-encode up to the exact frame.
-        player?.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+        if let player {
+            player.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+        } else {
+            pendingSeekAfterKSReady = seconds
+        }
 
         // While actively scrubbing we don't kick device-syncs on every micro-seek
         // (that explodes network/Bluetooth traffic). Final commit happens on
@@ -642,8 +673,12 @@ struct SceneDetailView: View {
     private func commitScrub(to seconds: Double) {
         isScrubbing = false
         let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
-        player?.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
-        player?.play()
+        if let player {
+            player.seek(to: targetTime, toleranceBefore: .positiveInfinity, toleranceAfter: .positiveInfinity)
+            player.play()
+        } else {
+            pendingSeekAfterKSReady = seconds
+        }
         if handyManager.isSyncing { handyManager.play(at: seconds) }
         if buttplugManager.isConnected { buttplugManager.play(at: seconds) }
         if loveSpouseManager.isSyncing { loveSpouseManager.play(at: seconds) }

@@ -119,8 +119,8 @@ extension View {
     }
 }
 
-func createPlayer(for url: URL) -> AVPlayer {
-    // Enable audio even in silent mode - Optimization: only set if needed
+/// Ensures `.playback` audio session for main scene/catalog playback (honors silent switch vs ambient previews).
+func prepareStashPlaybackAudioSession() {
     let session = AVAudioSession.sharedInstance()
     if session.category != .playback {
         do {
@@ -130,6 +130,10 @@ func createPlayer(for url: URL) -> AVPlayer {
             print("🎬 VIDEO PLAYER: Error setting up AVAudioSession: \(error)")
         }
     }
+}
+
+func createPlayer(for url: URL) -> AVPlayer {
+    prepareStashPlaybackAudioSession()
     
     // Use signed URL with API key as query parameter for maximum compatibility
     let authenticatedURL = signedURL(url) ?? url

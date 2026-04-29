@@ -8,7 +8,7 @@ A native **Stash** client for **iOS** and **tvOS** built with **SwiftUI** — fa
 - **Feeds** — vertical, swipeable feed (clips/previews); optional “Social” entry from performer detail.
 - **Feeds** — image and video timelines with filters.
 - **Downloads** — download scenes for offline playback.
-- **Playback** — streaming with selectable quality (per server / for Reels).
+- **Playback** — streaming with selectable quality (per server / for Reels); scene detail on iOS uses [KSPlayer](#third-party-ksplayer) (AV engine) for device sync compatibility.
 - **Devices** — TheHandy, **Intiface** / Buttplug including **FunScript** in the player.
 - **Search** — global search across server content.
 - **Settings** — multiple servers, API keys (Keychain on iOS), appearance, default sort/filter per area, tab visibility and order.
@@ -33,6 +33,14 @@ xcodebuild -project stashy.xcodeproj -scheme stashyTV -destination 'generic/plat
 ```
 
 GraphQL documents live under `graphql/` and are loaded at runtime.
+
+## Third-party: KSPlayer
+
+[KSPlayer](https://github.com/kingslay/KSPlayer) is pulled in via **Swift Package Manager** (see the `stashy` target in `stashy.xcodeproj`). It powers **inline scene playback** on iOS (replacing the previous `AVPlayerViewController`-based view in the scene detail card).
+
+**Engine:** The app sets `KSOptions.secondPlayerType` to **`KSAVPlayer`** at launch. That keeps playback on **`AVPlayer` / `AVPlayerItem`**, so **StashVideoSync** (video analysis and toy sync) continues to use the same AVFoundation hooks.
+
+**Note:** Upstream KSPlayer defaults to **GPL-3.0**. If you ship or fork the app, review license obligations; the author also offers a paid **LGPL** build and other terms.
 
 ## Platforms & distribution
 

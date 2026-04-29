@@ -2,13 +2,13 @@
 
 #if !os(tvOS)
 import SwiftUI
-import AVKit
+import AVFoundation
+import KSPlayer
 
 struct SceneVideoPlayerCard: View {
     @Binding var activeScene: Scene
     @Binding var player: AVPlayer?
     @Binding var isPlaybackStarted: Bool
-    @Binding var isFullscreen: Bool
     @Binding var isPreviewing: Bool
     @Binding var isHeaderExpanded: Bool
     @Binding var showingAddMarkerSheet: Bool
@@ -21,6 +21,9 @@ struct SceneVideoPlayerCard: View {
     @ObservedObject var buttplugManager = ButtplugManager.shared
     @ObservedObject var loveSpouseManager = LoveSpouseManager.shared
     
+    var ksCoordinator: KSVideoPlayer.Coordinator
+    /// Signed playback URL for KSPlayer (same semantics as `createPlayer`).
+    var scenePlaybackSignedURL: URL?
 
     // Preview state
     @State private var previewPlayer: AVPlayer?
@@ -65,8 +68,13 @@ struct SceneVideoPlayerCard: View {
     private var videoPlayerArea: some View {
         VStack(spacing: 0) {
             if activeScene.videoURL != nil {
-                if isPlaybackStarted, let player = player {
-                    VideoPlayerView(player: player, isFullscreen: $isFullscreen)
+                if isPlaybackStarted, let playbackURL = scenePlaybackSignedURL {
+                    KSVideoPlayer(coordinator: ksCoordinator, url: playbackURL, options: stashSceneKSOptions())
+                        .onStateChanged { layer, _ in
+                            if let ks = layer.player as? KSAVPlayer, player !== ks.player {
+                                player = ks.player
+                            }
+                        }
                         .aspectRatio(16/9, contentMode: .fit)
                         .frame(maxWidth: .infinity)
                         .clipShape(
@@ -546,6 +554,16 @@ struct SceneVideoPlayerCard: View {
         }
     }
     
+    private func stashSceneKSOptions() -> KSOptions {
+        let o = KSOptions()
+        o.preferredForwardBufferDuration = 2
+        o.canStartPictureInPictureAutomaticallyFromInline = TabManager.shared.isPiPEnabled
+        if let key = ServerConfigManager.shared.activeConfig?.secureApiKey, !key.isEmpty {
+            o.appendHeader(["ApiKey": key])
+        }
+        return o
+    }
+
     private func formatTime(_ seconds: Double) -> String {
         let hours = Int(seconds) / 3600
         let minutes = (Int(seconds) % 3600) / 60
