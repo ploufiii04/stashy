@@ -255,7 +255,7 @@ enum ToolsItem: String, Codable, CaseIterable, Identifiable {
         case .server: return "Server"
         case .downloads: return "Downloads"
         case .statistics: return "Statistics"
-        case .hotOrNot: return "Hot or Not"
+        case .hotOrNot: return "Match"
         }
     }
     

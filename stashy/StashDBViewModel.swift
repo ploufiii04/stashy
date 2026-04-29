@@ -379,7 +379,12 @@ class StashDBViewModel: ObservableObject {
     @Published var hasMoreScenes = true
     private var currentScenePage = 1
     private var currentSceneSortOption: SceneSortOption = .dateDesc
+    #if os(tvOS)
+    // tvOS has many large thumbnails on screen; smaller pages reduce memory spikes and crash risk.
+    private let scenesPerPage = 12
+    #else
     private let scenesPerPage = 20
+    #endif
     @Published var currentSceneFilter: SavedFilter? = nil
     
     // Groups properties
@@ -430,7 +435,7 @@ class StashDBViewModel: ObservableObject {
     @Published var currentPerformerFilter: SavedFilter? = nil
     var currentPerformerLiveFilter: [String: Any] = [:]
     private var currentPerformerPage = 1
-    private let performersPerPage = 500
+    private let performersPerPage = 50
     private var currentPerformerSortOption: PerformerSortOption = .nameAsc
 
     // Pagination properties for studios
@@ -3625,8 +3630,8 @@ class StashDBViewModel: ObservableObject {
         errorMessage = nil
         
         let query = GraphQLQueries.queryWithFragments("findPerformers")
-        // Text search returns a small first page; loading 500 performers (e.g. tvOS Search) is slow for little gain.
-        let effectivePerPage = searchQuery.isEmpty ? performersPerPage : min(64, performersPerPage)
+        // Moderate page size keeps initial GraphQL payloads light; pagination loads more via `loadMorePerformers`.
+        let effectivePerPage = performersPerPage
         
         var filterDict: [String: Any] = [
             "page": page,

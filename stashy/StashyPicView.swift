@@ -429,13 +429,13 @@ struct StashLineView: View {
 
     private func computeGroupedPosts() -> [StashLinePost] {
         // Future grouping rules (requested):
-        // - We only group while sorting by Date or Created.
+        // - Group while sorting by Date, Created, or Name (title).
         // - Grouping is *consecutive*: iterate the already-sorted list and keep
-        //   appending as long as performer-set + gallery-set + orientation stay identical.
-        // - No filename/session parsing; no non-consecutive merging.
+        //   appending as long as performer-set + gallery-set + session (when present) stay identical.
+        // - Under Date or Name sort we re-order within the primary bucket so sets stay contiguous.
         let shouldGroupConsecutively: Bool = {
             switch stashLineListFilters.selectedSortOption {
-            case .dateAsc, .dateDesc, .createdAtAsc, .createdAtDesc:
+            case .dateAsc, .dateDesc, .createdAtAsc, .createdAtDesc, .titleAsc, .titleDesc:
                 return true
             default:
                 return false
@@ -487,12 +487,19 @@ struct StashLineView: View {
             return key
         }
 
-        // Extracts the trailing counter (_0, _1, _42 …) from the filename for in-group ordering.
-        func imageIndex(_ image: StashImage) -> Int {
-            let path = image.visual_files?.first?.path ?? image.paths?.image ?? ""
-            let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-            guard let match = filename.range(of: #"_(\d+)$"#, options: .regularExpression) else { return 0 }
-            return Int(filename[match].dropFirst()) ?? 0
+        /// Order within a merged set: lexicographic order of the **full file name** (last path component), not only the trailing `_0` / `_1` index.
+        func fileNameSortKey(_ image: StashImage) -> String {
+            let raw = image.visual_files?.first?.path ?? image.paths?.image ?? ""
+            guard !raw.isEmpty else { return "" }
+            let path = raw.components(separatedBy: "?").first ?? raw
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+
+        func withinGroupSort(_ a: StashImage, _ b: StashImage) -> Bool {
+            let fa = fileNameSortKey(a)
+            let fb = fileNameSortKey(b)
+            if fa != fb { return fa.localizedStandardCompare(fb) == .orderedAscending }
+            return a.id < b.id
         }
 
         // Segment key:
@@ -520,16 +527,35 @@ struct StashLineView: View {
         // galleries/sets contiguous, without changing the overall date ordering.
         let imagesForGrouping: [StashImage] = {
             switch stashLineListFilters.selectedSortOption {
+            case .titleAsc, .titleDesc:
+                let ascending = (stashLineListFilters.selectedSortOption == .titleAsc)
+                func titleKey(_ img: StashImage) -> String {
+                    img.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                }
+                return viewModel.allImages.sorted { a, b in
+                    let xa = titleKey(a)
+                    let xb = titleKey(b)
+                    if xa != xb {
+                        return ascending ? (xa.localizedStandardCompare(xb) == .orderedAscending)
+                            : (xa.localizedStandardCompare(xb) == .orderedDescending)
+                    }
+
+                    let ga = galleryKey(a)
+                    let gb = galleryKey(b)
+                    if ga != gb { return ga < gb }
+
+                    let sa = sessionKey(a)
+                    let sb = sessionKey(b)
+                    if sa != sb { return sa < sb }
+
+                    return withinGroupSort(a, b)
+                }
             case .dateAsc, .dateDesc:
                 let ascending = (stashLineListFilters.selectedSortOption == .dateAsc)
                 func timeKey(_ img: StashImage) -> String {
                     // When sorting by date, fall back to createdAt if date missing.
                     // Both are ISO-like strings, so lexical compare is stable enough here.
                     return (img.date?.isEmpty == false ? img.date! : (img.createdAt ?? ""))
-                }
-                func titleIndex(_ img: StashImage) -> Int {
-                    if let t = img.title, let n = Int(t.trimmingCharacters(in: .whitespacesAndNewlines)) { return n }
-                    return 0
                 }
                 return viewModel.allImages.sorted { a, b in
                     let ta = timeKey(a)
@@ -544,15 +570,7 @@ struct StashLineView: View {
                     let sb = sessionKey(b)
                     if sa != sb { return sa < sb }
 
-                    let ia = imageIndex(a)
-                    let ib = imageIndex(b)
-                    if ia != ib { return ia < ib }
-
-                    let na = titleIndex(a)
-                    let nb = titleIndex(b)
-                    if na != nb { return na < nb }
-
-                    return a.id < b.id
+                    return withinGroupSort(a, b)
                 }
             default:
                 return viewModel.allImages
@@ -582,11 +600,11 @@ struct StashLineView: View {
                     ? [landscape, portrait]
                     : [portrait, landscape]
                 for group in groups where !group.isEmpty {
-                    posts.append(StashLinePost(images: group.sorted { imageIndex($0) < imageIndex($1) }))
+                    posts.append(StashLinePost(images: group.sorted(by: withinGroupSort)))
                 }
             } else {
-                // No orientation split – all images in one post, sorted by filename index.
-                posts.append(StashLinePost(images: buffer.sorted { imageIndex($0) < imageIndex($1) }))
+                // No orientation split – one post, images ordered by full filename.
+                posts.append(StashLinePost(images: buffer.sorted(by: withinGroupSort)))
             }
         }
 
@@ -752,18 +770,6 @@ struct StashLinePost: Identifiable {
             session: parts.count > 3 ? parts[3] : "",
             orientation: parts.count > 4 ? parts[4] : ""
         )
-    }
-
-    static func imageOrderIndex(_ image: StashImage) -> Int {
-        // Try to parse trailing _<digits> from filename (e.g. ..._0.jpg, ..._12.jpg)
-        if let path = image.visual_files?.first?.path ?? image.paths?.image {
-            let filename = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-            if let match = filename.range(of: #"_\d+$"#, options: .regularExpression) {
-                let s = filename[match].dropFirst()
-                return Int(s) ?? 0
-            }
-        }
-        return 0
     }
 }
 

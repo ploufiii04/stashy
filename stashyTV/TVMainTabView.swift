@@ -13,58 +13,43 @@ struct TVMainTabView: View {
     var body: some View {
         TabView {
             Tab("Home", systemImage: "house.fill") {
-                NavigationStack {
-                    TVDashboardView()
-                        .withTVDestinations()
-                }
+                NavigationStack { TVDashboardView() }
+                    .withTVDestinations()
             }
 
             Tab("Search", systemImage: "magnifyingglass") {
-                NavigationStack {
-                    TVSearchView()
-                        .withTVDestinations()
-                }
+                NavigationStack { TVSearchView() }
+                    .withTVDestinations()
             }
 
             Tab("Scenes", systemImage: "film.fill") {
-                NavigationStack {
-                    TVScenesView(sortBy: .dateDesc)
-                        .withTVDestinations()
-                }
+                NavigationStack { TVScenesView(sortBy: .dateDesc) }
+                    .withTVDestinations()
             }
 
             Tab("Performers", systemImage: "person.3.fill") {
-                NavigationStack {
-                    TVPerformersView()
-                        .withTVDestinations()
-                }
+                NavigationStack { TVPerformersView() }
+                    .withTVDestinations()
             }
 
             Tab("Studios", systemImage: "building.2.fill") {
-                NavigationStack {
-                    TVStudiosView()
-                        .withTVDestinations()
-                }
+                NavigationStack { TVStudiosView() }
+                    .withTVDestinations()
             }
 
             Tab("Tags", systemImage: "tag.fill") {
-                NavigationStack {
-                    TVTagsView()
-                        .withTVDestinations()
-                }
+                NavigationStack { TVTagsView() }
+                    .withTVDestinations()
             }
 
             Tab("Groups", systemImage: "rectangle.stack.fill") {
-                NavigationStack {
-                    TVGroupsView()
-                        .withTVDestinations()
-                }
+                NavigationStack { TVGroupsView() }
+                    .withTVDestinations()
             }
 
             Tab("Settings", systemImage: "gear") {
-                NavigationStack {
-                    TVSettingsView()
-                }
+                NavigationStack { TVSettingsView() }
+                    .withTVDestinations()
             }
         }
     }

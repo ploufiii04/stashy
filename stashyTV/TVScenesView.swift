@@ -168,7 +168,7 @@ struct TVScenesView: View {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 40) {
                     ForEach(viewModel.scenes) { scene in
                         VStack(alignment: .leading, spacing: 10) {
-                            NavigationLink(destination: TVSceneDetailView(sceneId: scene.id)) {
+                            NavigationLink(destination: TVSceneDetailView(sceneId: scene.id).tvExitDismissable()) {
                                 TVSceneCardView(scene: scene)
                             }
                             .buttonStyle(.card)

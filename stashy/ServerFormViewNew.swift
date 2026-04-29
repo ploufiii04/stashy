@@ -44,6 +44,7 @@ struct ServerFormViewNew: View {
     }
     
     @State private var authMethod: AuthMethod = .none
+    @State private var trustAllCertificates = false
     
     init(configToEdit: ServerConfig?, onSave: @escaping (ServerConfig) -> Void, onDelete: (() -> Void)? = nil) {
         self.configToEdit = configToEdit
@@ -91,6 +92,11 @@ struct ServerFormViewNew: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: serverProtocol) { _, _ in resetTestState() }
+                
+                if serverProtocol == .https {
+                    Toggle("Trust HTTPS certificate (advanced)", isOn: $trustAllCertificates)
+                        .onChange(of: trustAllCertificates) { _, _ in resetTestState() }
+                }
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Server Address")
@@ -234,8 +240,15 @@ struct ServerFormViewNew: View {
             } header: {
                 Text("Connection")
             } footer: {
-                if isConfigValid {
-                    Text("URL: \(currentBaseURL)")
+                Group {
+                    if isConfigValid {
+                        Text("URL: \(currentBaseURL)")
+                    }
+                    if serverProtocol == .https && trustAllCertificates {
+                        Text("Disables TLS validation for this server’s host only. Use for self-signed certs on LAN; risky on untrusted networks.")
+                            .foregroundColor(.secondary)
+                            .font(.caption2)
+                    }
                 }
             }
             .listRowBackground(Color.secondaryAppBackground)
@@ -304,6 +317,7 @@ struct ServerFormViewNew: View {
                 } else {
                     authMethod = .none
                 }
+                trustAllCertificates = config.trustAllCertificates
             }
         }
         .alert("Delete Server", isPresented: $showingDeleteAlert) {
@@ -369,7 +383,17 @@ struct ServerFormViewNew: View {
         """
         request.httpBody = query.data(using: .utf8)
         
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let sessionForTest: URLSession = {
+            if let deleg = DraftStashTrustDelegate(trustAll: trustAllCertificates, baseURLString: currentBaseURL) {
+                let cfg = URLSessionConfiguration.ephemeral
+                cfg.timeoutIntervalForRequest = 15
+                cfg.timeoutIntervalForResource = 20
+                return URLSession(configuration: cfg, delegate: deleg, delegateQueue: nil)
+            }
+            return .shared
+        }()
+        
+        sessionForTest.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 isTesting = false
                 
@@ -442,7 +466,8 @@ struct ServerFormViewNew: View {
             port: parsed.port,
             serverProtocol: serverProtocol,
             apiKey: nil, // API key now stored in Keychain
-            subpath: parsed.subpath
+            subpath: parsed.subpath,
+            trustAllCertificates: serverProtocol == .https ? trustAllCertificates : false
         )
         onSave(newConfig)
     }
@@ -483,6 +508,41 @@ struct ServerFormViewNew: View {
 #Preview {
     NavigationView {
         ServerFormViewNew(configToEdit: nil, onSave: { _ in })
+    }
+}
+
+/// Mirrors `TrustAllSessionDelegate` for unsaved draft server / connection test (pins to `currentBaseURL` host).
+private final class DraftStashTrustDelegate: NSObject, URLSessionDelegate {
+    private let trustAll: Bool
+    private let pinnedHostNormalized: String
+
+    init?(trustAll: Bool, baseURLString: String) {
+        guard let u = URL(string: baseURLString), let host = u.host else { return nil }
+        self.trustAll = trustAll
+        self.pinnedHostNormalized = SSLTrustHostMatching.normalizeHost(host)
+        super.init()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        let host = challenge.protectionSpace.host
+        let accept =
+            SSLTrustHostMatching.isLocalOrPrivateNetworkHost(host)
+            || SSLTrustHostMatching.isLegacySandboxHost(host)
+            || (trustAll && SSLTrustHostMatching.normalizeHost(host) == pinnedHostNormalized)
+
+        if accept, let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+            return
+        }
+        completionHandler(.performDefaultHandling, nil)
     }
 }
 #endif

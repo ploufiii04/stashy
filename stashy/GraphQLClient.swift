@@ -8,75 +8,6 @@
 import Foundation
 import Combine
 
-// MARK: - URLSession Delegate for SSL Handling
-
-class GraphQLURLSessionDelegate: NSObject, URLSessionDelegate {
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        
-        // Allow self-signed certificates for local development
-        // This is common for local Stash servers
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            let host = challenge.protectionSpace.host
-            
-            #if DEBUG
-            print("📱 SSL Challenge for host: \(host)")
-            #endif
-            
-            // For local/private IP addresses, accept self-signed certificates
-            if isLocalOrPrivateIP(host) {
-                if let serverTrust = challenge.protectionSpace.serverTrust {
-                    let credential = URLCredential(trust: serverTrust)
-                    completionHandler(.useCredential, credential)
-                    return
-                }
-            }
-        }
-        
-        // For all other cases, use default handling
-        completionHandler(.performDefaultHandling, nil)
-    }
-    
-    private func isLocalOrPrivateIP(_ host: String) -> Bool {
-        // Check for localhost
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-            return true
-        }
-
-        // Check for private IP ranges
-        let privateRanges = [
-            "10.",           // 10.0.0.0/8
-            "172.16.",       // 172.16.0.0/12
-            "172.17.",
-            "172.18.",
-            "172.19.",
-            "172.20.",
-            "172.21.",
-            "172.22.",
-            "172.23.",
-            "172.24.",
-            "172.25.",
-            "172.26.",
-            "172.27.",
-            "172.28.",
-            "172.29.",
-            "172.30.",
-            "172.31.",
-            "192.168."       // 192.168.0.0/16
-        ]
-
-        if privateRanges.contains(where: { host.hasPrefix($0) }) {
-            return true
-        }
-
-        // Also allow gole.tz specifically as it's the test domain showing SSL issues
-        if host.contains("gole.tz") {
-            return true
-        }
-
-        return false
-    }
-}
-
 // MARK: - Network Errors
 
 enum GraphQLNetworkError: LocalizedError {
@@ -150,7 +81,7 @@ actor GraphQLClient {
             // Create session with custom delegate for SSL handling
             self.session = URLSession(
                 configuration: config,
-                delegate: GraphQLURLSessionDelegate(),
+                delegate: TrustAllSessionDelegate.shared,
                 delegateQueue: nil
             )
         }
@@ -172,7 +103,7 @@ actor GraphQLClient {
         
         self.session = URLSession(
             configuration: config,
-            delegate: GraphQLURLSessionDelegate(),
+            delegate: TrustAllSessionDelegate.shared,
             delegateQueue: nil
         )
         print("📱 GraphQL: Cancelled all pending requests and reset session")

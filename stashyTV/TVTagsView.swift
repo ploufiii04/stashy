@@ -134,7 +134,7 @@ struct TVTagsView: View {
 
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 40) {
                     ForEach(viewModel.tags) { tag in
-                        NavigationLink(value: TVTagLink(id: tag.id, name: tag.name)) {
+                        NavigationLink(destination: TVTagDetailView(tagId: tag.id, tagName: tag.name).tvExitDismissable()) {
                             TVTagCardView(tag: tag)
                         }
                         .buttonStyle(.card)

@@ -77,9 +77,12 @@ class ImageCache {
         }
         
         var stable = urlComponents
-        // Filter query items to keep only size-related ones
+        // Filter query items to keep only size-related ones.
+        // Important: do NOT keep volatile params like `t` (timestamp cache buster),
+        // otherwise the cache key explodes and memory/disk churn causes missing
+        // thumbnails and crashes after loading many pages.
         if let queryItems = stable.queryItems {
-            let allowedParams = Set(["width", "height", "size", "t", "v"])
+            let allowedParams = Set(["width", "height", "size", "v"])
             let filteredItems = queryItems.filter { allowedParams.contains($0.name) }
             
             if filteredItems.isEmpty {
@@ -123,7 +126,7 @@ class ImageCache {
         let fileURL = cacheFileURL(for: key)
         if fileManager.fileExists(atPath: fileURL.path) {
             if let data = try? Data(contentsOf: fileURL), let image = UIImage(data: data) {
-                memoryCache.setObject(image, forKey: stableKey)
+                memoryCache.setObject(image, forKey: stableKey, cost: imageCost(image))
                 return image
             }
         }
@@ -135,7 +138,7 @@ class ImageCache {
         
         // Store in Memory
         if let image = UIImage(data: data) {
-            memoryCache.setObject(image, forKey: stableKey)
+            memoryCache.setObject(image, forKey: stableKey, cost: imageCost(image))
         }
         
         // Compute file URL on the current context (before detaching)
@@ -198,39 +201,13 @@ class ImageCache {
         memoryCache.removeAllObjects()
         try? fileManager.removeItem(at: currentServerCacheDirectory)
     }
-}
 
-// MARK: - Image Loader Session Delegate (SSL Handling)
-
-class ImageLoaderSessionDelegate: NSObject, URLSessionDelegate {
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            let host = challenge.protectionSpace.host
-            print("📱 ImageLoader SSL Challenge for host: \(host)")
-            
-            // Accept self-signed certificates for local/private IP ranges
-            if isLocalOrPrivateIP(host) {
-                print("✅ ImageLoader: Accepting SSL Trust for private/test host: \(host)")
-                if let serverTrust = challenge.protectionSpace.serverTrust {
-                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
-                    return
-                }
-            } else {
-                print("⚠️ ImageLoader: Host \(host) not in private ranges, using default SSL handling")
-            }
+    private func imageCost(_ image: UIImage) -> Int {
+        if let cg = image.cgImage {
+            return cg.bytesPerRow * cg.height
         }
-        completionHandler(.performDefaultHandling, nil)
-    }
-    
-    private func isLocalOrPrivateIP(_ host: String) -> Bool {
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return true }
-        let privateRanges = ["10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168."]
-        for range in privateRanges { if host.hasPrefix(range) { return true } }
-        
-        // Also allow stashytest.gole.tz specifically as it's the test domain showing SSL issues in logs
-        if host.contains("gole.tz") { return true }
-        
-        return false
+        let scale = image.scale
+        return Int(image.size.width * scale * image.size.height * scale * 4)
     }
 }
 
@@ -258,7 +235,7 @@ class ImageLoader: ObservableObject {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
-        self.session = URLSession(configuration: config, delegate: ImageLoaderSessionDelegate(), delegateQueue: nil)
+        self.session = URLSession(configuration: config, delegate: TrustAllSessionDelegate.shared, delegateQueue: nil)
 
         // Synchronous memory cache check — avoids any loading flash for warm-cache hits
         if let url, let cachedUIImage = ImageCache.shared.memoryObject(forKey: url as NSURL) {

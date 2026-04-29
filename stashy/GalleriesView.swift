@@ -1296,7 +1296,7 @@ struct FullScreenImageView: View {
         Task {
             let sessionConfig = URLSessionConfiguration.default
             sessionConfig.timeoutIntervalForRequest = 60
-            let session = URLSession(configuration: sessionConfig, delegate: ImageLoaderSessionDelegate(), delegateQueue: nil)
+            let session = URLSession(configuration: sessionConfig, delegate: TrustAllSessionDelegate.shared, delegateQueue: nil)
             var request = URLRequest(url: url)
             if let apiKey = ServerConfigManager.shared.activeConfig?.secureApiKey, !apiKey.isEmpty {
                 request.addValue(apiKey, forHTTPHeaderField: "ApiKey")

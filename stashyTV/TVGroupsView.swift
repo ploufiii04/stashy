@@ -136,7 +136,7 @@ struct TVGroupsView: View {
 
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 40) {
                     ForEach(viewModel.groups) { group in
-                        NavigationLink(value: TVGroupLink(id: group.id, name: group.name)) {
+                        NavigationLink(destination: TVGroupDetailView(groupId: group.id, groupName: group.name).tvExitDismissable()) {
                             TVGroupCardView(group: group)
                         }
                         .buttonStyle(.card)
@@ -239,6 +239,13 @@ struct TVGroupDetailView: View {
     let groupName: String
 
     @StateObject private var viewModel = StashDBViewModel()
+    @State private var groupDetail: StashGroup?
+    @State private var coverSide: CoverSide = .front
+
+    private enum CoverSide: String, CaseIterable {
+        case front = "Front"
+        case back = "Back"
+    }
 
     private let sceneColumns = [
         GridItem(.fixed(410), spacing: 40),
@@ -249,7 +256,7 @@ struct TVGroupDetailView: View {
 
     var body: some View {
         SwiftUI.Group {
-            if let group = viewModel.groups.first(where: { $0.id == groupId }) {
+            if let group = groupDetail ?? viewModel.groups.first(where: { $0.id == groupId }) {
                 renderDetail(item: group)
             } else {
                 renderDetail(item: StubGroupDetailItem(id: groupId, name: groupName))
@@ -264,6 +271,7 @@ struct TVGroupDetailView: View {
             isLoading: viewModel.isLoadingGroups && viewModel.groups.isEmpty,
             heroAspectRatio: 16/9,
             placeholderSystemImage: "rectangle.stack.fill",
+            heroImageOverride: AnyView(groupHeroImage()),
             scenes: viewModel.groupScenes,
             isLoadingScenes: viewModel.isLoadingGroupScenes,
             totalScenes: viewModel.totalGroupScenes,
@@ -274,6 +282,22 @@ struct TVGroupDetailView: View {
                     GridItem(.fixed(240), alignment: .leading),
                     GridItem(.flexible(), alignment: .leading)
                 ], alignment: .leading, spacing: 12) {
+                    if groupDetail != nil {
+                        Text("Cover").font(.title3).foregroundColor(.white.opacity(0.4))
+                        HStack(spacing: 14) {
+                            ForEach(CoverSide.allCases, id: \.self) { side in
+                                Button {
+                                    coverSide = side
+                                } label: {
+                                    Text(side.rawValue)
+                                        .font(.headline)
+                                        .padding(.horizontal, 18)
+                                        .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.card)
+                            }
+                        }
+                    }
                     if viewModel.totalGroupScenes > 0 {
                         Text("Scenes").font(.title3).foregroundColor(.white.opacity(0.4))
                         Text("\(viewModel.totalGroupScenes)").font(.title3).foregroundColor(.white)
@@ -283,8 +307,62 @@ struct TVGroupDetailView: View {
             additionalContent: { EmptyView() }
         )
         .onAppear {
+            viewModel.fetchGroup(groupId: groupId) { group in
+                self.groupDetail = group
+                if coverSide == .back, (group?.back_image_path == nil) {
+                    coverSide = .front
+                }
+            }
             viewModel.fetchGroupScenes(groupId: groupId, isInitialLoad: true)
         }
+    }
+
+    @ViewBuilder
+    private func groupHeroImage() -> some View {
+        if let group = groupDetail {
+            let url = coverSide == .back ? groupBackImageURL(group) : groupFrontImageURL(group)
+            ZStack {
+                if let url {
+                    CustomAsyncImage(url: url) { loader in
+                        if let image = loader.image {
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color.black.opacity(0.12))
+                        } else {
+                            Color.appBackground
+                                .overlay(ProgressView().scaleEffect(1.2))
+                        }
+                    }
+                } else {
+                    Color.appBackground
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func groupFrontImageURL(_ group: StashGroup) -> URL? {
+        if let path = group.front_image_path, let url = URL(string: path) {
+            if path.starts(with: "http") { return signedURL(url) }
+            guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
+            return signedURL(URL(string: config.baseURL + path))
+        }
+        guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
+        return signedURL(URL(string: "\(config.baseURL)/group/\(group.id)/frontimage"))
+    }
+
+    private func groupBackImageURL(_ group: StashGroup) -> URL? {
+        if let path = group.back_image_path, let url = URL(string: path) {
+            if path.starts(with: "http") { return signedURL(url) }
+            guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
+            return signedURL(URL(string: config.baseURL + path))
+        }
+        guard let config = ServerConfigManager.shared.loadConfig() else { return nil }
+        // Stash uses /group/<id>/backimage for the back cover when available.
+        return signedURL(URL(string: "\(config.baseURL)/group/\(group.id)/backimage"))
     }
 }
 

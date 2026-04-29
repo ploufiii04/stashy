@@ -21,8 +21,11 @@ struct TVSettingsView: View {
 
     var body: some View {
         List {
-                // MARK: - Current Server
-                Section {
+            // MARK: - Current Server
+            // tvOS: must be focusable so ↑ from the first Saved Server row can leave the list
+            // toward the tab bar; a plain HStack is skipped by the focus engine.
+            Section {
+                Group {
                     if let config = configManager.activeConfig {
                         HStack(spacing: 20) {
                             Image(systemName: "server.rack")
@@ -52,199 +55,211 @@ struct TVSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                } header: {
-                    Text("Active Server")
                 }
+                .focusable()
+            } header: {
+                Text("Active Server")
+            }
 
-                // MARK: - Saved Servers
-                Section {
-                    ForEach(configManager.savedServers) { server in
-                        Button {
-                            switchToServer(server)
-                        } label: {
-                            HStack(spacing: 16) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(server.name)
-                                        .font(.headline)
-                                    Text(server.baseURL)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-
-                                if server.id == configManager.activeConfig?.id {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(appearanceManager.tintColor)
-                                }
-                            }
-                        }
-                        .contextMenu {
-                            Button("Edit") {
-                                editingServer = server
-                            }
-                            Button("Delete", role: .destructive) {
-                                configManager.deleteServer(id: server.id)
-                            }
-                        }
-                    }
-
+            // MARK: - Saved Servers
+            Section {
+                ForEach(configManager.savedServers) { server in
                     Button {
-                        showingAddServer = true
+                        switchToServer(server)
                     } label: {
-                        Label("Add Server", systemImage: "plus")
-                    }
-                } header: {
-                    Text("Saved Servers")
-                }
-
-                // MARK: - Appearance
-                Section {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Accent Color")
-                            .font(.headline)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 20) {
-                                ForEach(appearanceManager.presets) { preset in
-                                    Button {
-                                        appearanceManager.tintColor = preset.color
-                                    } label: {
-                                        TVColorPresetButton(
-                                            preset: preset,
-                                            isSelected: colorsEqual(preset.color, appearanceManager.tintColor)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                }
+                        HStack(spacing: 16) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(server.name)
+                                    .font(.headline)
+                                Text(server.baseURL)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                             }
-                            .padding(.vertical, 8)
+
+                            Spacer()
+
+                            if server.id == configManager.activeConfig?.id {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(appearanceManager.tintColor)
+                            }
                         }
                     }
-                } header: {
-                    Text("Appearance")
+                    .contextMenu {
+                        Button("Edit") {
+                            editingServer = server
+                        }
+                        Button("Delete", role: .destructive) {
+                            configManager.deleteServer(id: server.id)
+                        }
+                    }
                 }
 
-                // MARK: - Security (PIN Lock)
-                Section {
-                    Toggle(
-                        "Enable PIN Lock",
-                        isOn: Binding(
-                            get: { securityManager.isPinLockEnabled && securityManager.isPinSet },
-                            set: { enabled in
-                                if enabled {
-                                    // Start setup flow if not set yet
-                                    if !securityManager.isPinSet {
-                                        showingSetPasscode = true
-                                    } else {
-                                        securityManager.isPinLockEnabled = true
-                                    }
+                Button {
+                    showingAddServer = true
+                } label: {
+                    Label("Add Server", systemImage: "plus")
+                }
+            } header: {
+                Text("Saved Servers")
+            }
+
+            // MARK: - Appearance
+            Section {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Accent Color")
+                        .font(.headline)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 20) {
+                            ForEach(appearanceManager.presets) { preset in
+                                Button {
+                                    appearanceManager.tintColor = preset.color
+                                } label: {
+                                    TVColorPresetButton(
+                                        preset: preset,
+                                        isSelected: colorsEqual(preset.color, appearanceManager.tintColor)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            } header: {
+                Text("Appearance")
+            }
+
+            // MARK: - Security (PIN Lock)
+            Section {
+                Toggle(
+                    "Enable PIN Lock",
+                    isOn: Binding(
+                        get: { securityManager.isPinLockEnabled && securityManager.isPinSet },
+                        set: { enabled in
+                            if enabled {
+                                // Start setup flow if not set yet
+                                if !securityManager.isPinSet {
+                                    showingSetPasscode = true
                                 } else {
-                                    securityManager.isPinLockEnabled = false
+                                    securityManager.isPinLockEnabled = true
                                 }
+                            } else {
+                                securityManager.isPinLockEnabled = false
                             }
-                        )
+                        }
                     )
-                    .tint(appearanceManager.tintColor)
+                )
+                .tint(appearanceManager.tintColor)
 
-                    if securityManager.isPinSet {
-                        Button("Change PIN") {
-                            showingSetPasscode = true
-                        }
-
-                        Button("Remove PIN", role: .destructive) {
-                            securityManager.removePin()
-                        }
+                if securityManager.isPinSet {
+                    Button("Change PIN") {
+                        showingSetPasscode = true
                     }
-                } header: {
-                    Text("Security")
-                } footer: {
-                    Text("The app will require your PIN each time it is opened and whenever it returns from the background.")
-                }
 
-                // MARK: - Playback
-                Section {
-                    if let config = configManager.activeConfig {
-                        Picker(selection: Binding(
-                            get: { config.defaultQuality },
-                            set: { newValue in
-                                var updated = config
-                                updated.defaultQuality = newValue
-                                configManager.saveConfig(updated)
-                                configManager.addOrUpdateServer(updated)
-                            }
-                        )) {
+                    Button("Remove PIN", role: .destructive) {
+                        securityManager.removePin()
+                    }
+                }
+            } header: {
+                Text("Security")
+            } footer: {
+                Text("The app will require your PIN each time it is opened and whenever it returns from the background.")
+            }
+
+            // MARK: - Playback
+            Section {
+                if let config = configManager.activeConfig {
+                    HStack {
+                        Text("Streaming Quality")
+                        Spacer()
+                        Menu {
                             ForEach(StreamingQuality.allCases, id: \.self) { quality in
-                                Text(quality.displayName).tag(quality)
+                                Button {
+                                    var updated = config
+                                    updated.defaultQuality = quality
+                                    configManager.saveConfig(updated)
+                                    configManager.addOrUpdateServer(updated)
+                                } label: {
+                                    HStack {
+                                        Text(quality.displayName)
+                                        if config.defaultQuality == quality {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
                             }
                         } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "film")
-                                    .foregroundColor(appearanceManager.tintColor)
-                                Text("Streaming Quality")
-                            }
+                            Text(config.defaultQuality.displayName)
+                                .foregroundColor(.secondary)
                         }
-                    } else {
-                        Text("Connect to a server to configure quality.")
-                            .foregroundStyle(.secondary)
                     }
-                } header: {
-                    Text("Playback")
-                } footer: {
-                    Text("\"Original\" streams MP4 files directly for the best seeking performance. Lower quality options use HLS transcoding.")
+                } else {
+                    Text("Connect to a server to configure quality.")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text("\"Original\" streams MP4 files directly for the best seeking performance. Lower quality options use HLS transcoding.")
+            }
+
+            // MARK: - Default Sort
+            Section {
+                sceneSortRow
+                performerSortRow
+                studioSortRow
+                tagSortRow
+                groupSortRow
+            } header: {
+                Text("Default Sorting")
+            } footer: {
+                Text("The sort order used when opening each tab.")
+            }
+
+            // MARK: - Default Filter
+            Section {
+                tvFilterRow(label: "Scenes", icon: "film", tab: .scenes, mode: .scenes)
+                tvFilterRow(label: "Performers", icon: "person.3", tab: .performers, mode: .performers)
+                tvFilterRow(label: "Studios", icon: "building.2", tab: .studios, mode: .studios)
+                tvFilterRow(label: "Tags", icon: "tag", tab: .tags, mode: .tags)
+                tvFilterRow(label: "Groups", icon: "rectangle.stack", tab: .groups, mode: .groups)
+            } header: {
+                Text("Default Filters")
+            } footer: {
+                Text("Saved filters from your Stash server that will be applied automatically when opening each tab.")
+            }
+
+            // MARK: - About
+            Section {
+                HStack {
+                    Text("App")
+                    Spacer()
+                    Text("stashy for Apple TV")
+                        .foregroundStyle(.secondary)
                 }
 
-                // MARK: - Default Sort
-                Section {
-                    sceneSortRow
-                    performerSortRow
-                    studioSortRow
-                    tagSortRow
-                    groupSortRow
-                } header: {
-                    Text("Default Sorting")
-                } footer: {
-                    Text("The sort order used when opening each tab.")
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(appVersion)
+                        .foregroundStyle(.secondary)
                 }
 
-                // MARK: - Default Filter
-                Section {
-                    tvFilterRow(label: "Scenes", icon: "film", tab: .scenes, mode: .scenes)
-                    tvFilterRow(label: "Performers", icon: "person.3", tab: .performers, mode: .performers)
-                    tvFilterRow(label: "Studios", icon: "building.2", tab: .studios, mode: .studios)
-                    tvFilterRow(label: "Tags", icon: "tag", tab: .tags, mode: .tags)
-                    tvFilterRow(label: "Groups", icon: "rectangle.stack", tab: .groups, mode: .groups)
-                } header: {
-                    Text("Default Filters")
-                } footer: {
-                    Text("Saved filters from your Stash server that will be applied automatically when opening each tab.")
+                HStack {
+                    Text("Build")
+                    Spacer()
+                    Text(buildNumber)
+                        .foregroundStyle(.secondary)
                 }
-
-                // MARK: - About
-                Section {
-                    HStack {
-                        Text("App")
-                        Spacer()
-                        Text("stashy for Apple TV")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text(appVersion)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        Text("Build")
-                        Spacer()
-                        Text(buildNumber)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("About")
-                }
+            } header: {
+                Text("About")
+            }
+        }
+            // Prevent the last rows from being clipped behind the Tab bar / safe area.
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 80)
             }
             .sheet(isPresented: $showingAddServer) {
                 TVServerFormView(server: nil) { newServer in

@@ -78,6 +78,8 @@ struct ServerConfig: Codable, Identifiable, Equatable {
     var subpath: String?       // Optional subpath (e.g. "/stash")
     var defaultQuality: StreamingQuality = .original
     var reelsQuality: StreamingQuality = .original
+    /// When using HTTPS, accept this server’s certificate even if self-signed or not system-trusted (pin to `baseURL` host only).
+    var trustAllCertificates: Bool = false
 
     var baseURL: String {
         let effectivePort = port ?? serverProtocol.defaultPort
@@ -132,7 +134,8 @@ struct ServerConfig: Codable, Identifiable, Equatable {
         apiKey: String? = nil,
         subpath: String? = nil,
         defaultQuality: StreamingQuality = .original,
-        reelsQuality: StreamingQuality = .original
+        reelsQuality: StreamingQuality = .original,
+        trustAllCertificates: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -143,6 +146,7 @@ struct ServerConfig: Codable, Identifiable, Equatable {
         self.subpath = subpath
         self.defaultQuality = defaultQuality
         self.reelsQuality = reelsQuality
+        self.trustAllCertificates = trustAllCertificates
     }
     
     // Backward compatibility decoder
@@ -154,6 +158,7 @@ struct ServerConfig: Codable, Identifiable, Equatable {
         apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey)
         defaultQuality = try container.decodeIfPresent(StreamingQuality.self, forKey: .defaultQuality) ?? .original
         reelsQuality = try container.decodeIfPresent(StreamingQuality.self, forKey: .reelsQuality) ?? .original
+        trustAllCertificates = try container.decodeIfPresent(Bool.self, forKey: .trustAllCertificates) ?? false
         
         // Try to decode new format first
         if let serverAddress = try? container.decode(String.self, forKey: .serverAddress),
@@ -195,12 +200,13 @@ struct ServerConfig: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(subpath, forKey: .subpath)
         try container.encode(defaultQuality, forKey: .defaultQuality)
         try container.encode(reelsQuality, forKey: .reelsQuality)
+        try container.encode(trustAllCertificates, forKey: .trustAllCertificates)
     }
     
     enum CodingKeys: String, CodingKey {
         case id, name, apiKey, subpath
         // New format keys
-        case serverAddress, port, serverProtocol, defaultQuality, reelsQuality
+        case serverAddress, port, serverProtocol, defaultQuality, reelsQuality, trustAllCertificates
         // Legacy format keys (for backward compatibility)
         case connectionType, ipAddress, domain, useHTTPS
     }
@@ -271,6 +277,7 @@ class ServerConfigManager: ObservableObject {
     private init() {
         self.activeConfig = loadConfig()
         self.savedServers = getSavedServers() // Load initial list
+        ActiveServerSSLTrust.update(from: activeConfig)
     }
 
     // MARK: - Active Server Management
@@ -286,8 +293,11 @@ class ServerConfigManager: ObservableObject {
             let coreSettingsChanged = oldConfig == nil ||
                 oldConfig?.baseURL != config.baseURL ||
                 oldConfig?.secureApiKey != config.secureApiKey ||
-                oldConfig?.id != config.id
+                oldConfig?.id != config.id ||
+                oldConfig?.trustAllCertificates != config.trustAllCertificates
             
+            ActiveServerSSLTrust.update(from: config)
+
             if coreSettingsChanged {
                 // Clear system URL cache to avoid using stale data/auth for the new server
                 URLCache.shared.removeAllCachedResponses()
@@ -387,6 +397,7 @@ class ServerConfigManager: ObservableObject {
     private func clearActiveConfig() {
         UserDefaults.standard.removeObject(forKey: activeConfigKey)
         self.activeConfig = nil
+        ActiveServerSSLTrust.update(from: nil)
         print("⚠️ Active server deleted, config cleared.")
         
         // Notify app to reset UI state

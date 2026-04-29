@@ -207,7 +207,7 @@ struct TVSearchView: View {
                 HStack(spacing: 30) {
                     ForEach(viewModel.scenes) { scene in
                         VStack(alignment: .leading, spacing: 10) {
-                            NavigationLink(value: TVSceneLink(sceneId: scene.id)) {
+                            NavigationLink(destination: TVSceneDetailView(sceneId: scene.id).tvExitDismissable()) {
                                 TVSceneCardView(scene: scene)
                             }
                             .buttonStyle(.card)
@@ -244,7 +244,7 @@ struct TVSearchView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 30) {
                     ForEach(viewModel.performers) { performer in
-                        NavigationLink(value: TVPerformerLink(id: performer.id, name: performer.name)) {
+                        NavigationLink(destination: TVPerformerDetailView(performerId: performer.id, performerName: performer.name).tvExitDismissable()) {
                             TVPerformerCardView(performer: performer)
                         }
                         .buttonStyle(.card)

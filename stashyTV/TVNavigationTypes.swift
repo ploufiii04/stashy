@@ -52,6 +52,27 @@ struct TVSceneListLink: Hashable {
     let sortBy: StashDBViewModel.SceneSortOption
 }
 
+// MARK: - tvOS Exit/Menu handling
+
+/// On tvOS the Menu button triggers an "exit" command. If we don't handle it in deep stacks,
+/// the system may jump out to the app root / close the app instead of popping one level.
+private struct TVExitCommandDismiss: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content.onExitCommand {
+            dismiss()
+        }
+    }
+}
+
+extension View {
+    /// Menu-/Back-Verhalten: eine Ebene zurück statt App verlassen (siehe `TVNavigationDestinations`).
+    func tvExitDismissable() -> some View {
+        modifier(TVExitCommandDismiss())
+    }
+}
+
 // MARK: - Centralised Navigation Destinations
 
 /// Apply to the root view of each NavigationStack so every child view can
@@ -61,21 +82,27 @@ struct TVNavigationDestinations: ViewModifier {
         content
             .navigationDestination(for: TVSceneLink.self) { link in
                 TVSceneDetailView(sceneId: link.sceneId)
+                    .tvExitDismissable()
             }
             .navigationDestination(for: TVPerformerLink.self) { link in
                 TVPerformerDetailView(performerId: link.id, performerName: link.name)
+                    .tvExitDismissable()
             }
             .navigationDestination(for: TVStudioLink.self) { link in
                 TVStudioDetailView(studioId: link.id, studioName: link.name)
+                    .tvExitDismissable()
             }
             .navigationDestination(for: TVTagLink.self) { link in
                 TVTagDetailView(tagId: link.id, tagName: link.name)
+                    .tvExitDismissable()
             }
             .navigationDestination(for: TVGroupLink.self) { link in
                 TVGroupDetailView(groupId: link.id, groupName: link.name)
+                    .tvExitDismissable()
             }
             .navigationDestination(for: TVSceneListLink.self) { link in
                 TVScenesView(sortBy: link.sortBy)
+                    .tvExitDismissable()
             }
     }
 }

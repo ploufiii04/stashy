@@ -134,7 +134,7 @@ struct TVStudiosView: View {
 
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 40) {
                     ForEach(viewModel.studios) { studio in
-                        NavigationLink(value: TVStudioLink(id: studio.id, name: studio.name)) {
+                        NavigationLink(destination: TVStudioDetailView(studioId: studio.id, studioName: studio.name).tvExitDismissable()) {
                             TVStudioCardView(studio: studio)
                         }
                         .buttonStyle(.card)

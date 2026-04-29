@@ -209,7 +209,7 @@ struct ToolsView: View {
         case server = "Server"
         case downloads = "Downloads"
         case statistics = "Statistics"
-        case hotOrNot = "Hot or Not"
+        case hotOrNot = "Match"
         
         var icon: String {
             switch self {
@@ -258,6 +258,11 @@ struct ToolsView: View {
                 ToolsStatisticsView()
             case .hotOrNot:
                 HotOrNotToolsView()
+            }
+        }
+        .onAppear {
+            if coordinator.toolsSubTab == "Hot or Not" {
+                coordinator.toolsSubTab = ToolsTab.hotOrNot.rawValue
             }
         }
         .navigationBarHidden(true)

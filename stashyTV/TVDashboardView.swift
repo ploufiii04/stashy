@@ -166,13 +166,13 @@ struct TVDashboardView: View {
                     ForEach(scenes) { scene in
                         VStack(alignment: .leading, spacing: 10) {
                             if isHeroRow {
-                                NavigationLink(value: TVSceneLink(sceneId: scene.id)) {
+                                NavigationLink(destination: TVSceneDetailView(sceneId: scene.id).tvExitDismissable()) {
                                     TVSceneCardView(scene: scene, width: cardWidth + 10, height: cardHeight + 5)
                                 }
                                 .buttonStyle(.card)
                                 .focused($focusedHeroSceneID, equals: scene.id)
                             } else {
-                                NavigationLink(value: TVSceneLink(sceneId: scene.id)) {
+                                NavigationLink(destination: TVSceneDetailView(sceneId: scene.id).tvExitDismissable()) {
                                     TVSceneCardView(scene: scene, width: cardWidth + 10, height: cardHeight + 5)
                                 }
                                 .buttonStyle(.card)
@@ -184,7 +184,7 @@ struct TVDashboardView: View {
                     }
 
                     // See All Card at the end
-                    NavigationLink(value: TVSceneListLink(sortBy: sortBy)) {
+                    NavigationLink(destination: TVScenesView(sortBy: sortBy).tvExitDismissable()) {
                         VStack(spacing: 20) {
                             Image(systemName: "arrow.right.circle.fill")
                                 .font(.system(size: 60))

@@ -603,7 +603,7 @@ private struct ScenesViewContent: View {
             } else {
                 clearLiveFilterChipsOnly()
             }
-        } else {
+                } else {
             clearLiveFilterChipsOnly()
             let flat: [String: Any]? = {
                 if let raw = f.filterDict { return FilterMapper.sanitize(raw, isMarker: false) }
@@ -1152,7 +1152,7 @@ private struct ScenesViewContent: View {
             // Search pill in title area when active
             if !searchText.isEmpty {
                 ToolbarItem(placement: .principal) {
-                    Button(action: {
+                            Button(action: {
                         searchText = ""
                         performSearch()
                     }) {

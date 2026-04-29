@@ -2,7 +2,7 @@
 //  HotOrNotToolsView.swift
 //  stashy
 //
-//  Duel modes Head-to-head / Placement / Champion + Charts leaderboard; rating math aligned with
+//  Match: duel modes 1 vs. 1 / Rise / Legend + Charts leaderboard; rating math aligned with
 //  Ascension plugin (`ascension.js` calculateMatchOutcome / getProgressiveKFactor).
 //  (hotornot_stats, rating100, performer_record).
 //
@@ -418,12 +418,10 @@ private struct HotOrNotPerformerData: Codable {
 
     var stats: HotOrNotStats { HotOrNotSwissMath.parseStats(from: custom_fields) }
 
-    var displayName: String {
-        if let d = disambiguation, !d.isEmpty { return "\(name) (\(d))" }
-        return name
-    }
+    /// Nur `name` (ohne Disambiguation) für Match-Karten und Listen.
+    var displayName: String { name }
 
-    /// Minimal `Performer` for pushing `PerformerDetailView` from Hot or Not (detail loads full data).
+    /// Minimal `Performer` for pushing `PerformerDetailView` from Match (detail loads full data).
     func toPerformerStub() -> Performer {
         Performer(
             id: id,
@@ -741,7 +739,7 @@ private struct HotOrNotBattleColumn: View {
     }
 }
 
-/// Placement starter: same card shell as duel (`HotOrNotBattleColumn`), but only photo + name + rating row (no detail grid, no rank).
+/// Rise starter: same card shell as duel (`HotOrNotBattleColumn`), but only photo + name + rating row (no detail grid, no rank).
 private struct HotOrNotGauntletStarterPickCard: View {
     @ObservedObject var model: HotOrNotViewModel
     let performer: HotOrNotPerformerData
@@ -776,7 +774,7 @@ private struct HotOrNotGauntletStarterPickCard: View {
         .buttonStyle(.plain)
         .disabled(model.isSubmitting)
         .frame(maxWidth: .infinity)
-        .accessibilityLabel("Pick \(performer.displayName) as Placement starter")
+        .accessibilityLabel("Pick \(performer.displayName) as Rise starter")
     }
 
     private var photoStack: some View {
@@ -881,23 +879,40 @@ enum HotOrNotBattleDisplay {
         ]
     }
 
-    /// Same query/sort as `HotOrNotViewModel.refreshLeaderboard` — `rank/total` in the Hot Or Not pool, or `nil` if not listed or on error.
+    /// Same query/sort as `HotOrNotViewModel.refreshLeaderboard` — `rank/total` in the Match pool, or `nil` if not listed or on error.
     static func fetchRankSlashTotal(performerId: String) async -> String? {
         let genders = loadGenders()
         let query = GraphQLQueries.queryWithFragments("hotOrNotFindPerformers")
-        let variables: [String: Any] = [
-            "performer_filter": performerFilter(genders: genders),
-            "filter": ["per_page": -1, "sort": "rating", "direction": "DESC"] as [String: Any]
-        ]
+        let perPage = HotOrNotViewModel.leaderboardPerPage
+        var totalCount = 0
+        var page = 1
         do {
-            let res: HotOrNotFindResponse = try await client.execute(query: query, variables: variables)
-            let list = res.data?.findPerformers.performers ?? []
-            let sorted = list.sorted { ($0.rating100 ?? 50) > ($1.rating100 ?? 50) }
-            guard !sorted.isEmpty, let idx = sorted.firstIndex(where: { $0.id == performerId }) else { return nil }
-            return "\(idx + 1)/\(sorted.count)"
+            while true {
+                let variables: [String: Any] = [
+                    "performer_filter": performerFilter(genders: genders),
+                    "filter": [
+                        "page": page,
+                        "per_page": perPage,
+                        "sort": "rating",
+                        "direction": "DESC"
+                    ] as [String: Any]
+                ]
+                let res: HotOrNotFindResponse = try await client.execute(query: query, variables: variables)
+                let list = res.data?.findPerformers.performers ?? []
+                if page == 1 {
+                    totalCount = res.data?.findPerformers.count ?? list.count
+                }
+                if let idx = list.firstIndex(where: { $0.id == performerId }) {
+                    let rank = (page - 1) * perPage + idx + 1
+                    return "\(rank)/\(max(totalCount, rank))"
+                }
+                if list.count < perPage || page * perPage >= totalCount { break }
+                page += 1
+            }
         } catch {
             return nil
         }
+        return nil
     }
 }
 
@@ -943,9 +958,9 @@ private final class HotOrNotViewModel: ObservableObject {
 
         var label: String {
             switch self {
-            case .headToHead: return "Head to Head"
-            case .placement: return "Placement"
-            case .champion: return "Champion"
+            case .headToHead: return "1 vs. 1"
+            case .placement: return "Rise"
+            case .champion: return "Legend"
             }
         }
 
@@ -973,6 +988,9 @@ private final class HotOrNotViewModel: ObservableObject {
     @Published var rankLeft: Int?
     @Published var rankRight: Int?
     @Published var leaderboard: [HotOrNotPerformerData] = []
+    /// Total performers in pool (`findPerformers.count`); leaderboard rows are paginated (`leaderboardPerPage`).
+    @Published var leaderboardTotalCount: Int = 0
+    @Published var isLoadingMoreLeaderboard = false
     @Published var isLoadingPair = false
     @Published var isSubmitting = false
     @Published var isLoadingBoard = false
@@ -992,13 +1010,20 @@ private final class HotOrNotViewModel: ObservableObject {
     @Published var placementStarters: [HotOrNotPerformerData] = []
     @Published var isLoadingPlacementStarters = false
 
-    /// Inline Placement starter grid (no sheet): need picks before the first duel.
+    /// Inline Rise starter grid (no sheet): need picks before the first duel.
     var needsPlacementStarterSelection: Bool {
         duelMode == .placement && climbChampion == nil && !climbFalling && climbVictory == nil
     }
 
     private let client = GraphQLClient.shared
     private static let duelFeedbackDurationNs: UInt64 = 1_200_000_000
+    fileprivate static let leaderboardPerPage = 50
+    /// Last successfully loaded Charts `filter.page` (1-based); 0 = not loaded.
+    private var lastLeaderboardPageLoaded = 0
+
+    var leaderboardHasMore: Bool {
+        !leaderboard.isEmpty && leaderboard.count < leaderboardTotalCount
+    }
     /// `findPerformers` right after `performerUpdate` can still return old `rating100`; overlay last pushed values until reload finishes.
     private var pendingRating100ByPerformerId: [String: Int] = [:]
 
@@ -1049,6 +1074,16 @@ private final class HotOrNotViewModel: ObservableObject {
             return p.replacingRating100(r)
         }
         return p
+    }
+
+    /// Pool by **effective** `rating100` (pending updates merged), descending. Stable tie-break on `id` so ladder / ranks match the UI.
+    private func ladderSortedPool(_ list: [HotOrNotPerformerData]) -> [HotOrNotPerformerData] {
+        list.map { mergePendingRating($0) }.sorted { a, b in
+            let ra = a.rating100 ?? 50
+            let rb = b.rating100 ?? 50
+            if ra != rb { return ra > rb }
+            return a.id < b.id
+        }
     }
 
     func loadDuelPair() async {
@@ -1127,7 +1162,7 @@ private final class HotOrNotViewModel: ObservableObject {
         }
     }
 
-    /// Champion / Placement pairing (climb ladder vs Ascension placement flow).
+    /// Legend / Rise pairing (climb ladder).
     private func loadClimbPair(isPlacement: Bool) async {
         isLoadingPair = true
         errorMessage = nil
@@ -1155,21 +1190,23 @@ private final class HotOrNotViewModel: ObservableObject {
                 climbChampion = mergePendingRating(live)
             }
 
+            let ranked = ladderSortedPool(list)
+
             if isPlacement, climbFalling, let fall = climbFallingItem {
-                let candidates = list.filter {
+                let candidates = ranked.filter {
                     $0.id != fall.id && !climbDefeatedIds.contains($0.id) && $0.id != climbSkippedId
                 }
                 if let opp = candidates.randomElement() {
                     left = mergePendingRating(fall)
                     right = mergePendingRating(opp)
-                    rankLeft = list.firstIndex { $0.id == fall.id }.map { $0 + 1 }
-                    rankRight = list.firstIndex { $0.id == opp.id }.map { $0 + 1 }
+                    rankLeft = ranked.firstIndex { $0.id == fall.id }.map { $0 + 1 }
+                    rankRight = ranked.firstIndex { $0.id == opp.id }.map { $0 + 1 }
                 } else if climbSkippedId != nil {
                     climbSkippedId = nil
                     await loadClimbPair(isPlacement: true)
                     return
                 } else {
-                    let resolved = list.first(where: { $0.id == fall.id }).map { mergePendingRating($0) } ?? mergePendingRating(fall)
+                    let resolved = ranked.first(where: { $0.id == fall.id }) ?? mergePendingRating(fall)
                     climbVictory = resolved
                     left = nil
                     right = nil
@@ -1181,24 +1218,24 @@ private final class HotOrNotViewModel: ObservableObject {
             }
 
             if climbChampion == nil {
-                let shuffled = list.shuffled()
+                let shuffled = ranked.shuffled()
                 left = mergePendingRating(shuffled[0])
                 right = mergePendingRating(shuffled[1])
-                rankLeft = list.firstIndex { $0.id == shuffled[0].id }.map { $0 + 1 }
-                rankRight = list.firstIndex { $0.id == shuffled[1].id }.map { $0 + 1 }
+                rankLeft = ranked.firstIndex { $0.id == shuffled[0].id }.map { $0 + 1 }
+                rankRight = ranked.firstIndex { $0.id == shuffled[1].id }.map { $0 + 1 }
                 climbSkippedId = nil
                 return
             }
 
             guard let champ = climbChampion else { return }
-            guard let champIdx = list.firstIndex(where: { $0.id == champ.id }) else {
-                errorMessage = "Champion is no longer in this pool. Run reset."
+            guard let champIdx = ranked.firstIndex(where: { $0.id == champ.id }) else {
+                errorMessage = "Legend run performer is no longer in this pool. Run reset."
                 resetClimbStatePreservingMode()
                 await loadDuelPair()
                 return
             }
 
-            let potential = list.enumerated()
+            let potential = ranked.enumerated()
                 .filter { $0.offset < champIdx && !climbDefeatedIds.contains($0.element.id) && $0.element.id != climbSkippedId }
                 .map { $0.element }
 
@@ -1208,7 +1245,7 @@ private final class HotOrNotViewModel: ObservableObject {
                     await loadClimbPair(isPlacement: isPlacement)
                     return
                 }
-                climbVictory = mergePendingRating(list[champIdx])
+                climbVictory = ranked[champIdx]
                 left = nil
                 right = nil
                 rankLeft = nil
@@ -1219,10 +1256,10 @@ private final class HotOrNotViewModel: ObservableObject {
             let window = min(5, potential.count)
             let rIdx = Int.random(in: 0..<window)
             let opponent = potential[potential.count - 1 - rIdx]
-            left = mergePendingRating(list[champIdx])
+            left = mergePendingRating(ranked[champIdx])
             right = mergePendingRating(opponent)
             rankLeft = champIdx + 1
-            rankRight = (list.firstIndex { $0.id == opponent.id } ?? 0) + 1
+            rankRight = (ranked.firstIndex { $0.id == opponent.id } ?? 0) + 1
             climbSkippedId = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -1260,7 +1297,7 @@ private final class HotOrNotViewModel: ObservableObject {
             let list = res.data?.findPerformers.performers ?? []
             placementStarters = Array(list.shuffled().prefix(6))
             if placementStarters.isEmpty {
-                errorMessage = "No performers to pick as a Placement starter."
+                errorMessage = "No performers to pick as a Rise starter."
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -1313,12 +1350,49 @@ private final class HotOrNotViewModel: ObservableObject {
         let query = GraphQLQueries.queryWithFragments("hotOrNotFindPerformers")
         let variables: [String: Any] = [
             "performer_filter": performerFilter,
-            "filter": ["per_page": -1, "sort": "rating", "direction": "DESC"] as [String: Any]
+            "filter": [
+                "page": 1,
+                "per_page": Self.leaderboardPerPage,
+                "sort": "rating",
+                "direction": "DESC"
+            ] as [String: Any]
         ]
         do {
             let res: HotOrNotFindResponse = try await client.execute(query: query, variables: variables)
             let list = res.data?.findPerformers.performers ?? []
-            leaderboard = list.sorted { ($0.rating100 ?? 50) > ($1.rating100 ?? 50) }
+            let count = res.data?.findPerformers.count ?? list.count
+            leaderboard = list
+            leaderboardTotalCount = count
+            lastLeaderboardPageLoaded = list.isEmpty ? 0 : 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreLeaderboard() async {
+        guard leaderboardHasMore, !isLoadingMoreLeaderboard, !isLoadingBoard else { return }
+        let nextPage = lastLeaderboardPageLoaded + 1
+        guard nextPage >= 2 else { return }
+        isLoadingMoreLeaderboard = true
+        defer { isLoadingMoreLeaderboard = false }
+        let query = GraphQLQueries.queryWithFragments("hotOrNotFindPerformers")
+        let variables: [String: Any] = [
+            "performer_filter": performerFilter,
+            "filter": [
+                "page": nextPage,
+                "per_page": Self.leaderboardPerPage,
+                "sort": "rating",
+                "direction": "DESC"
+            ] as [String: Any]
+        ]
+        do {
+            let res: HotOrNotFindResponse = try await client.execute(query: query, variables: variables)
+            let list = res.data?.findPerformers.performers ?? []
+            if list.isEmpty { return }
+            let existing = Set(leaderboard.map(\.id))
+            let appended = list.filter { !existing.contains($0.id) }
+            leaderboard.append(contentsOf: appended)
+            lastLeaderboardPageLoaded = nextPage
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1592,7 +1666,7 @@ struct HotOrNotToolsView: View {
         }
     }
 
-    /// Gleiche Logik wie der Zweig in `battleContent` mit Karten + Aktionen (kein Sieger-/Placement-Start-UI).
+    /// Gleiche Logik wie der Zweig in `battleContent` mit Karten + Aktionen (kein Sieger-/Rise-Start-UI).
     private var shouldShowDuelActionsAboveFloatingBar: Bool {
         guard model.section == .battle else { return false }
         guard model.climbVictory == nil else { return false }
@@ -1616,7 +1690,7 @@ struct HotOrNotToolsView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.isSubmitting)
-                .accessibilityLabel("End Champion run")
+                .accessibilityLabel("End Legend run")
             } else {
                 Button {
                     Task { await model.skipDraw() }
@@ -1637,7 +1711,7 @@ struct HotOrNotToolsView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(true)
-                .accessibilityLabel("New pair, not available in Placement")
+                .accessibilityLabel("New pair, not available in Rise")
 
                 Button {
                     HapticManager.light()
@@ -1650,7 +1724,7 @@ struct HotOrNotToolsView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(appearance.tintColor)
                 .disabled(model.isSubmitting)
-                .accessibilityLabel("End Placement run")
+                .accessibilityLabel("End Rise run")
             } else {
                 Button {
                     Task { await model.loadDuelPair() }
@@ -1799,7 +1873,7 @@ struct HotOrNotToolsView: View {
             VStack(spacing: 16) {
                 if let victor = model.climbVictory {
                     VStack(spacing: 12) {
-                        Text("Champion!")
+                        Text("Legend!")
                             .font(.title2.weight(.bold))
                         Text(victor.displayName)
                             .font(.headline)
@@ -1882,6 +1956,14 @@ struct HotOrNotToolsView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        if model.leaderboardHasMore {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .onAppear {
+                                    Task { await model.loadMoreLeaderboard() }
+                                }
+                        }
                     }
                     .padding(.horizontal, Self.contentHorizontalPadding)
                     .padding(.top, 8)
@@ -1922,9 +2004,11 @@ private struct HotOrNotLeaderboardCard: View {
         n > 0 ? "+\(n)" : "\(n)"
     }
 
+    private var thumbCornerRadius: CGFloat { DesignTokens.CornerRadius.card }
+
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            thumbnailWithRank
+        HStack(alignment: .top, spacing: 12) {
+            Color.clear.frame(width: Self.thumbWidth)
             VStack(alignment: .leading, spacing: 6) {
                 Text(performer.displayName)
                     .font(.subheadline.weight(.bold))
@@ -1935,9 +2019,16 @@ private struct HotOrNotLeaderboardCard: View {
                 hotOrNotStatsBlock
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .padding(.trailing, 10)
         }
-        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .leading) {
+            thumbnailWithRank
+                .frame(width: Self.thumbWidth)
+                .frame(maxHeight: .infinity)
+        }
         .background(Color.secondaryAppBackground)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
         .overlay(
@@ -1947,13 +2038,24 @@ private struct HotOrNotLeaderboardCard: View {
         .cardShadow()
     }
 
+    private var thumbnailClip: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: thumbCornerRadius,
+            bottomLeadingRadius: thumbCornerRadius,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 0
+        )
+    }
+
     private var thumbnailWithRank: some View {
-        ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card)
+        ZStack(alignment: .bottomTrailing) {
+            thumbnailClip
                 .fill(Color.gray.opacity(DesignTokens.Opacity.placeholder))
-                .frame(width: Self.thumbWidth, height: Self.thumbHeight)
-                .overlay(photoOverlay)
-                .clipped()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    photoOverlay
+                }
+                .clipShape(thumbnailClip)
 
             Text("#\(place)")
                 .font(.system(size: 9, weight: .bold))
@@ -1961,8 +2063,9 @@ private struct HotOrNotLeaderboardCard: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(.ultraThinMaterial, in: Capsule())
-                .padding(4)
+                .padding([.trailing, .bottom], 4)
         }
+        .frame(minWidth: Self.thumbWidth, maxWidth: Self.thumbWidth, maxHeight: .infinity)
     }
 
     private var hotOrNotStatsBlock: some View {
@@ -2020,9 +2123,8 @@ private struct HotOrNotLeaderboardCard: View {
                 placeholderIcon
             }
         }
-        .frame(width: Self.thumbWidth, height: Self.thumbHeight)
+        .frame(minWidth: Self.thumbWidth, maxWidth: .infinity, minHeight: Self.thumbHeight, maxHeight: .infinity)
         .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.CornerRadius.card))
     }
 
     private var placeholderIcon: some View {

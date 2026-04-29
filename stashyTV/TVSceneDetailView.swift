@@ -12,6 +12,7 @@ import Combine
 struct TVSceneDetailView: View {
     let sceneId: String
 
+    @ObservedObject private var configManager = ServerConfigManager.shared
     @StateObject private var viewModel = StashDBViewModel()
     @StateObject private var playerViewModel = TVPlayerViewModel()
     @State private var sceneDetail: Scene?
@@ -19,6 +20,17 @@ struct TVSceneDetailView: View {
     @State private var isLoadingDetail = true
     @State private var isLoadingStreams = true
     @State private var hasAddedPlay = false
+
+    /// Same idea as iOS `ScenesView`: list/detail only treat transport/config as “connection” errors.
+    private var hasValidActiveServer: Bool {
+        guard let config = configManager.activeConfig else { return false }
+        return config.hasValidConfig
+    }
+
+    private var shouldShowConnectionFailure: Bool {
+        let msg = viewModel.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !msg.isEmpty
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -30,7 +42,13 @@ struct TVSceneDetailView: View {
             }
             
             ScrollView(showsIndicators: false) {
-                if isLoadingDetail {
+                if !hasValidActiveServer {
+                    TVConnectionErrorView(
+                        title: "Server not reachable",
+                        subtitle: "Add a server in Settings.",
+                        onRetry: retryConnectionAndReload
+                    )
+                } else if isLoadingDetail {
                     VStack {
                         Spacer(minLength: 400)
                         ProgressView().scaleEffect(1.5)
@@ -67,13 +85,26 @@ struct TVSceneDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 60)
                     .padding(.bottom, 100)
+                } else if shouldShowConnectionFailure {
+                    TVConnectionErrorView(
+                        title: "Server not reachable",
+                        subtitle: viewModel.errorMessage,
+                        onRetry: retryConnectionAndReload
+                    )
                 } else {
-                    errorView
+                    sceneNotFoundView
                 }
             }
         }
         .navigationTitle("")
-        .onAppear { loadData() }
+        .onAppear {
+            if hasValidActiveServer {
+                loadData()
+            } else {
+                isLoadingDetail = false
+                isLoadingStreams = false
+            }
+        }
         .onPlayPauseCommand {
             if sceneDetail != nil {
                 if playerViewModel.player?.rate == 0 {
@@ -93,7 +124,8 @@ struct TVSceneDetailView: View {
         }
     }
 
-    private var errorView: some View {
+    /// Scene missing or GraphQL returned null without a network error (e.g. deleted on server).
+    private var sceneNotFoundView: some View {
         VStack(spacing: 24) {
             Spacer(minLength: 300)
             Image(systemName: "exclamationmark.triangle")
@@ -103,7 +135,7 @@ struct TVSceneDetailView: View {
                 .font(.title2)
                 .foregroundColor(.white.opacity(0.4))
             Button("Retry") {
-                loadData()
+                retryConnectionAndReload()
             }
             .font(.title3)
             Spacer(minLength: 300)
@@ -113,7 +145,19 @@ struct TVSceneDetailView: View {
 
     // MARK: - Data Loading
 
+    /// Re-test reachability then reload — mirrors iOS list screens calling `performSearch` after `ConnectionErrorView`.
+    private func retryConnectionAndReload() {
+        viewModel.testConnection()
+        loadData()
+    }
+
     private func loadData() {
+        guard hasValidActiveServer else {
+            isLoadingDetail = false
+            isLoadingStreams = false
+            return
+        }
+
         isLoadingDetail = true
         isLoadingStreams = true
 
@@ -529,7 +573,7 @@ struct TVSceneDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 30) {
                     ForEach(performers) { performer in
-                        NavigationLink(value: TVPerformerLink(id: performer.id, name: performer.name)) {
+                        NavigationLink(destination: TVPerformerDetailView(performerId: performer.id, performerName: performer.name).tvExitDismissable()) {
                             VStack(alignment: .leading, spacing: 12) {
                                 performerThumbnail(performer: performer)
                                     .frame(width: 180, height: 270)
@@ -558,7 +602,7 @@ struct TVSceneDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             sectionHeading(icon: "building.2.fill", title: "Studio")
 
-            NavigationLink(value: TVStudioLink(id: studio.id, name: studio.name)) {
+            NavigationLink(destination: TVStudioDetailView(studioId: studio.id, studioName: studio.name).tvExitDismissable()) {
                 VStack(alignment: .leading, spacing: 12) {
                     ZStack {
                         TVStudioImageView(studioId: studio.id, studioName: studio.name, contentMode: .fit)
@@ -627,7 +671,7 @@ struct TVSceneDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 30) {
                     ForEach(tags) { tag in
-                        NavigationLink(value: TVTagLink(id: tag.id, name: tag.name)) {
+                        NavigationLink(destination: TVTagDetailView(tagId: tag.id, tagName: tag.name).tvExitDismissable()) {
                             Text(tag.name)
                                 .font(.headline)
                                 .padding(.horizontal, 24)
@@ -639,6 +683,9 @@ struct TVSceneDetailView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 40)
             }
+            // tvOS focus: make this row a separate focus section so the user can move up/down
+            // from any tag (not only after returning to the first item).
+            .focusSection()
         }
     }
 
@@ -822,6 +869,10 @@ struct TVVideoPlayerView: View {
             // Empty overlay - VideoPlayer provides native tvOS controls
         }
         .ignoresSafeArea()
+        .onExitCommand {
+            // Menu button should close the player, not exit the app.
+            isPresented = false
+        }
         .onDisappear {
             // Final progress save handled by VM clear
         }
