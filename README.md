@@ -53,8 +53,10 @@ GraphQL documents live under `graphql/` and are loaded at runtime.
 ## Known limitations
 
 - **tvOS** does not include every iOS feature (e.g. Keychain, some UI components/gestures).
-- **Match** (tab label; Hot-or-Not–style rating in tools) is **inspired by** **[Ascension](https://github.com/Servbot91/Ascension/tree/main)** — the Sakoto fork of Hot or Not for Stash. Stashy aims to stay **compatible with the same custom-field / DB entries** used by that plugin ecosystem, but **matchmaking and scoring algorithms** in the app **differ** from Ascension’s server-side behaviour; you still need a **compatible Stash plugin** and matching server data for full fidelity.
+
 
 ## Third-party
 
 **[KSPlayer](https://github.com/kingslay/KSPlayer)** (SPM, `stashy` target) — iOS inline scene playback; app uses **`KSAVPlayer`** so **`AVPlayer`/`AVPlayerItem`** and StashVideoSync stay on AVFoundation. Upstream **GPL-3.0**; author offers **LGPL** / commercial builds.
+
+**Match** (Hot-or-Not–style rating function) is **inspired by** **[Ascension](https://github.com/Servbot91/Ascension/tree/main)** — the Sakoto fork of Hot or Not for Stash. Stashy aims to stay **compatible with the same custom-field / DB entries** used by that plugin ecosystem, but **matchmaking and scoring algorithms** in the app **differ** from Ascension’s server-side behaviour.
