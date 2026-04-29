@@ -6,11 +6,10 @@ A native **Stash** client for **iOS** and **tvOS** built with **SwiftUI** — fa
 
 - **Home & catalogue** — configurable dashboard (rows, statistics, lists), scenes, performers, studios, galleries, images, tags, groups, markers.
 - **Feeds** — vertical, swipeable feed (clips/previews); optional “Social” entry from performer detail.
-- **StashLine** — image timeline with filters, set grouping (e.g. by date or name), optionally by image orientation.
+- **Feeds** — image and video timelines with filters.
 - **Downloads** — download scenes for offline playback.
 - **Playback** — streaming with selectable quality (per server / for Reels).
 - **Devices** — TheHandy, **Intiface** / Buttplug including **FunScript** in the player.
-- **Tools** — optional **Hot or Not** (duel/charts), aligned with the Stash plugin; in server settings: **Trust HTTPS certificate** for self-signed certs on a home network.
 - **Search** — global search across server content.
 - **Settings** — multiple servers, API keys (Keychain on iOS), appearance, default sort/filter per area, tab visibility and order.
 
