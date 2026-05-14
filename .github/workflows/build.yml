@@ -1,9 +1,7 @@
-name: Build Swift App
+name: Build & Export IPA
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
     branches: [ "main" ]
 
 jobs:
@@ -11,27 +9,35 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
-
-      - name: List schemes
-        run: xcodebuild -project stashy.xcodeproj -list
-
-      - name: Resolve Swift packages
+      - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project stashy.xcodeproj -scheme stashy
 
-      - name: Build for iOS Simulator
+      # 1. ARCHIVE
+      - name: Archive app
         run: |
           xcodebuild \
             -project stashy.xcodeproj \
             -scheme stashy \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath $PWD/build/stashy.xcarchive \
+            clean archive \
+            CODE_SIGNING_ALLOWED=NO
+
+      # 2. EXPORT IPA
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $PWD/build/stashy.xcarchive \
+            -exportPath $PWD/build \
+            -exportOptionsPlist ExportOptions.plist
+
+      # 3. Upload IPA
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: stashy-ipa
+          path: build/*.ipa
