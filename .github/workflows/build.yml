@@ -1,7 +1,9 @@
-name: Build & Export IPA
+name: Build Archive Only
 
 on:
   push:
+    branches: [ "main" ]
+  pull_request:
     branches: [ "main" ]
 
 jobs:
@@ -9,35 +11,31 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Resolve packages
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project stashy.xcodeproj -scheme stashy
 
-      # 1. ARCHIVE
-      - name: Archive app
+      - name: Archive app without signing
         run: |
           xcodebuild \
             -project stashy.xcodeproj \
             -scheme stashy \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -archivePath $PWD/build/stashy.xcarchive \
-            clean archive \
-            CODE_SIGNING_ALLOWED=NO
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
 
-      # 2. EXPORT IPA
-      - name: Export IPA
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath $PWD/build/stashy.xcarchive \
-            -exportPath $PWD/build \
-            -exportOptionsPlist ExportOptions.plist
-
-      # 3. Upload IPA
-      - name: Upload IPA
+      - name: Upload xcarchive
         uses: actions/upload-artifact@v4
         with:
-          name: stashy-ipa
-          path: build/*.ipa
+          name: stashy-xcarchive
+          path: build/stashy.xcarchive
