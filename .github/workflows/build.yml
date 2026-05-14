@@ -1,0 +1,43 @@
+name: Build Swift App
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Show Xcode version (debug utile)
+      - name: Check Xcode version
+        run: xcodebuild -version
+
+      # 3. Resolve Swift packages (si tu en as)
+      - name: Resolve Swift Packages
+        run: xcodebuild -resolvePackageDependencies -project stashy.xcodeproj
+
+      # 4. Build app (macOS)
+      - name: Build App
+        run: |
+          xcodebuild \
+            -project stashy.xcodeproj \
+            -scheme stashy \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            clean build
+
+      # 5. Run tests (si disponibles)
+      - name: Run Tests
+        run: |
+          xcodebuild \
+            -project stashy.xcodeproj \
+            -scheme stashy \
+            -destination 'platform=macOS' \
+            test
