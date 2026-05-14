@@ -17,6 +17,9 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: List schemes
+        run: xcodebuild -project stashy.xcodeproj -list
+
       - name: Resolve Swift packages
         run: xcodebuild -resolvePackageDependencies -project stashy.xcodeproj -scheme stashy
 
@@ -26,7 +29,8 @@ jobs:
             -project stashy.xcodeproj \
             -scheme stashy \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
